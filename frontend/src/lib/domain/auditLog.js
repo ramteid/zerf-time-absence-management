@@ -12,7 +12,7 @@ import { absenceKindLabel } from "../../i18n.js";
 export const TABLE_FIELDS = {
   time_entries: ["entry_date", "start_time", "end_time", "status", "comment"],
   users: ["first_name", "last_name", "email", "role", "active"],
-  absences: ["kind", "start_date", "end_date", "status", "note"],
+  absences: ["kind", "start_date", "end_date", "status", "comment", "reason"],
   categories: ["name", "color", "description", "counts_as_work", "active"],
   holidays: ["name", "holiday_date"],
   app_settings: ["key", "value"],
@@ -25,7 +25,7 @@ export const FIELD_LABEL_KEYS = {
   end_time: "End",
   status: "Status",
   comment: "Comment",
-  note: "Note",
+  reason: "Reason",
   first_name: "First name",
   last_name: "Last name",
   email: "Email",
@@ -163,11 +163,15 @@ export function userLabel(userId, userMap, translate) {
 }
 
 // ID of the user whose data is being acted on (may differ from the acting user).
-// For "users" table: the record itself is the subject. For other tables: look in the payload.
+// For "users" table: the record itself is the subject. For other tables: look in
+// the payload. Review actions (approve/reject/cancel/revoke) snapshot the full
+// record into `before_data` and only a thin status delta into `after_data`, so
+// `user_id` (the applicant) often lives in `before_data` only — check both.
 export function subjectUserId(entry) {
   if (entry.table_name === "users") return entry.record_id ?? null;
-  const payload = relevantPayload(entry);
-  return payload?.user_id ?? null;
+  const after = safeParseJson(entry.after_data);
+  const before = safeParseJson(entry.before_data);
+  return after?.user_id ?? before?.user_id ?? null;
 }
 
 export function subjectUserLabel(entry, userMap) {

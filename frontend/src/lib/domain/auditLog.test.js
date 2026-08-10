@@ -234,6 +234,19 @@ describe("subjectUserId", () => {
     };
     expect(subjectUserId(entry)).toBe(3);
   });
+
+  it("falls back to before_data when after_data omits user_id (e.g. a rejected absence)", () => {
+    // Review actions snapshot the full record into before_data and only a thin
+    // status delta into after_data — the applicant's id lives in before_data.
+    const entry = {
+      table_name: "absences",
+      record_id: 42,
+      action: "rejected",
+      before_data: '{"user_id":3,"kind":"vacation"}',
+      after_data: '{"status":"rejected","reason":"wrong kind"}',
+    };
+    expect(subjectUserId(entry)).toBe(3);
+  });
 });
 
 describe("subjectUserLabel", () => {
@@ -284,7 +297,7 @@ describe("fmtFieldVal", () => {
   });
 
   it("returns null for null values (omit the row in the detail table)", () => {
-    expect(fmtFieldVal("note", null, new Map(), translate)).toBeNull();
+    expect(fmtFieldVal("comment", null, new Map(), translate)).toBeNull();
   });
 
   it("resolves user_id fields to names via the userMap", () => {
@@ -329,6 +342,24 @@ describe("extractDetailRows", () => {
         '{"name":"Work","color":"#123456","description":null,"counts_as_work":true,"active":true}',
     };
     expect(extractDetailRows(entry, new Map(), translate)).toBeNull();
+  });
+
+  it("shows the applicant's comment and the rejection reason for a rejected absence", () => {
+    // before_data is the full request as filed (kind, dates, comment); after_data
+    // is a thin {status, reason} delta. The reviewer must see both — the original
+    // comment that motivated a decision, and the reason the decision was made.
+    const entry = {
+      table_name: "absences",
+      action: "rejected",
+      before_data:
+        '{"user_id":3,"kind":"vacation","start_date":"2026-08-05","end_date":"2026-08-05","status":"requested","comment":"Actually sick, see doctor note"}',
+      after_data: '{"status":"rejected","reason":"This is a sick leave, not vacation"}',
+    };
+    const rows = extractDetailRows(entry, new Map(), translate);
+    expect(rows).not.toBeNull();
+    const byLabel = Object.fromEntries(rows.map((r) => [r.label, r]));
+    expect(byLabel["Comment"].before).toBe("Actually sick, see doctor note");
+    expect(byLabel["Reason"].after).toBe("This is a sick leave, not vacation");
   });
 });
 
