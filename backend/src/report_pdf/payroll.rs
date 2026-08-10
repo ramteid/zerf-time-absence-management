@@ -19,33 +19,40 @@ use chrono::NaiveDate;
 const ABSENCE_COLUMNS: &[Column] = &[
     Column {
         header_key: "pdf_payroll_column_employee",
-        width_mm: 60.0,
+        width_mm: 52.0,
         align: Align::Left,
     },
     Column {
         header_key: "pdf_column_category",
-        width_mm: 40.0,
+        width_mm: 35.0,
         align: Align::Left,
     },
     Column {
         header_key: "pdf_payroll_column_from",
-        width_mm: 25.0,
+        width_mm: 22.0,
         align: Align::Left,
     },
     Column {
         header_key: "pdf_payroll_column_to",
-        width_mm: 25.0,
+        width_mm: 22.0,
         align: Align::Left,
     },
     Column {
         header_key: "pdf_payroll_column_days",
-        width_mm: 30.0,
+        width_mm: 24.0,
         align: Align::Right,
+    },
+    Column {
+        header_key: "pdf_payroll_column_medical_certificate",
+        width_mm: 25.0,
+        align: Align::Left,
     },
 ];
 
 /// Index of the `Days` column in [`ABSENCE_COLUMNS`].
 const ABSENCE_DAYS_COLUMN: usize = 4;
+/// Index of the `AU` (medical certificate) column in [`ABSENCE_COLUMNS`].
+const ABSENCE_MEDICAL_CERTIFICATE_COLUMN: usize = 5;
 
 /// Hours table: one row per person in the section. All columns are
 /// left-aligned so data rows line up under the (always left-aligned) header
@@ -88,6 +95,10 @@ pub struct PayrollAbsenceRow {
     pub to: NaiveDate,
     /// Contract workdays covered by the clamped range (holidays excluded).
     pub days: f64,
+    /// Whether a medical certificate (AU) is required for this absence, per
+    /// `services::medical_certificate`. `None` when the category does not
+    /// track this at all (renders as "–" rather than "No").
+    pub medical_certificate_required: Option<bool>,
 }
 
 /// Working days and worked minutes of one person within the reported month.
@@ -223,9 +234,23 @@ fn render_absence_table(renderer: &mut Renderer, language: &Language, rows: &[Pa
                 (2, i18n::format_date(language, row.from)),
                 (3, i18n::format_date(language, row.to)),
                 (ABSENCE_DAYS_COLUMN, format_days(row.days, language)),
+                (
+                    ABSENCE_MEDICAL_CERTIFICATE_COLUMN,
+                    format_medical_certificate_required(row.medical_certificate_required, language),
+                ),
             ],
             index % 2 == 1,
         );
+    }
+}
+
+/// "AU" column text: localized Yes/No when the category tracks it, or a dash
+/// when it doesn't apply to this category at all.
+fn format_medical_certificate_required(required: Option<bool>, language: &Language) -> String {
+    match required {
+        Some(true) => i18n::translate(language, "pdf_payroll_medical_certificate_yes", &[]),
+        Some(false) => i18n::translate(language, "pdf_payroll_medical_certificate_no", &[]),
+        None => "\u{2013}".to_string(),
     }
 }
 
@@ -344,6 +369,7 @@ mod tests {
                 from: date(2026, 5, 4),
                 to: date(2026, 5, 6),
                 days: 3.0,
+                medical_certificate_required: Some(false),
             }]),
             hours_sections: vec![PayrollHoursSection {
                 heading_key: "pdf_payroll_assistant_hours_heading",

@@ -63,6 +63,7 @@ pub struct UpdateSettings {
     pub auto_break_threshold_hours_2: Option<f64>,
     pub auto_break_deduction_minutes_2: Option<i32>,
     pub allow_team_lead_manage_assistants: Option<bool>,
+    pub medical_certificate_threshold_days: Option<u32>,
 }
 
 /// Tell "field omitted" apart from "field explicitly null" for a partial update.
@@ -150,6 +151,13 @@ pub async fn update_admin_settings(
         if !(1..=28).contains(&day) {
             return Err(AppError::BadRequest(
                 "submission_deadline_day must be between 1 and 28.".into(),
+            ));
+        }
+    }
+    if let Some(days) = body.medical_certificate_threshold_days {
+        if !(1..=30).contains(&days) {
+            return Err(AppError::BadRequest(
+                "medical_certificate_threshold_days must be between 1 and 30.".into(),
             ));
         }
     }
@@ -316,6 +324,12 @@ pub async fn update_admin_settings(
         transaction,
         settings::ALLOW_TEAM_LEAD_MANAGE_ASSISTANTS_KEY,
         body.allow_team_lead_manage_assistants.map(|v| if v { "true" } else { "false" }.to_string())
+    );
+    save_if_some!(
+        transaction,
+        settings::MEDICAL_CERTIFICATE_THRESHOLD_DAYS_KEY,
+        body.medical_certificate_threshold_days,
+        num
     );
 
     transaction.commit().await?;

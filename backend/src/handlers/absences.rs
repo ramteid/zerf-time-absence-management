@@ -41,6 +41,16 @@ pub struct RejectBody {
     pub reason: String,
 }
 
+#[derive(Deserialize)]
+pub struct MedicalCertificatePreviewQuery {
+    pub category_id: i64,
+    pub start_date: NaiveDate,
+    pub end_date: NaiveDate,
+    /// The absence being edited, if any, so it isn't counted twice against
+    /// its own hypothetical replacement range.
+    pub exclude_absence_id: Option<i64>,
+}
+
 pub async fn list(
     State(app_state): State<AppState>,
     requester: User,
@@ -313,6 +323,24 @@ pub async fn reject_cancellation(
 ) -> AppResult<Json<serde_json::Value>> {
     let result = reject_cancellation_absence(&app_state, &requester, absence_id).await?;
     Ok(Json(result))
+}
+
+pub async fn medical_certificate_preview(
+    State(app_state): State<AppState>,
+    requester: User,
+    Query(query): Query<MedicalCertificatePreviewQuery>,
+) -> AppResult<Json<crate::services::medical_certificate::MedicalCertificatePreview>> {
+    require_tracks_time(&requester)?;
+    let preview = crate::services::medical_certificate::preview_for_range(
+        &app_state,
+        requester.id,
+        query.category_id,
+        query.start_date,
+        query.end_date,
+        query.exclude_absence_id,
+    )
+    .await?;
+    Ok(Json(preview))
 }
 
 pub async fn balance(

@@ -33,6 +33,7 @@ Use this document if you are:
 - [Absence workflow](#absence-workflow)
   - [Status lifecycle](#status-lifecycle-1)
   - [Auto-approval](#auto-approval)
+  - [Medical certificate (AU) requirement](#medical-certificate-au-requirement)
   - [Overlap rules](#overlap-rules)
 - [Flextime logic](#flextime-logic)
   - [How daily targets are calculated](#how-daily-targets-are-calculated)
@@ -394,6 +395,23 @@ does nothing. The only way to make corrections is to reopen the whole week.
 - Absence categories marked **Auto-approve past dates** (e.g. sick leave) with a start date on or before today are auto-approved.
   Your approvers receive an informational notice, in-app and by email (not an action request).
 - Other absence types require explicit approval.
+
+### Medical certificate (AU) requirement
+
+For absence categories your admin has marked accordingly (typically sick
+leave), Zerf tells you whether a medical certificate is required for a
+request. This shows up right in the request dialog once you pick dates:
+
+- A checkmark and the number of consecutive sick days the request belongs to.
+- The count includes any sick period you already have that directly connects
+  to this one — even if it was booked as a separate request. Weekends and
+  public holidays in between don't break the connection: if you were sick
+  Friday and Monday with no working day in between, that's treated as one
+  four-day period, not two separate ones.
+- Once that connected period reaches the number of days configured by your
+  admin (Settings → General, default: 4), a prominent warning appears telling
+  you to obtain a certificate from your doctor and submit it as required by
+  your employer. This is informational only — you cannot change it yourself.
 
 ### Overlap rules
 
@@ -1087,6 +1105,9 @@ Vacation, sick leave, training, special leave, unpaid leave, general absence, an
 - If the start date is today or earlier: sick leave is **auto-approved** immediately.
   Your approvers receive an informational notice, in-app and by email (not an action request).
 - If the start date is in the future: sick leave requires approval like any other absence.
+- If the category is marked for it by your admin, the dialog also shows
+  whether a medical certificate (AU) is required — see [Medical certificate
+  (AU) requirement](#medical-certificate-au-requirement).
 
 **Overlap and time-entry conflict:**
 
@@ -1633,6 +1654,7 @@ Admins configure system-wide behavior in the Settings panel (Settings → Genera
 | Submission reminders enabled | Enable or disable the monthly submission reminder. |
 | Approval reminders enabled | Enable or disable the weekly approval reminder. |
 | Automatic break deduction | When enabled, deducts a configured break from each day where total crediting work exceeds a threshold. See [Automatic break deduction](#automatic-break-deduction). |
+| Consecutive sick days before a certificate is required | How many consecutive calendar days of illness trigger a medical certificate (AU) requirement. Default: 4. Only applies to absence categories marked accordingly on the [Managing categories](#managing-categories) page. See [Medical certificate (AU) requirement](#medical-certificate-au-requirement). |
 | SMTP configuration | Server, port, and credentials for outgoing email. Required for registration emails and email reminders. |
 | Public URL | Used to construct login links in registration emails. |
 | Nextcloud Upload | Configure automatic upload of encrypted DB backups and monthly timesheet PDFs to a Nextcloud public share. See [Nextcloud Upload](#nextcloud-upload). |
@@ -1729,11 +1751,13 @@ list. Deactivated and deleted accounts are not shown either.
 #### What the PDF contains
 
 - **Absence days**: one row per absence period — person, category, first and last
-  day within the reported month, and the number of contract working days it
-  covers. Weekends, public holidays, and days before a person's start date are
-  not counted; a period that covers only such days is left out entirely.
-  A row that started in the previous month or continues into the next one is cut
-  to the reported month.
+  day within the reported month, the number of contract working days it
+  covers, and (for categories that track it) whether a medical certificate
+  (AU) is required — see [Medical certificate (AU)
+  requirement](#medical-certificate-au-requirement). Weekends, public
+  holidays, and days before a person's start date are not counted; a period
+  that covers only such days is left out entirely. A row that started in the
+  previous month or continues into the next one is cut to the reported month.
 - **Working days and hours**: one row per person — the number of days with
   approved working time and the total approved hours, given both as hours:minutes
   and as a decimal value for payroll. Automatic break deduction is already
@@ -1826,13 +1850,14 @@ Categories define what employees can book time against.
 
 #### Absence categories
 
-Absence categories define what types of absences employees can request. Each category has three behavior fields:
+Absence categories define what types of absences employees can request. Each category has four behavior fields:
 
 | Field | Effect |
 | --- | --- |
 | **Cost type** | A single 3-state field that determines the balance impact of approved days. `none` — no balance impact (e.g. unpaid leave, general absence): the day is removed from the daily work target but neither leave account nor flextime is debited. `vacation` — creates a separate leave account for this category and deducts from that account, using its own per-user entitlements, carryover, and expiry. `flextime` — keeps the daily work target intact so the absence costs flextime balance. The flextime balance is checked at BOTH request and approval time against the configured floor (default 0 minutes; admin can override via the `flextime_min_balance_min` setting); the check accounts for other already-pending/approved flextime-cost absences so multiple requests that each individually fit cannot together breach the floor, and the approver's re-check catches the case where the user spent balance between request and approval. A `none` category can be a paid day off (special leave, paid training) or an unpaid one — that distinction is what the **Unpaid** field below is for. |
 | **Auto-approve past dates** | Absences with a start date on or before today are approved automatically. Approvers receive an informational notice, in-app and by email. This flag also disables the time-entry conflict check at creation, so partial-day overlaps are allowed (e.g. employee worked the morning and then called in sick). Auto-approved absences that start today may extend at most 60 days into the future; longer ongoing absences require a new submission. |
 | **Unpaid** | Only available when cost type is `none`. Marks days in this category as actually reducing the employee's salary — as opposed to a `none`-cost category that is still fully paid, such as special leave or paid training. This is what drives which categories show up automatically in the monthly [Payroll Report](#payroll-report): sick-like categories and anything marked Unpaid. Unlike Cost type and Auto-approve past dates, this field is not locked once the category has existing absences — it can be changed at any time. |
+| **Counts toward the medical certificate (AU) threshold** | Marks this category as sick-like for the [medical certificate (AU) requirement](#medical-certificate-au-requirement): its absences count toward the consecutive-sick-days threshold configured under Settings → General. Independent of the other fields — a category can behave like sick leave without this, or vice versa. Can be changed at any time. |
 
 Constraints:
 - A category slug is auto-generated from the name and must be unique. Existing absences are not affected when a category is deactivated or renamed.

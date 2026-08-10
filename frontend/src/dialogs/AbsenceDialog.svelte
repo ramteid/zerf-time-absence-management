@@ -114,6 +114,53 @@
       : null;
   let pendingClose = null;
 
+  // AU (medical certificate) preview: only categories flagged
+  // medical_certificate_relevant show this — see services::medical_certificate
+  // on the backend, which is the single source of truth for the calculation.
+  // This is read-only information for the requester; it cannot be edited here.
+  $: selectedCategory = $absenceCategories.find((c) => c.id === category_id);
+  $: medicalCertificateRelevant =
+    selectedCategory?.medical_certificate_relevant ?? false;
+
+  let medicalCertificatePreview = null;
+  let previewRequestId = 0;
+
+  async function loadMedicalCertificatePreview(
+    relevant,
+    catId,
+    fromDate,
+    toDate,
+  ) {
+    if (!relevant || !catId || !fromDate || !toDate || fromDate > toDate) {
+      medicalCertificatePreview = null;
+      return;
+    }
+    const requestId = ++previewRequestId;
+    const params = new URLSearchParams({
+      category_id: String(catId),
+      start_date: fromDate,
+      end_date: toDate,
+    });
+    if (!isNew && template.id) {
+      params.set("exclude_absence_id", String(template.id));
+    }
+    try {
+      const result = await api(
+        `/absences/medical-certificate-preview?${params}`,
+      );
+      if (requestId === previewRequestId) medicalCertificatePreview = result;
+    } catch {
+      if (requestId === previewRequestId) medicalCertificatePreview = null;
+    }
+  }
+
+  $: loadMedicalCertificatePreview(
+    medicalCertificateRelevant,
+    category_id,
+    start_date,
+    end_date,
+  );
+
   function localizeAbsenceError(message) {
     const text = String(message || "").trim();
     if (!text) return $t("Error");
@@ -224,6 +271,38 @@
       {selectedDays === 1 ? $t("workday") : $t("workdays")}
     </div>
   {/if}
+  {#if medicalCertificateRelevant}
+    <div class="medical-certificate-info">
+      {#if medicalCertificatePreview?.required}
+        <!-- The day count lives here (folded into the warning text) instead
+             of also repeating in a separate hint below — showing both said
+             the same thing twice. -->
+        <div class="medical-certificate-warning" role="alert">
+          <strong>{$t("medical_certificate_required_warning_title")}</strong>
+          <div>
+            {$t("medical_certificate_required_warning_body", {
+              days: medicalCertificatePreview.chain_days,
+            })}
+          </div>
+        </div>
+      {:else if medicalCertificatePreview}
+        <div class="field-hint">
+          {$t("medical_certificate_chain_days_hint", {
+            days: medicalCertificatePreview.chain_days,
+            threshold: medicalCertificatePreview.threshold_days,
+          })}
+        </div>
+      {/if}
+      <label class="zf-check-label">
+        <input
+          type="checkbox"
+          checked={medicalCertificatePreview?.required ?? false}
+          disabled
+        />
+        <span>{$t("label_medical_certificate_required")}</span>
+      </label>
+    </div>
+  {/if}
   <div>
     <label class="zf-label" for="absence-comment"
       >{$t("Notes (optional)")}</label
@@ -252,5 +331,20 @@
     font-size: 0.9rem;
     color: var(--text-secondary, #64748b);
     margin-top: -0.0rem;
+  }
+
+  .medical-certificate-info {
+    margin-top: 8px;
+  }
+
+  .medical-certificate-warning {
+    margin-bottom: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--danger, #c64a3f);
+    border-radius: 6px;
+    background: var(--danger-soft, #fbe8e5);
+    color: var(--danger-text, #8a3128);
+    font-size: 0.9rem;
+    line-height: 1.4;
   }
 </style>

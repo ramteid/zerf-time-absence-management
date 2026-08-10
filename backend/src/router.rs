@@ -97,6 +97,10 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                 .route("/absences/all", get(handlers::absences::list_all))
                 .route("/absences/calendar", get(handlers::absences::calendar))
                 .route(
+                    "/absences/medical-certificate-preview",
+                    get(handlers::absences::medical_certificate_preview),
+                )
+                .route(
                     "/absences/{id}",
                     get(handlers::absences::get_one)
                         .put(handlers::absences::update)

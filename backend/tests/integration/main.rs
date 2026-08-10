@@ -36,6 +36,7 @@ mod email_queue;
 mod error_notifications;
 mod full_suite;
 mod holidays;
+mod medical_certificate;
 mod notifications;
 mod payroll_report;
 mod reopen;

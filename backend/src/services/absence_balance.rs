@@ -989,6 +989,7 @@ mod tests {
             cost_type: "none".to_string(),
             auto_approve_past,
             unpaid: false,
+            medical_certificate_relevant: false,
             leave_account_default_days: None,
             leave_account_carryover_expiry: None,
             leave_account_start_year: None,

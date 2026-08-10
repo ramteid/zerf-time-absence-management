@@ -584,25 +584,42 @@ async fn build_absence_rows(
 ) -> AppResult<Vec<PayrollAbsenceRow>> {
     // Category order in the PDF follows `list_all()`'s order, so all sick days
     // stay together, then all unpaid days, and so on.
-    let selected: Vec<(String, String, usize)> = relevant_categories
+    let selected: Vec<(String, String, usize, bool)> = relevant_categories
         .iter()
         .enumerate()
-        .map(|(index, category)| (category.slug.clone(), category.name.clone(), index))
+        .map(|(index, category)| {
+            (
+                category.slug.clone(),
+                category.name.clone(),
+                index,
+                category.medical_certificate_relevant,
+            )
+        })
         .collect();
+    // Skip the per-member AU chain lookup entirely when no selected category
+    // tracks it — the common case for orgs that haven't opted into the flag.
+    let any_medical_certificate_category =
+        relevant_categories.iter().any(|c| c.medical_certificate_relevant);
 
     let holidays = app_state.db.reports.holiday_set(from, to).await?;
 
     let mut rows: Vec<(usize, String, PayrollAbsenceRow)> = Vec::new();
     for member in members {
+        let medical_certificate_required = if any_medical_certificate_category {
+            crate::services::medical_certificate::required_map_for_user(app_state, member.id)
+                .await?
+        } else {
+            std::collections::HashMap::new()
+        };
         let absences = app_state
             .db
             .reports
             .approved_absence_rows(member.id, from, to)
             .await?;
-        for (start_date, end_date, slug, _stored_name) in absences {
-            let Some((_, category_name, category_rank)) = selected
+        for (absence_id, start_date, end_date, slug, _stored_name) in absences {
+            let Some((_, category_name, category_rank, tracks_medical_certificate)) = selected
                 .iter()
-                .find(|(selected_slug, _, _)| selected_slug == &slug)
+                .find(|(selected_slug, _, _, _)| selected_slug == &slug)
             else {
                 continue;
             };
@@ -629,6 +646,8 @@ async fn build_absence_rows(
                     from: row_from,
                     to: row_to,
                     days,
+                    medical_certificate_required: tracks_medical_certificate
+                        .then(|| medical_certificate_required.get(&absence_id).copied().unwrap_or(false)),
                 },
             ));
         }
@@ -822,6 +841,7 @@ mod tests {
             cost_type: cost_type.to_string(),
             auto_approve_past,
             unpaid,
+            medical_certificate_relevant: false,
             leave_account_default_days: (cost_type == "vacation").then_some(30),
             leave_account_carryover_expiry: (cost_type == "vacation")
                 .then_some("03-31".to_string()),

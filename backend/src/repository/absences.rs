@@ -612,6 +612,28 @@ impl AbsenceDb {
             .await?)
     }
 
+    /// (id, start_date, end_date) of a user's approved/cancellation_pending
+    /// absences whose category is flagged `medical_certificate_relevant`,
+    /// ordered by start_date. Feeds the "AU" (medical certificate) threshold
+    /// chain calculation in `services::medical_certificate` — unscoped by date
+    /// range because a continuous illness period can span outside any single
+    /// report window.
+    pub async fn medical_certificate_relevant_absences_for_user(
+        &self,
+        user_id: i64,
+    ) -> AppResult<Vec<(i64, NaiveDate, NaiveDate)>> {
+        Ok(sqlx::query_as(
+            "SELECT a.id, a.start_date, a.end_date FROM absences a \
+             JOIN absence_categories c ON c.id = a.category_id \
+             WHERE a.user_id=$1 AND c.medical_certificate_relevant=TRUE \
+             AND a.status IN ('approved','cancellation_pending') \
+             ORDER BY a.start_date, a.id",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     /// Approved/cancellation_pending absences in the requested window, with the
     /// category slug as `kind`. Consumers iterate the slug for labelling.
     pub async fn approved_ranges_in_period(

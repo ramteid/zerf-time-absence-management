@@ -6,6 +6,7 @@ pub mod audit_log;
 pub mod auth;
 pub mod categories;
 pub mod holidays;
+pub mod medical_certificate;
 pub mod nextcloud;
 pub mod notifications;
 pub mod payroll_report;

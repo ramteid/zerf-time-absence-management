@@ -412,6 +412,32 @@
         </div>
       </div>
 
+      <!-- Medical certificate (AU) threshold -->
+      <div class="zf-form-section-title">
+        {$t("Medical certificate (AU)")}
+      </div>
+      <div class="field-row">
+        <div>
+          <label class="zf-label" for="settings-medical-certificate-threshold"
+            >{$t("Consecutive sick days before a certificate is required")}</label
+          >
+          <input
+            id="settings-medical-certificate-threshold"
+            class="zf-input"
+            type="number"
+            min="1"
+            max="30"
+            bind:value={settingsForm.medical_certificate_threshold_days}
+            placeholder={$t("e.g. 4")}
+          />
+          <div class="field-hint">
+            {$t(
+              "Applies only to absence categories marked accordingly under Categories. Counts consecutive calendar days, bridging weekends and public holidays.",
+            )}
+          </div>
+        </div>
+      </div>
+
       <!-- Automatic break deduction -->
       <div class="zf-form-section-title">
         {$t("Automatic break deduction")}

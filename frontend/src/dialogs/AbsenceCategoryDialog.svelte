@@ -29,6 +29,11 @@
   // and its value resets alongside it.
   let unpaid = template.unpaid ?? false;
   $: if (cost_type !== "none") unpaid = false;
+  // Independent of cost_type/auto_approve_past: marks this category as
+  // "sick-like" for the AU (medical certificate) threshold calculation in
+  // services::medical_certificate, so an org can opt a category in/out of
+  // that calculation regardless of its other behavior flags.
+  let medical_certificate_relevant = template.medical_certificate_relevant ?? false;
   $: hasLeaveAccount = cost_type === "vacation";
   // cost_type is immutable once a category exists at all: "none" and
   // "flextime" stay freely interchangeable for an existing category (no
@@ -117,6 +122,7 @@
         cost_type,
         auto_approve_past,
         unpaid,
+        medical_certificate_relevant,
       };
       if (hasLeaveAccount) {
         body.leave_account_default_days = Number(leave_account_default_days);
@@ -357,6 +363,28 @@
       </label>
       {#if openHelp === "auto_approve_past"}
         <div class="abscat-help">{$t("help_auto_approve_past")}</div>
+      {/if}
+    </div>
+    <div>
+      <label class="zf-check-label">
+        <input
+          id="abscat-medical-certificate-relevant"
+          type="checkbox"
+          bind:checked={medical_certificate_relevant}
+        />
+        <span>{$t("label_medical_certificate_relevant")}</span>
+        <button
+          type="button"
+          class="zf-btn-icon-sm zf-btn-ghost zf-help-btn"
+          aria-expanded={openHelp === "medical_certificate_relevant"}
+          aria-label={$t("Show explanation")}
+          on:click={() => toggleHelp("medical_certificate_relevant")}
+        >
+          <Icon name="Info" size={14} />
+        </button>
+      </label>
+      {#if openHelp === "medical_certificate_relevant"}
+        <div class="abscat-help">{$t("help_medical_certificate_relevant")}</div>
       {/if}
     </div>
     <!--

@@ -22,6 +22,7 @@ pub struct AbsenceCategoryResponse {
     pub cost_type: String,
     pub auto_approve_past: bool,
     pub unpaid: bool,
+    pub medical_certificate_relevant: bool,
     pub leave_account_default_days: Option<i64>,
     pub leave_account_carryover_expiry: Option<String>,
 }
@@ -38,6 +39,7 @@ impl From<AbsenceCategory> for AbsenceCategoryResponse {
             cost_type: category.cost_type,
             auto_approve_past: category.auto_approve_past,
             unpaid: category.unpaid,
+            medical_certificate_relevant: category.medical_certificate_relevant,
             leave_account_default_days: category.leave_account_default_days,
             leave_account_carryover_expiry: category.leave_account_carryover_expiry,
         }
@@ -78,6 +80,8 @@ pub struct NewAbsenceCategoryRequest {
     pub auto_approve_past: bool,
     #[serde(default)]
     pub unpaid: bool,
+    #[serde(default)]
+    pub medical_certificate_relevant: bool,
     /// Required for a category with `cost_type = "vacation"` and otherwise
     /// rejected. Existing user accounts keep their own base values.
     pub leave_account_default_days: Option<i64>,
@@ -103,6 +107,7 @@ pub async fn create(
                 cost_type: body.cost_type,
                 auto_approve_past: body.auto_approve_past,
                 unpaid: body.unpaid,
+                medical_certificate_relevant: body.medical_certificate_relevant,
                 leave_account_default_days: body.leave_account_default_days,
                 leave_account_carryover_expiry: body.leave_account_carryover_expiry,
             },
@@ -121,6 +126,7 @@ pub struct UpdateAbsenceCategoryRequest {
     pub cost_type: Option<String>,
     pub auto_approve_past: Option<bool>,
     pub unpaid: Option<bool>,
+    pub medical_certificate_relevant: Option<bool>,
     pub leave_account_default_days: Option<i64>,
     pub leave_account_carryover_expiry: Option<String>,
 }
@@ -144,6 +150,7 @@ pub async fn update(
                 cost_type: body.cost_type,
                 auto_approve_past: body.auto_approve_past,
                 unpaid: body.unpaid,
+                medical_certificate_relevant: body.medical_certificate_relevant,
                 leave_account_default_days: body.leave_account_default_days,
                 leave_account_carryover_expiry: body.leave_account_carryover_expiry,
             },

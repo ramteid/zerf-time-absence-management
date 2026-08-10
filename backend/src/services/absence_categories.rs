@@ -210,6 +210,7 @@ pub struct NewCategoryInput {
     pub cost_type: String,
     pub auto_approve_past: bool,
     pub unpaid: bool,
+    pub medical_certificate_relevant: bool,
     pub leave_account_default_days: Option<i64>,
     pub leave_account_carryover_expiry: Option<String>,
 }
@@ -313,6 +314,7 @@ pub async fn create(
             cost_type: &input.cost_type,
             auto_approve_past: input.auto_approve_past,
             unpaid: input.unpaid,
+            medical_certificate_relevant: input.medical_certificate_relevant,
             leave_account_default_days,
             leave_account_carryover_expiry: leave_account_carryover_expiry.as_deref(),
             leave_account_start_year,
@@ -348,6 +350,7 @@ pub struct UpdateCategoryInput {
     pub cost_type: Option<String>,
     pub auto_approve_past: Option<bool>,
     pub unpaid: Option<bool>,
+    pub medical_certificate_relevant: Option<bool>,
     pub leave_account_default_days: Option<i64>,
     pub leave_account_carryover_expiry: Option<String>,
 }
@@ -369,6 +372,7 @@ pub async fn update(
         cost_type,
         auto_approve_past,
         unpaid,
+        medical_certificate_relevant,
         leave_account_default_days,
         leave_account_carryover_expiry,
     } = input;
@@ -465,6 +469,7 @@ pub async fn update(
             cost_type: cost_type.as_deref(),
             auto_approve_past,
             unpaid,
+            medical_certificate_relevant,
             leave_account_default_days,
             leave_account_carryover_expiry: normalized_carryover_expiry.as_deref(),
             leave_account_start_year: None,

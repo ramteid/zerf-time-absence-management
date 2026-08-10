@@ -68,20 +68,22 @@ impl ReportDb {
         .await?)
     }
 
-    /// Active absences in range: (start_date, end_date, slug, category_name).
+    /// Active absences in range: (id, start_date, end_date, slug, category_name).
     ///
     /// `cancellation_pending` still blocks time logging until an approver
     /// decides, so reporting/flextime must treat it like approved.
     /// `category_name` is returned alongside the slug so PDF rendering can
     /// localise admin-created custom categories (which have no static i18n key).
+    /// `id` lets the payroll report look up the "AU required" verdict computed
+    /// by `services::medical_certificate` for this specific absence.
     pub async fn approved_absence_rows(
         &self,
         user_id: i64,
         from: NaiveDate,
         to: NaiveDate,
-    ) -> AppResult<Vec<(NaiveDate, NaiveDate, String, String)>> {
+    ) -> AppResult<Vec<(i64, NaiveDate, NaiveDate, String, String)>> {
         Ok(sqlx::query_as(
-            "SELECT a.start_date, a.end_date, c.slug, c.name \
+            "SELECT a.id, a.start_date, a.end_date, c.slug, c.name \
              FROM absences a JOIN absence_categories c ON c.id = a.category_id \
              WHERE a.user_id=$1 AND a.status IN ('approved','cancellation_pending') \
              AND a.end_date >= $2 AND a.start_date <= $3 \

@@ -39,6 +39,13 @@ const DEFAULT_REGION: &str = "";
 pub const SUBMISSION_DEADLINE_DAY_KEY: &str = "submission_deadline_day";
 pub const ORGANIZATION_NAME_KEY: &str = "organization_name";
 
+/// Number of consecutive calendar days of illness (see
+/// `services::medical_certificate`) after which a medical certificate (AU) is
+/// considered required. Matches the common German statutory default of the
+/// 4th calendar day (§ 5 EFZG).
+pub const MEDICAL_CERTIFICATE_THRESHOLD_DAYS_KEY: &str = "medical_certificate_threshold_days";
+pub const DEFAULT_MEDICAL_CERTIFICATE_THRESHOLD_DAYS: u32 = 4;
+
 // Nextcloud upload — report PDF export (app reads/writes these).
 pub const REPORT_UPLOAD_ENABLED_KEY: &str = "report_upload_enabled";
 pub const REPORT_UPLOAD_URL_KEY: &str = "report_upload_url";
@@ -257,6 +264,15 @@ pub async fn load_admin_settings(pool: &crate::db::DatabasePool) -> AppResult<Ad
 
     let allow_team_lead_manage_assistants = team_lead_assistant_management_enabled(pool).await?;
 
+    let medical_certificate_threshold_days: u32 = load_setting(
+        pool,
+        MEDICAL_CERTIFICATE_THRESHOLD_DAYS_KEY,
+        &DEFAULT_MEDICAL_CERTIFICATE_THRESHOLD_DAYS.to_string(),
+    )
+    .await?
+    .parse()
+    .unwrap_or(DEFAULT_MEDICAL_CERTIFICATE_THRESHOLD_DAYS);
+
     let payroll_report = crate::services::payroll_report::load_config(pool).await?;
     let payroll_relevant_categories =
         crate::services::payroll_report::payroll_relevant_categories(pool).await?;
@@ -282,6 +298,7 @@ pub async fn load_admin_settings(pool: &crate::db::DatabasePool) -> AppResult<Ad
         backup_last_success_at,
         backup_last_manual_at,
         allow_team_lead_manage_assistants,
+        medical_certificate_threshold_days,
         payroll_report_enabled: payroll_report.enabled,
         payroll_report_recipients: payroll_report.recipients,
         payroll_report_day_of_month: payroll_report.day_of_month,
@@ -444,6 +461,9 @@ pub struct AdminSettingsData {
     /// When TRUE, non-admin team leads may create/manage "assistant" users
     /// assigned to them (see `/team-users*`). On by default.
     pub allow_team_lead_manage_assistants: bool,
+    /// Consecutive calendar days of illness after which a medical certificate
+    /// (AU) is considered required — see `services::medical_certificate`.
+    pub medical_certificate_threshold_days: u32,
     // --- Monthly payroll report email (tax office / payroll accountant) ---
     pub payroll_report_enabled: bool,
     /// Recipient addresses, all equal (no primary/CC distinction).

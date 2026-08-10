@@ -49,6 +49,21 @@ const TRANSLATIONS = {
     label_unpaid: "Unpaid (reduces salary)",
     help_unpaid:
       "Only available when the category uses nothing: marks days in this category as unpaid, so they reduce the salary payout. Leave unchecked for paid days off that happen to use neither vacation nor flextime, such as special leave or paid training — those don't affect pay and must not appear in the monthly payroll report. Sick leave is always included in the payroll report regardless of this setting, since it needs separate handling for health-insurance reimbursement.",
+    label_medical_certificate_relevant: "Counts toward the medical certificate (AU) threshold",
+    help_medical_certificate_relevant:
+      "Absences in this category count toward the consecutive-sick-days threshold configured under Admin Settings. Once a continuous illness period reaches that threshold, affected requests are marked as requiring a medical certificate (AU). Independent of the other options above — a category can behave like sick leave without this, or vice versa.",
+    label_medical_certificate_required: "Medical certificate (AU) required",
+    medical_certificate_chain_days_hint:
+      "This request is part of a continuous sick period of {days} day(s). A certificate is required from {threshold} day(s).",
+    medical_certificate_required_warning_title: "Medical certificate required",
+    medical_certificate_required_warning_body:
+      "Your continuous sick period has reached {days} day(s). You must obtain a medical certificate (AU) from your doctor and submit it to your employer as required.",
+    "Medical certificate (AU)": "Medical certificate (AU)",
+    "Consecutive sick days before a certificate is required":
+      "Consecutive sick days before a certificate is required",
+    "Applies only to absence categories marked accordingly under Categories. Counts consecutive calendar days, bridging weekends and public holidays.":
+      "Applies only to absence categories marked accordingly under Categories. Counts consecutive calendar days, bridging weekends and public holidays.",
+    "e.g. 4": "e.g. 4",
     "Leave accounts": "Leave accounts",
     "Leave account default days": "Leave account default days",
     "Leave account default days must be between 0 and 366.":
@@ -737,6 +752,21 @@ const TRANSLATIONS = {
     label_cost_type_vacation: "Verwendet ein Tageskonto",
     label_cost_type_flextime: "Verbraucht Gleitzeitstunden",
     label_unpaid: "Unbezahlt (mindert das Gehalt)",
+    label_medical_certificate_relevant:
+      "Zählt für die AU-Pflicht-Berechnung",
+    label_medical_certificate_required: "Arbeitsunfähigkeitsbescheinigung (AU) erforderlich",
+    medical_certificate_chain_days_hint:
+      "Dieser Antrag ist Teil eines durchgehenden Krankheitszeitraums von {days} Tag(en). Ab {threshold} Tag(en) ist eine AU erforderlich.",
+    medical_certificate_required_warning_title:
+      "Arbeitsunfähigkeitsbescheinigung erforderlich",
+    medical_certificate_required_warning_body:
+      "Ihr durchgehender Krankheitszeitraum hat {days} Tag(e) erreicht. Sie müssen eine Arbeitsunfähigkeitsbescheinigung (AU) von Ihrem Arzt einholen und wie von Ihrem Arbeitgeber gefordert einreichen.",
+    "Medical certificate (AU)": "Arbeitsunfähigkeitsbescheinigung (AU)",
+    "Consecutive sick days before a certificate is required":
+      "Durchgehende Krankheitstage, ab denen eine AU erforderlich ist",
+    "Applies only to absence categories marked accordingly under Categories. Counts consecutive calendar days, bridging weekends and public holidays.":
+      "Gilt nur für Abwesenheitskategorien, die entsprechend unter Kategorien markiert sind. Zählt durchgehende Kalendertage, wobei Wochenenden und Feiertage überbrückt werden.",
+    "e.g. 4": "z.B. 4",
     "Auto-approve past dates": "Vergangene Daten automatisch genehmigen",
     "Type is required.": "Typ ist erforderlich.",
     "Not enough flextime balance for this absence.":
@@ -1173,6 +1203,8 @@ const TRANSLATIONS = {
       "Anträge mit Startdatum heute oder in der Vergangenheit werden automatisch genehmigt (ohne Freigabe durch eine vorgesetzte Person). Zeitbuchungen am selben Tag bleiben erlaubt (z. B. „vormittags gearbeitet, mittags krankgemeldet“). Rückdatieren ist auf 30 Tage begrenzt. Typische Verwendung: Krankmeldung.",
     help_unpaid:
       "Nur verfügbar, wenn die Kategorie nichts verbraucht: markiert Tage dieser Kategorie als unbezahlt, sodass sie das Gehalt mindern. Bei bezahlten freien Tagen, die zufällig weder Urlaub noch Gleitzeit verbrauchen — etwa Sonderurlaub oder bezahlte Fortbildung —, bitte nicht aktivieren: Diese wirken sich nicht aufs Gehalt aus und dürfen nicht in der monatlichen Lohnmeldung erscheinen. Krankmeldungen erscheinen unabhängig von dieser Einstellung immer in der Lohnmeldung, da sie für die Krankenkassen-Erstattung gesondert behandelt werden müssen.",
+    help_medical_certificate_relevant:
+      "Abwesenheiten dieser Kategorie zählen für die Schwelle durchgehender Krankheitstage, die in den Admin-Einstellungen konfiguriert ist. Sobald ein durchgehender Krankheitszeitraum diese Schwelle erreicht, werden die betroffenen Anträge als AU-pflichtig markiert. Unabhängig von den obigen Optionen — eine Kategorie kann sich wie eine Krankmeldung verhalten, ohne dies zu zählen, oder umgekehrt.",
     help_submission_status:
       "Zeigt an, ob alle erforderlichen Wochen im gewählten Monat eingereicht wurden.",
     Approvals: "Genehmigungen",

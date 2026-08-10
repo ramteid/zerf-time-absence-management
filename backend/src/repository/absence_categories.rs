@@ -61,6 +61,11 @@ pub struct AbsenceCategory {
     /// (enforced by the `abs_cat_unpaid_requires_none_cost` CHECK): vacation
     /// and flextime categories are always paid through their own mechanics.
     pub unpaid: bool,
+    /// Whether absences in this category count toward the "AU" (medical
+    /// certificate) threshold calculation — see `services::medical_certificate`.
+    /// Independent of `auto_approve_past`: an org may want sick-like behavior
+    /// without the category counting toward the threshold, or vice versa.
+    pub medical_certificate_relevant: bool,
     /// Default annual entitlement for this category's leave account. Present
     /// exactly when `cost_type == "vacation"` (enforced by migration 039).
     pub leave_account_default_days: Option<i64>,
@@ -99,6 +104,7 @@ impl AbsenceCategory {
 
 const ABS_CAT_COLUMNS: &str =
     "id, slug, name, color, sort_order, active, cost_type, auto_approve_past, unpaid, \
+     medical_certificate_relevant, \
      leave_account_default_days, leave_account_carryover_expiry, leave_account_start_year";
 
 #[derive(Clone)]
@@ -183,8 +189,9 @@ impl AbsenceCategoryDb {
         let new_id: i64 = sqlx::query_scalar(
             "INSERT INTO absence_categories \
              (slug, name, color, sort_order, active, cost_type, auto_approve_past, unpaid, \
+              medical_certificate_relevant, \
               leave_account_default_days, leave_account_carryover_expiry, leave_account_start_year) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id",
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id",
         )
         .bind(input.slug)
         .bind(input.name)
@@ -194,6 +201,7 @@ impl AbsenceCategoryDb {
         .bind(input.cost_type)
         .bind(input.auto_approve_past)
         .bind(input.unpaid)
+        .bind(input.medical_certificate_relevant)
         .bind(input.leave_account_default_days)
         .bind(input.leave_account_carryover_expiry)
         .bind(input.leave_account_start_year)
@@ -293,6 +301,7 @@ impl AbsenceCategoryDb {
     pub async fn list_active_for_user(&self, user_id: i64) -> AppResult<Vec<AbsenceCategory>> {
         Ok(sqlx::query_as::<_, AbsenceCategory>(
             "SELECT c.id, c.slug, c.name, c.color, c.sort_order, c.active, c.cost_type, c.auto_approve_past, c.unpaid, \
+                    c.medical_certificate_relevant, \
                     c.leave_account_default_days, c.leave_account_carryover_expiry, c.leave_account_start_year \
              FROM absence_categories c \
              JOIN user_absence_category_access uaca ON uaca.category_id = c.id AND uaca.user_id = $1 \
@@ -314,6 +323,7 @@ impl AbsenceCategoryDb {
             "SELECT c.id, c.slug, c.name, c.color, c.sort_order, \
                     (c.active AND uaca.user_id IS NOT NULL) AS active, \
                     c.cost_type, c.auto_approve_past, c.unpaid, \
+                    c.medical_certificate_relevant, \
                     c.leave_account_default_days, c.leave_account_carryover_expiry, c.leave_account_start_year \
              FROM absence_categories c \
              LEFT JOIN user_absence_category_access uaca \
@@ -346,10 +356,11 @@ impl AbsenceCategoryDb {
                 cost_type=COALESCE($5,cost_type), \
                 auto_approve_past=COALESCE($6,auto_approve_past), \
                 unpaid=COALESCE($7,unpaid), \
-                leave_account_default_days=COALESCE($8,leave_account_default_days), \
-                leave_account_carryover_expiry=COALESCE($9,leave_account_carryover_expiry), \
-                leave_account_start_year=COALESCE($10,leave_account_start_year) \
-             WHERE id=$11",
+                medical_certificate_relevant=COALESCE($8,medical_certificate_relevant), \
+                leave_account_default_days=COALESCE($9,leave_account_default_days), \
+                leave_account_carryover_expiry=COALESCE($10,leave_account_carryover_expiry), \
+                leave_account_start_year=COALESCE($11,leave_account_start_year) \
+             WHERE id=$12",
         )
         .bind(input.name)
         .bind(input.color)
@@ -358,6 +369,7 @@ impl AbsenceCategoryDb {
         .bind(input.cost_type)
         .bind(input.auto_approve_past)
         .bind(input.unpaid)
+        .bind(input.medical_certificate_relevant)
         .bind(input.leave_account_default_days)
         .bind(input.leave_account_carryover_expiry)
         .bind(input.leave_account_start_year)
@@ -425,6 +437,7 @@ pub struct NewAbsenceCategory<'a> {
     /// `abs_cat_unpaid_requires_none_cost` CHECK); service-layer code
     /// validates this before passing it through.
     pub unpaid: bool,
+    pub medical_certificate_relevant: bool,
     /// Required for `cost_type = 'vacation'`; otherwise it must be `None`.
     pub leave_account_default_days: Option<i64>,
     /// Required MM-DD carryover expiry for `cost_type = 'vacation'`.
@@ -442,6 +455,7 @@ pub struct UpdateAbsenceCategory<'a> {
     pub cost_type: Option<&'a str>,
     pub auto_approve_past: Option<bool>,
     pub unpaid: Option<bool>,
+    pub medical_certificate_relevant: Option<bool>,
     pub leave_account_default_days: Option<i64>,
     pub leave_account_carryover_expiry: Option<&'a str>,
     pub leave_account_start_year: Option<i32>,
@@ -517,6 +531,7 @@ mod tests {
             cost_type: cost_type.to_string(),
             auto_approve_past,
             unpaid,
+            medical_certificate_relevant: false,
             leave_account_default_days: (cost_type == COST_TYPE_VACATION).then_some(30),
             leave_account_carryover_expiry: (cost_type == COST_TYPE_VACATION)
                 .then_some("03-31".to_string()),

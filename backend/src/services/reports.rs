@@ -294,7 +294,7 @@ pub async fn build_range_with_user(
     // Pre-group by date so per-day lookups are O(1) instead of scanning all rows.
     let entries_by_date = group_entries_by_date(time_entry_rows);
 
-    let approved_absence_rows: Vec<(NaiveDate, NaiveDate, String, String)> =
+    let approved_absence_rows: Vec<(i64, NaiveDate, NaiveDate, String, String)> =
         reports_db.approved_absence_rows(user_id, from, to).await?;
 
     // Per-build category flag lookup — used once per day to decide whether an
@@ -326,11 +326,11 @@ pub async fn build_range_with_user(
         let holiday = holiday_map.get(&current_date).cloned();
         let active_absence = approved_absence_rows
             .iter()
-            .find(|(abs_start, abs_end, _, _)| {
+            .find(|(_, abs_start, abs_end, _, _)| {
                 current_date >= *abs_start && current_date <= *abs_end
             });
-        let absence = active_absence.map(|(_, _, kind, _)| kind.clone());
-        let absence_name = active_absence.map(|(_, _, _, name)| name.clone());
+        let absence = active_absence.map(|(_, _, _, kind, _)| kind.clone());
+        let absence_name = active_absence.map(|(_, _, _, _, name)| name.clone());
         let before_start = current_date < user.start_date;
         let after_today = current_date > today;
 
@@ -573,7 +573,7 @@ pub async fn build_flextime_for_user(
     // Expand absence ranges into a per-day map so each day can look up its kind in O(1).
     // If two absences overlap (possible via race/manual DB), prioritize the one that removes target.
     let mut absence_by_day: HashMap<NaiveDate, String> = HashMap::new();
-    for (absence_start, absence_end, absence_kind, _absence_name) in approved_absences {
+    for (_absence_id, absence_start, absence_end, absence_kind, _absence_name) in approved_absences {
         let mut day = absence_start.max(from);
         while day <= absence_end.min(to) {
             let existing = absence_by_day.get(&day);
