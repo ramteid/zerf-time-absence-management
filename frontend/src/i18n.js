@@ -52,7 +52,6 @@ const TRANSLATIONS = {
     label_medical_certificate_relevant: "Counts toward the medical certificate (eAU) threshold",
     help_medical_certificate_relevant:
       "Absences in this category count toward the consecutive-sick-days threshold configured under Admin Settings. Once a continuous illness period reaches that threshold, affected requests are marked as requiring an electronic certificate of incapacity for work (eAU). Independent of the other options above — a category can behave like sick leave without this, or vice versa.",
-    label_medical_certificate: "Medical certificate (eAU)",
     medical_certificate_chain_days_hint:
       "Continuous sick period: {days} day(s). An eAU is required from {threshold} day(s).",
     medical_certificate_required_warning_title: "Please obtain an eAU",
@@ -754,7 +753,6 @@ const TRANSLATIONS = {
     label_unpaid: "Unbezahlt (mindert das Gehalt)",
     label_medical_certificate_relevant:
       "Zählt für die eAU-Pflicht-Berechnung",
-    label_medical_certificate: "Arbeitsunfähigkeitsbescheinigung (eAU)",
     medical_certificate_chain_days_hint:
       "Durchgehender Krankheitszeitraum: {days} Tag(e). Ab {threshold} Tag(en) ist eine eAU erforderlich.",
     medical_certificate_required_warning_title: "Bitte eAU einholen",

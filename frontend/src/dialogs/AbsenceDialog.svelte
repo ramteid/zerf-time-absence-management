@@ -273,10 +273,9 @@
   {/if}
   {#if medicalCertificateRelevant}
     <div class="medical-certificate-info">
-      <!-- Only one of the two blocks below is ever visible at a time, and
-           the checkbox label no longer says "required" in words — its
-           checked state already carries that meaning, so nothing here
-           states the same fact twice. -->
+      <!-- Only one of these two is ever visible at a time — the verdict is
+           conveyed by which one shows, so there's no separate indicator
+           (e.g. a checkbox) restating it a third time. -->
       {#if medicalCertificatePreview?.required}
         <div class="medical-certificate-warning" role="alert">
           <strong>{$t("medical_certificate_required_warning_title")}</strong>
@@ -294,14 +293,6 @@
           })}
         </div>
       {/if}
-      <label class="zf-check-label">
-        <input
-          type="checkbox"
-          checked={medicalCertificatePreview?.required ?? false}
-          disabled
-        />
-        <span>{$t("label_medical_certificate")}</span>
-      </label>
     </div>
   {/if}
   <div>
