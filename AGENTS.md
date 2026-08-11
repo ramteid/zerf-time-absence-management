@@ -316,7 +316,7 @@ Supported languages: `en` (en-US) and `de` (de-DE). Stored in localStorage key `
 ## Security model
 
 - **Passwords**: Argon2id; 5 failed attempts per 15 min lockout
-- **Sessions**: 256-bit random tokens (HttpOnly/Secure/SameSite=Strict), 8h idle / 7d absolute timeout
+- **Sessions**: 256-bit random tokens (HttpOnly/Secure/SameSite=Strict), 4d idle / 14d absolute timeout
 - **CSRF**: SameSite=Strict + Origin/Referer check + X-CSRF-Token double-submit
 - **Database auth**: SCRAM-SHA-256, checksums, internal-only Docker network
 - **Data at rest**: [pg_tde](https://docs.percona.com/pg-tde/) (Percona Transparent Data Encryption) encrypts all tables and WAL segments at the PostgreSQL storage layer. The pg_tde principal key is auto-generated on first start, then encrypted with `ZERF_DB_ENCRYPTION_KEY` (AES-256-CBC, PBKDF2) and stored as `pg_tde_keyring.enc` in the data volume. On each container start the custom entrypoint decrypts the blob into a Docker-managed in-memory tmpfs (`/var/lib/pg_tde_keyring`); no elevated container capabilities are needed.

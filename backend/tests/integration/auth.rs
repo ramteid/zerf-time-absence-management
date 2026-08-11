@@ -400,9 +400,9 @@ async fn expired_session_returns_unauthorized() {
     let (st, _) = admin.get("/api/v1/auth/me").await;
     assert_eq!(st, StatusCode::OK, "me before session expiry");
 
-    // Manually expire the session by back-dating both timestamps past their
-    // respective timeouts in the database.  This simulates what happens after
-    // `ABSOLUTE_TIMEOUT_HOURS` (168 h) without a refresh.
+    // Manually expire the session by back-dating both timestamps past the
+    // idle timeout (`IDLE_TIMEOUT_HOURS`) in the database, simulating what
+    // happens after prolonged inactivity without a refresh.
     sqlx::query(
         "UPDATE sessions SET \
          created_at = CURRENT_TIMESTAMP - INTERVAL '200 hours', \

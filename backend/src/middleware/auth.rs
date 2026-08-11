@@ -13,8 +13,8 @@ use serde::Serialize;
 // Session timing policy — also referenced by services::auth::cleanup_loop.
 pub const SESSION_COOKIE_SECURE: &str = "__Host-zerf_session";
 pub const SESSION_COOKIE_PLAIN: &str = "zerf_session";
-pub const ABSOLUTE_TIMEOUT_HOURS: i64 = 168; // 7 days absolute timeout (since session creation)
-pub const IDLE_TIMEOUT_HOURS: i64 = 8; // sliding idle timeout (since last_active_at)
+pub const ABSOLUTE_TIMEOUT_HOURS: i64 = 336; // 14 days absolute timeout (since session creation)
+pub const IDLE_TIMEOUT_HOURS: i64 = 96; // 4 days sliding idle timeout (since last_active_at)
 pub const MAX_FAILED_LOGINS: i64 = 5;
 pub const LOCKOUT_MIN: i64 = 15;
 
