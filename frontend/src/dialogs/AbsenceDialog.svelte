@@ -273,10 +273,11 @@
   {/if}
   {#if medicalCertificateRelevant}
     <div class="medical-certificate-info">
+      <!-- Only one of the two blocks below is ever visible at a time, and
+           the checkbox label no longer says "required" in words — its
+           checked state already carries that meaning, so nothing here
+           states the same fact twice. -->
       {#if medicalCertificatePreview?.required}
-        <!-- The day count lives here (folded into the warning text) instead
-             of also repeating in a separate hint below — showing both said
-             the same thing twice. -->
         <div class="medical-certificate-warning" role="alert">
           <strong>{$t("medical_certificate_required_warning_title")}</strong>
           <div>
@@ -299,7 +300,7 @@
           checked={medicalCertificatePreview?.required ?? false}
           disabled
         />
-        <span>{$t("label_medical_certificate_required")}</span>
+        <span>{$t("label_medical_certificate")}</span>
       </label>
     </div>
   {/if}
