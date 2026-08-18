@@ -425,7 +425,7 @@
 
     {#if Object.keys(reportAbsenceSummary).length > 0}
       <div class="report-subheading">{$t("Absences")}</div>
-      <div class="stat-cards mb-16">
+      <div class="stat-cards absence-stat-cards mb-16">
         {#each Object.entries(reportAbsenceSummary) as [kind, days] (kind)}
           <StatCard
             label={absenceKindLabel(kind)}
@@ -571,6 +571,13 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin-bottom: 6px;
+  }
+
+  /* Unlike the balance stat-cards above, the number of absence kinds varies
+     (often just one), so cards must not grow to fill the row — a lone card
+     would otherwise stretch to the full container width. */
+  .absence-stat-cards :global(.stat-card) {
+    flex: 0 1 auto;
   }
 
   .leave-account-cards {
