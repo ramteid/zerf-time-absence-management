@@ -260,8 +260,8 @@
     for (const cell of eventCells) {
       if (cell.other) continue;
       for (const event of cell.events) {
-        if (!seen.has(event.key)) {
-          seen.set(event.key, { color: event.color, label: event.label });
+        if (!seen.has(event.colorKey)) {
+          seen.set(event.colorKey, { color: event.color, label: event.label });
         }
       }
     }

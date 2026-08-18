@@ -157,7 +157,7 @@ describe("rawCellEvents", () => {
     const cell = {
       ds: "2026-07-15",
       hol: null,
-      absences: [{ kind: "vacation", name: "Summer", comment: "" }],
+      absences: [{ id: 42, kind: "vacation", name: "Summer", comment: "" }],
     };
     const events = rawCellEvents(
       cell,
@@ -166,15 +166,36 @@ describe("rawCellEvents", () => {
       new Map(),
       translate,
     );
-    const absEvent = events.find((e) => e.key === "absence:vacation");
+    const absEvent = events.find((e) => e.colorKey === "absence:vacation");
     expect(absEvent).not.toBeUndefined();
+    expect(absEvent.key).toBe("absence:42");
+  });
+
+  it("keys each absence event by its own id, not just its kind, so two people's overlapping same-category absences on one day don't collide in Svelte's keyed each block", () => {
+    const cell = {
+      ds: "2026-08-24",
+      hol: null,
+      absences: [
+        { id: 7, kind: "vacation", name: "Person A", comment: "" },
+        { id: 11, kind: "vacation", name: "Person B", comment: "" },
+      ],
+    };
+    const events = rawCellEvents(
+      cell,
+      new Map(),
+      new Map(),
+      new Map(),
+      translate,
+    );
+    const keys = events.map((e) => e.key);
+    expect(new Set(keys).size).toBe(keys.length);
   });
 
   it("uses DB-stored category color for absence events", () => {
     const cell = {
       ds: "2026-07-15",
       hol: null,
-      absences: [{ kind: "vacation", name: "Summer", comment: "" }],
+      absences: [{ id: 1, kind: "vacation", name: "Summer", comment: "" }],
     };
     const absCatMap = new Map([["vacation", { color: "#1a73e8" }]]);
     const events = rawCellEvents(
@@ -184,7 +205,7 @@ describe("rawCellEvents", () => {
       absCatMap,
       translate,
     );
-    const absEvent = events.find((e) => e.key === "absence:vacation");
+    const absEvent = events.find((e) => e.colorKey === "absence:vacation");
     expect(absEvent.color).toBe("#1a73e8");
   });
 
@@ -195,6 +216,7 @@ describe("rawCellEvents", () => {
         ds,
         [
           {
+            id: 1,
             user_id: 1,
             category_id: null,
             start_time: "09:00:00",
@@ -212,6 +234,43 @@ describe("rawCellEvents", () => {
       translate,
     );
     expect(events.some((e) => e.key.startsWith("work:"))).toBe(true);
+  });
+
+  it("keys each work event by its own id, not just its category, so two people sharing a category on one day don't collide in Svelte's keyed each block", () => {
+    const ds = "2026-03-10";
+    const entryMap = new Map([
+      [
+        ds,
+        [
+          {
+            id: 101,
+            user_id: 1,
+            category_id: 4,
+            start_time: "09:00:00",
+            end_time: "12:00:00",
+          },
+          {
+            id: 102,
+            user_id: 2,
+            category_id: 4,
+            start_time: "09:00:00",
+            end_time: "12:00:00",
+          },
+        ],
+      ],
+    ]);
+    const cell = { ds, hol: null, absences: [] };
+    const events = rawCellEvents(
+      cell,
+      entryMap,
+      new Map(),
+      new Map(),
+      translate,
+    );
+    const keys = events.map((e) => e.key);
+    expect(new Set(keys).size).toBe(keys.length);
+    // Both still share one color-grouping key so they render with the same color.
+    expect(new Set(events.map((e) => e.colorKey)).size).toBe(1);
   });
 
   it("includes the other user's name in the detail when the entry is not own", () => {

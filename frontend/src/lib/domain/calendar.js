@@ -57,6 +57,10 @@ export function rawCellEvents(
   if (cell.hol) {
     events.push({
       key: "holiday",
+      // `colorKey` groups events for shared coloring (see buildColorMap):
+      // every event of the same kind/category must resolve to the same
+      // color regardless of how many distinct records produced it.
+      colorKey: "holiday",
       color: HOLIDAY_COLOR,
       label: translate("Holiday"),
       detail: cell.hol,
@@ -71,7 +75,13 @@ export function rawCellEvents(
     // generic placeholder.
     const label = absenceKindLabel(absence.kind, absence.category_name);
     events.push({
-      key: `absence:${absence.kind}`,
+      // `key` must be unique per rendered event (it's the Svelte keyed-each
+      // identity). Two different people can have overlapping same-category
+      // absences on the same day (e.g. overlapping vacations) — keying only
+      // by kind collides and throws `each_key_duplicate`, which aborts the
+      // whole calendar's render.
+      key: `absence:${absence.id}`,
+      colorKey: `absence:${absence.kind}`,
       color: absColor(absence.kind, absenceCategoryMap),
       label,
       title: label,
@@ -94,7 +104,10 @@ export function rawCellEvents(
       : null;
     const detail = userName ? `${userName} – ${timeDetail}` : timeDetail;
     events.push({
-      key: `work:${entry.category_id ?? "unknown"}`,
+      // Same rationale as absences above: multiple team members can share a
+      // work category on the same day in a team calendar.
+      key: `work:${entry.id}`,
+      colorKey: `work:${entry.category_id ?? "unknown"}`,
       color: workBaseColor(entry, events.length, categoryMap),
       label: translate(workLabel(entry, categoryMap)),
       detail,
@@ -130,8 +143,8 @@ export function buildColorMap(
       absenceCategoryMap,
       translate,
     )) {
-      if (assigned.has(event.key)) continue;
-      const isWorkEvent = event.key.startsWith("work:");
+      if (assigned.has(event.colorKey)) continue;
+      const isWorkEvent = event.colorKey.startsWith("work:");
       const blocked = new Set([...used, ...reservedColors]);
       let color =
         normalizeColor(event.color) || fallbackColor(assigned.size, blocked);
@@ -142,7 +155,7 @@ export function buildColorMap(
       } else if (used.has(color)) {
         color = fallbackColor(assigned.size, blocked);
       }
-      assigned.set(event.key, color);
+      assigned.set(event.colorKey, color);
       used.add(color);
     }
   }
@@ -169,7 +182,7 @@ export function cellEvents(
     currentUserId,
   ).map((event) => ({
     ...event,
-    color: colorMap.get(event.key) || event.color,
+    color: colorMap.get(event.colorKey) || event.color,
   }));
 }
 
