@@ -291,14 +291,14 @@
   })();
 
   $: {
-    // Sync activeFilters when legend changes (e.g., month navigation)
+    // Sync activeFilters when legend changes (e.g., month navigation).
+    // On first load (activeFilters.size === 0), enable all categories.
+    // On subsequent loads, remove filters for categories no longer in the legend.
     if (allLegendItems.length > 0) {
       const currentKeys = new Set(allLegendItems.map((item) => item.colorKey));
       if (activeFilters.size === 0) {
-        // First load: enable all
         activeFilters = new Set(currentKeys);
       } else {
-        // Remove filters for items no longer in the legend
         activeFilters = new Set([...activeFilters].filter((key) => currentKeys.has(key)));
       }
     }
@@ -314,10 +314,25 @@
     activeFilters = newFilters;
   }
 
-  $: legendItems = allLegendItems.map((item) => ({
-    ...item,
-    active: activeFilters.has(item.colorKey),
-  }));
+  $: legendItems = (() => {
+    // Sort legend items consistently: holidays first, then absences, then work categories
+    const sortKey = (item) => {
+      if (item.colorKey === "holiday") return [0, item.label];
+      if (item.colorKey.startsWith("absence:")) return [1, item.label];
+      return [2, item.label];
+    };
+    return allLegendItems
+      .map((item) => ({
+        ...item,
+        active: activeFilters.has(item.colorKey),
+      }))
+      .sort((a, b) => {
+        const [aGroup, aLabel] = sortKey(a);
+        const [bGroup, bLabel] = sortKey(b);
+        if (aGroup !== bGroup) return aGroup - bGroup;
+        return aLabel.localeCompare(bLabel);
+      });
+  })();
 
   function clickDay(cell) {
     const cellEventsList = cell.events;
@@ -433,6 +448,7 @@
         class:inactive={!item.active}
         on:click={() => toggleFilter(item.colorKey)}
         title={item.active ? $t("Hide") : $t("Show")}
+        aria-label="{item.active ? $t('Hide') : $t('Show')}: {item.label}"
       >
         <span class="cal-swatch" style:background={item.color}></span>
         <span>{item.label}</span>
@@ -488,7 +504,7 @@
     border: 1px solid var(--border);
     background: var(--bg-surface);
     cursor: pointer;
-    transition: all 150ms ease-in-out;
+    transition: opacity 150ms ease-in-out, border-color 150ms ease-in-out, background-color 150ms ease-in-out;
   }
 
   .cal-legend-item:hover {

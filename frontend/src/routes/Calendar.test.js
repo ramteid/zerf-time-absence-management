@@ -305,6 +305,11 @@ describe("Calendar", () => {
       throw new Error("Project filter should be active initially");
     }
 
+    // Check accessibility: legend buttons should have aria-labels
+    if (!projectButton.getAttribute("aria-label")) {
+      throw new Error("Project filter button should have aria-label for accessibility");
+    }
+
     // Click the Project filter to hide it
     projectButton.click();
     await settle();
@@ -337,6 +342,50 @@ describe("Calendar", () => {
 
     if (finalProjectButton.classList.contains("inactive")) {
       throw new Error("Project filter should be active again after re-clicking");
+    }
+  });
+
+  it("displays legend items in consistent sort order", async () => {
+    mockState.holidays = [
+      {
+        id: 1,
+        holiday_date: "2026-05-01",
+        name: "May Day",
+        year: 2026,
+        is_auto: true,
+      },
+    ];
+    mockState.absences = [
+      {
+        id: 101,
+        user_id: 2,
+        name: "Tina Team",
+        kind: "vacation",
+        category_name: "Vacation",
+        start_date: "2026-05-04",
+        end_date: "2026-05-05",
+        comment: null,
+        status: "approved",
+      },
+    ];
+    // timeEntries already has a Project entry from the mock
+
+    component = mount(Calendar, { target });
+    await settle();
+
+    const legendButtons = Array.from(target.querySelectorAll(".cal-legend-item"));
+    const labels = legendButtons.map((btn) => btn.textContent.trim());
+
+    // Expected order: Holiday first, then Vacation (absence), then Project (work)
+    // Holiday is translated to "Holiday", not the holiday name ("May Day")
+    if (labels[0] !== "Holiday") {
+      throw new Error(`Holiday should be first, got: ${labels[0]}`);
+    }
+    if (labels[1] !== "Vacation") {
+      throw new Error(`Absence categories should come before work categories, got: ${labels[1]}`);
+    }
+    if (labels[2] !== "Project") {
+      throw new Error(`Work categories should be last, got: ${labels[2]}`);
     }
   });
 });
