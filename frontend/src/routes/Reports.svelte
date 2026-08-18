@@ -90,15 +90,53 @@
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
   }
 
+  function isValidIsoDate(value) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const date = new Date(`${value}T12:00:00Z`);
+    return (
+      !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
+    );
+  }
+
+  function reportDeepLink(currentPath) {
+    const queryString = currentPath.includes("?")
+      ? currentPath.split("?")[1]
+      : "";
+    const params = new URLSearchParams(queryString);
+    const userId = Number(params.get("user"));
+    const from = params.get("from");
+    const to = params.get("to");
+    if (
+      !Number.isSafeInteger(userId) ||
+      userId < 1 ||
+      !from ||
+      !to ||
+      !isValidIsoDate(from) ||
+      !isValidIsoDate(to) ||
+      from > to ||
+      isReportRangeTooLong(from, to)
+    )
+      return null;
+    return { userId, from, to };
+  }
+
+  function reportMaxDate(currentPath, todayDate) {
+    const defaultMaxDate = isoDate(addDays(todayDate, 366));
+    const linkedMaxDate = reportDeepLink(currentPath)?.to;
+    return linkedMaxDate && linkedMaxDate > defaultMaxDate
+      ? linkedMaxDate
+      : defaultMaxDate;
+  }
+
   let today = appTodayDate();
   let todayIso = isoDate(today);
   $: today = appTodayDate($settings?.timezone);
   $: todayIso = isoDate(today);
   $: currentMonthStr = isoMonthOf(today);
-  // Custom-range upper bound: keeps the calendar from reaching a date so far
-  // out that the absence/holiday lookups below (one API call per calendar
-  // year in the selected range) would balloon into a request flood.
-  $: maxDate = isoDate(addDays(today, 366));
+  // Custom ranges are limited to a year. A valid absence can nevertheless
+  // start farther in the future, so its calendar deep link temporarily extends
+  // the picker bound far enough to show the linked dates.
+  $: maxDate = reportMaxDate($path, today);
 
   let activeTab = "employee"; // "employee" | "team"
   let periodMode = "month";
@@ -117,29 +155,13 @@
   // Reports never calls go() for its own filter changes, so $path stays put
   // afterwards and this won't fight manual filter edits made later.
   function applyDeepLink(currentPath) {
-    const queryString = currentPath.includes("?")
-      ? currentPath.split("?")[1]
-      : "";
-    const params = new URLSearchParams(queryString);
-    const user = params.get("user");
-    const fromParam = params.get("from");
-    const toParam = params.get("to");
-    const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
-    if (
-      user &&
-      fromParam &&
-      toParam &&
-      isoDatePattern.test(fromParam) &&
-      isoDatePattern.test(toParam) &&
-      fromParam <= toParam &&
-      !isReportRangeTooLong(fromParam, toParam)
-    ) {
-      selectedUserId = Number(user);
-      periodMode = "range";
-      from = fromParam;
-      to = toParam;
-      activeTab = "employee";
-    }
+    const deepLink = reportDeepLink(currentPath);
+    if (!deepLink) return;
+    selectedUserId = deepLink.userId;
+    periodMode = "range";
+    from = deepLink.from;
+    to = deepLink.to;
+    activeTab = "employee";
   }
 
   $: if ($path.startsWith("/reports?")) applyDeepLink($path);
@@ -375,6 +397,7 @@
       {month}
       {from}
       {to}
+      navigationKey={$path}
     />
   {/if}
 </div>

@@ -335,6 +335,38 @@
     popupCell = cell;
   }
 
+  // A popup row links to the exact person, period and report section instead
+  // of showing the full detail inline - this is where an absence's comment
+  // remains available without competing with the name and time in the popup.
+  function hasReportLink(item) {
+    return (
+      item.userId != null &&
+      !!item.reportFrom &&
+      !!item.reportTo &&
+      !!item.reportSection
+    );
+  }
+
+  function reportHref(item) {
+    const fragment = `report-${item.reportSection}`;
+    return `/reports?user=${item.userId}&from=${item.reportFrom}&to=${item.reportTo}#${fragment}`;
+  }
+
+  function openReport(event, item) {
+    if (!hasReportLink(item)) return;
+    if (
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    )
+      return;
+    event.preventDefault();
+    go(reportHref(item));
+    popupCell = null;
+  }
+
   function monthFromPath() {
     const queryString = $path.includes("?") ? $path.split("?")[1] : "";
     const searchParams = new URLSearchParams(queryString);
@@ -467,14 +499,33 @@
           </div>
           <div class="cal-popup-rows">
             {#each group.items as item (item.key)}
-              <div class="cal-popup-row">
-                <span class="cal-popup-primary">{item.primary}</span>
-                {#if item.secondary}
-                  <span class="cal-popup-secondary text-tertiary"
-                    >{item.secondary}</span
-                  >
-                {/if}
-              </div>
+              {#if hasReportLink(item)}
+                <!-- Links to this person's employee report for the exact day
+                     (or, for an absence, its full date range) instead of
+                     showing the record's own detail inline. -->
+                <a
+                  href={reportHref(item)}
+                  class="cal-popup-row cal-popup-row-link"
+                  title={$t("View in report")}
+                  on:click={(event) => openReport(event, item)}
+                >
+                  <span class="cal-popup-primary">{item.primary}</span>
+                  {#if item.secondary}
+                    <span class="cal-popup-secondary text-tertiary"
+                      >{item.secondary}</span
+                    >
+                  {/if}
+                </a>
+              {:else}
+                <div class="cal-popup-row">
+                  <span class="cal-popup-primary">{item.primary}</span>
+                  {#if item.secondary}
+                    <span class="cal-popup-secondary text-tertiary"
+                      >{item.secondary}</span
+                    >
+                  {/if}
+                </div>
+              {/if}
             {/each}
           </div>
         </div>
@@ -533,14 +584,38 @@
 
   .cal-popup-row {
     display: flex;
+    flex-wrap: wrap;
     align-items: baseline;
-    gap: 12px;
+    column-gap: 12px;
+    row-gap: 2px;
+    width: 100%;
+    padding: 3px 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: none;
+    font: inherit;
+    text-align: left;
+    color: inherit;
+    text-decoration: none;
     font-size: 0.875rem;
   }
 
+  .cal-popup-row-link {
+    cursor: pointer;
+  }
+
+  .cal-popup-row-link:hover {
+    background: var(--bg-subtle);
+  }
+
   .cal-popup-primary {
+    /* Keep names and times visible: when both do not fit, flex moves the
+       non-wrapping time to a second line. Only a single unbreakable name part
+       may break, which prevents horizontal clipping on narrow screens. */
+    flex: 1 1 auto;
     min-width: 0;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
+    word-break: normal;
   }
 
   .cal-popup-secondary {

@@ -117,6 +117,12 @@ export function rawCellEvents(cell, context) {
       title: cell.hol,
       personName: null,
       detail: cell.hol,
+      // No employee report to link to for a public holiday.
+      popupDetail: null,
+      userId: null,
+      reportFrom: null,
+      reportTo: null,
+      reportSection: null,
     });
   }
   for (const absence of cell.absences) {
@@ -139,7 +145,16 @@ export function rawCellEvents(cell, context) {
       label,
       title: label,
       personName: absence.name || null,
-      detail: absence.comment || "",
+      detail: "",
+      // The comment can be arbitrarily long free text - showing it inline
+      // in the day popup is what used to squeeze the name column down to
+      // one character per line. It stays out of the popup; the row links to
+      // the employee report instead, where the comment remains available.
+      popupDetail: null,
+      userId: absence.user_id ?? null,
+      reportFrom: absence.start_date ?? null,
+      reportTo: absence.end_date ?? null,
+      reportSection: "absences",
     });
   }
   for (const entry of entryMap.get(cell.ds) || []) {
@@ -164,6 +179,12 @@ export function rawCellEvents(cell, context) {
       title: label,
       personName: personNameForEntry(entry, resolved),
       detail: timeDetail,
+      popupDetail: timeDetail,
+      userId: entry.user_id ?? null,
+      // A work entry only ever covers the one day it was booked on.
+      reportFrom: cell.ds,
+      reportTo: cell.ds,
+      reportSection: "entries",
     });
   }
   return events;
@@ -232,12 +253,20 @@ export function groupDayEvents(events) {
     }
     group.items.push({
       key: event.key,
-      // One popup row per record: the person on the left, the record's own
-      // detail (time range or comment) on the right. Rows that have no person
-      // — holidays — promote their detail into the primary column so every
-      // row still starts at the same indent.
+      // One popup row per record: the person on the left, the booked time on
+      // the right (work entries only - an absence's comment is intentionally
+      // not shown here, see `popupDetail` above). Rows that have no person -
+      // holidays - promote their detail into the primary column so every row
+      // still starts at the same indent.
       primary: event.personName || event.detail || "",
-      secondary: event.personName ? event.detail || "" : "",
+      secondary: event.personName ? event.popupDetail || "" : "",
+      // Present only when this row's record belongs to a specific person on
+      // a specific day/range - lets the popup link the row to that person's
+      // employee report instead of cramming the full detail into this list.
+      userId: event.userId ?? null,
+      reportFrom: event.reportFrom ?? null,
+      reportTo: event.reportTo ?? null,
+      reportSection: event.reportSection ?? null,
     });
   }
   for (const group of groupsByColorKey.values()) {

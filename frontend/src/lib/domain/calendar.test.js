@@ -170,6 +170,15 @@ describe("rawCellEvents", () => {
     expect(events.find((e) => e.key === "holiday").detail).toBe("New Year");
   });
 
+  it("gives a holiday no report link - there is no employee report for a public holiday", () => {
+    const cell = { ds: "2026-01-01", hol: "New Year", absences: [] };
+    const [holidayEvent] = rawCellEvents(cell, { translate });
+    expect(holidayEvent.userId).toBeNull();
+    expect(holidayEvent.reportFrom).toBeNull();
+    expect(holidayEvent.reportTo).toBeNull();
+    expect(holidayEvent.reportSection).toBeNull();
+  });
+
   it("titles a holiday chip with the holiday's own name, not the generic label", () => {
     // A day never has more than one holiday, so the day cell can afford to be
     // specific where absences and work entries show the category name.
@@ -205,19 +214,30 @@ describe("rawCellEvents", () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
-  it("splits an absence into the person it belongs to and its comment", () => {
-    // The popup lists the person in its own column and the comment beside it,
-    // so the two must not be pre-joined into one string.
+  it("keeps an absence comment out of the popup and carries its report target", () => {
     const cell = {
       ds: "2026-07-15",
       hol: null,
       absences: [
-        { id: 1, kind: "vacation", name: "Tina Team", comment: "Pre-booked" },
+        {
+          id: 1,
+          user_id: 17,
+          kind: "vacation",
+          name: "Tina Team",
+          start_date: "2026-07-14",
+          end_date: "2026-07-18",
+          comment: "Pre-booked",
+        },
       ],
     };
     const [absEvent] = rawCellEvents(cell, { translate });
     expect(absEvent.personName).toBe("Tina Team");
-    expect(absEvent.detail).toBe("Pre-booked");
+    expect(absEvent.detail).toBe("");
+    expect(absEvent.popupDetail).toBeNull();
+    expect(absEvent.userId).toBe(17);
+    expect(absEvent.reportFrom).toBe("2026-07-14");
+    expect(absEvent.reportTo).toBe("2026-07-18");
+    expect(absEvent.reportSection).toBe("absences");
   });
 
   it("uses DB-stored category color for absence events", () => {
@@ -316,6 +336,11 @@ describe("rawCellEvents", () => {
     expect(calendarEventTitle(workEvent)).toBe("Project");
     expect(workEvent.personName).toBe("Eve Emp");
     expect(workEvent.detail).toBe("09:00 - 10:00 (1:00)");
+    expect(workEvent.popupDetail).toBe("09:00 - 10:00 (1:00)");
+    expect(workEvent.userId).toBe(5);
+    expect(workEvent.reportFrom).toBe(ds);
+    expect(workEvent.reportTo).toBe(ds);
+    expect(workEvent.reportSection).toBe("entries");
   });
 
   it("names the viewer's own entries from the session when the user lookup is empty", () => {
@@ -382,15 +407,25 @@ describe("groupDayEvents", () => {
     title: "May Day",
     personName: null,
     detail: "May Day",
+    popupDetail: null,
+    userId: null,
+    reportFrom: null,
+    reportTo: null,
+    reportSection: null,
   };
-  const vacationEvent = (id, personName) => ({
+  const vacationEvent = (id, personName, detail = "") => ({
     key: `absence:${id}`,
     colorKey: "absence:vacation",
     color: "#1a73e8",
     label: "Vacation",
     title: "Vacation",
     personName,
-    detail: "",
+    detail,
+    popupDetail: null,
+    userId: id,
+    reportFrom: "2026-06-01",
+    reportTo: "2026-06-01",
+    reportSection: "absences",
   });
   const workEvent = (id, personName, detail) => ({
     key: `work:${id}`,
@@ -400,6 +435,11 @@ describe("groupDayEvents", () => {
     title: "Project",
     personName,
     detail,
+    popupDetail: detail,
+    userId: id,
+    reportFrom: "2026-06-01",
+    reportTo: "2026-06-01",
+    reportSection: "entries",
   });
 
   it("collapses several records of one category into a single group", () => {
@@ -453,12 +493,28 @@ describe("groupDayEvents", () => {
     ]);
   });
 
+  it("keeps absence comments out of the popup row", () => {
+    const [group] = groupDayEvents([
+      vacationEvent(1, "Tina Team", "Long absence comment"),
+    ]);
+    expect(group.items[0].primary).toBe("Tina Team");
+    expect(group.items[0].secondary).toBe("");
+  });
+
   it("gives every row a person column so the popup indentation never varies", () => {
     // Rows without a person (holidays) promote their detail into the primary
     // column instead of leaving it empty, which would shift the row's text.
     const [group] = groupDayEvents([holidayEvent]);
     expect(group.items).toEqual([
-      { key: "holiday", primary: "May Day", secondary: "" },
+      {
+        key: "holiday",
+        primary: "May Day",
+        secondary: "",
+        userId: null,
+        reportFrom: null,
+        reportTo: null,
+        reportSection: null,
+      },
     ]);
   });
 

@@ -484,6 +484,69 @@ describe("Reports", () => {
     expect(target.querySelector("#reports-user-select").value).toBe("8");
   }, 20000);
 
+  it("keeps a valid far-future absence deep link visible in the date fields", async () => {
+    currentUser.set({
+      id: 7,
+      role: "team_lead",
+      first_name: "Ada",
+      last_name: "Lead",
+      weekly_hours: 40,
+      start_date: "2020-01-01",
+      permissions: { can_view_team_reports: true },
+    });
+    mockState.users = [
+      { id: 7, first_name: "Ada", last_name: "Lead", role: "team_lead" },
+      { id: 8, first_name: "Ben", last_name: "Employee", role: "employee" },
+    ];
+    mockState.rangeReport = monthReportFixture({ user_id: 8 });
+
+    // Absences may start more than a year in the future. The range itself is
+    // still only two days, so it is a valid report deep link.
+    path.set("/reports?user=8&from=2032-07-01&to=2032-07-02");
+    component = mount(Reports, { target });
+
+    await waitFor(() =>
+      api.mock.calls.some(
+        ([p]) =>
+          p.startsWith("/absences/all?") &&
+          p.includes("from=2032-07-01") &&
+          p.includes("to=2032-07-02"),
+      ),
+    );
+    await waitFor(
+      () =>
+        target.querySelector("#reports-period-from")?.value === "2032-07-01",
+    );
+
+    expect(target.querySelector("#reports-period-to").value).toBe("2032-07-02");
+  }, 20000);
+
+  it("ignores a deep link with a calendar-invalid date", async () => {
+    currentUser.set({
+      id: 7,
+      role: "team_lead",
+      first_name: "Ada",
+      last_name: "Lead",
+      weekly_hours: 40,
+      start_date: "2020-01-01",
+      permissions: { can_view_team_reports: true },
+    });
+    mockState.users = [
+      { id: 7, first_name: "Ada", last_name: "Lead", role: "team_lead" },
+      { id: 8, first_name: "Ben", last_name: "Employee", role: "employee" },
+    ];
+
+    path.set("/reports?user=8&from=2032-02-30&to=2032-03-01");
+    component = mount(Reports, { target });
+
+    await waitFor(
+      () => target.querySelector("#reports-user-select")?.value === "7",
+    );
+    expect(api.mock.calls.some(([p]) => p.startsWith("/reports/range?"))).toBe(
+      false,
+    );
+  }, 20000);
+
   it("ignores a malformed ?user/from/to deep link (multi-century range) instead of querying it", async () => {
     // Regression test: applyDeepLink used to trust from/to straight from the
     // URL with no validation. A stray or malformed link could set an

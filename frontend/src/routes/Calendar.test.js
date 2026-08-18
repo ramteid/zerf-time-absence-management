@@ -693,7 +693,7 @@ describe("Calendar", () => {
       { label: "Holiday", rows: [{ primary: "May Day", secondary: null }] },
       {
         label: "Vacation",
-        rows: [{ primary: "Tina Team", secondary: "Long weekend" }],
+        rows: [{ primary: "Tina Team", secondary: null }],
       },
       {
         label: "Project",
@@ -710,6 +710,43 @@ describe("Calendar", () => {
       expect(row.parentElement.classList.contains("cal-popup-rows")).toBe(true);
       expect(row.querySelectorAll(".cal-popup-primary")).toHaveLength(1);
     }
+
+    const absenceGroup = [...popup.querySelectorAll(".cal-popup-group")].find(
+      (group) => group.textContent.includes("Vacation"),
+    );
+    const absenceRow = absenceGroup.querySelector(".cal-popup-row");
+    expect(absenceRow.tagName).toBe("A");
+    expect(absenceRow.title).toBe("View in report");
+    expect(absenceRow.getAttribute("href")).toBe(
+      "/reports?user=2&from=2026-05-04&to=2026-05-05#report-absences",
+    );
+    expect(absenceRow.textContent).toContain("Tina Team");
+    expect(absenceRow.textContent).not.toContain("Long weekend");
+
+    absenceRow.click();
+    await waitForPath("/reports?user=2&from=2026-05-04&to=2026-05-05");
+    expect(window.location.hash).toBe("#report-absences");
+    expect(document.querySelector(".cal-popup")).toBeNull();
+  });
+
+  it("links a time-entry row to that employee's report for the selected day", async () => {
+    component = mount(Calendar, { target });
+    await settle();
+    await waitForText(target, "Project");
+    await openDay(target, "2026-05-04");
+
+    const timeRow = document.querySelector(
+      ".cal-popup-group .cal-popup-row-link",
+    );
+    expect(timeRow.textContent).toContain("Tina Team");
+    expect(timeRow.textContent).toContain("09:00 - 11:00 (2:00)");
+    expect(timeRow.getAttribute("href")).toBe(
+      "/reports?user=2&from=2026-05-04&to=2026-05-04#report-entries",
+    );
+
+    timeRow.click();
+    await waitForPath("/reports?user=2&from=2026-05-04&to=2026-05-04");
+    expect(window.location.hash).toBe("#report-entries");
   });
 
   it("names the viewer's own entries in the popup even without a team lookup", async () => {

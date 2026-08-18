@@ -1,4 +1,5 @@
 <script>
+  import { onMount, tick } from "svelte";
   // The "Employee" tab of the Reports page: one person's balance, category
   // breakdown, entries, absences and flextime chart for the shared toolbar
   // period (month or custom range). Absorbs what used to be three separate
@@ -67,6 +68,7 @@
   export let month = "";
   export let from = "";
   export let to = "";
+  export let navigationKey = "";
 
   let today = appTodayDate();
   let todayIso = isoDate(today);
@@ -79,6 +81,11 @@
   let reportData = null;
   let loading = false;
   let activeHelp = null;
+  let entriesSection;
+  let absencesSection;
+  let reportHash = typeof window === "undefined" ? "" : window.location.hash;
+  let hashVersion = 0;
+  let lastFocusedSectionKey = "";
 
   function toggleHelp(id) {
     activeHelp = activeHelp === id ? null : id;
@@ -327,6 +334,45 @@
 
   $: syncChartWithReport(reportData);
 
+  function syncReportHash() {
+    reportHash = typeof window === "undefined" ? "" : window.location.hash;
+    hashVersion += 1;
+  }
+
+  function sectionForHash(hash) {
+    if (hash === "#report-entries") return entriesSection;
+    if (hash === "#report-absences") return absencesSection;
+    return null;
+  }
+
+  function focusLinkedSection(data, hash, version, key) {
+    const currentHash =
+      typeof window === "undefined" ? hash : window.location.hash;
+    if (
+      !data ||
+      (currentHash !== "#report-entries" && currentHash !== "#report-absences")
+    )
+      return;
+    const focusKey = `${key}:${currentHash}:${version}`;
+    if (focusKey === lastFocusedSectionKey) return;
+    lastFocusedSectionKey = focusKey;
+    tick().then(() => {
+      if (focusKey !== lastFocusedSectionKey) return;
+      const target = sectionForHash(currentHash);
+      if (!target) return;
+      target.scrollIntoView?.({ block: "start" });
+      target.focus({ preventScroll: true });
+    });
+  }
+
+  onMount(() => {
+    syncReportHash();
+    window.addEventListener("hashchange", syncReportHash);
+    return () => window.removeEventListener("hashchange", syncReportHash);
+  });
+
+  $: focusLinkedSection(reportData, reportHash, hashVersion, navigationKey);
+
   async function loadChart() {
     if (userId == null || !chartFrom || !chartTo || chartFrom > chartTo) return;
     chartLoading = true;
@@ -561,83 +607,111 @@
     {/if}
 
     {#if reportData.monthReport?.entries?.length}
-      <SectionCard title={$t("Entries")} padded={false}>
-        <DataTable>
-          <thead>
-            <tr>
-              <th>{$t("Date")}</th>
-              <th>{$t("Start")}</th>
-              <th>{$t("End")}</th>
-              <th>{$t("Duration")}</th>
-              <th>{$t("Category")}</th>
-              <th>{$t("Comment")}</th>
-              <th>{$t("Status")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each reportData.monthReport.entries as e, i (`${e.entry_date}-${e.start_time}-${e.end_time}-${i}`)}
-              <tr class:entry-rejected={e.status === "rejected"}>
-                <td class="tab-num">{fmtDate(e.entry_date)}</td>
-                <td class="tab-num">{e.start_time?.slice(0, 5)}</td>
-                <td class="tab-num">{e.end_time?.slice(0, 5)}</td>
-                <td class="tab-num">{minToHM(e.minutes || 0)}</td>
-                <td>{e.category_name ? $t(e.category_name) : "-"}</td>
-                <td>
-                  {#if e.comment}
-                    <span class="text-truncate-tooltip" title={e.comment}>
-                      {e.comment}
-                    </span>
-                  {:else}
-                    -
-                  {/if}
-                </td>
-                <td>
-                  <span class="zf-chip zf-chip-{e.status}"
-                    >{statusLabel(e.status)}</span
-                  >
-                </td>
+      <div
+        id="report-entries"
+        class="report-focus-target"
+        role="region"
+        aria-label={$t("Entries")}
+        tabindex="-1"
+        bind:this={entriesSection}
+      >
+        <SectionCard title={$t("Entries")} padded={false}>
+          <DataTable>
+            <thead>
+              <tr>
+                <th>{$t("Date")}</th>
+                <th>{$t("Start")}</th>
+                <th>{$t("End")}</th>
+                <th>{$t("Duration")}</th>
+                <th>{$t("Category")}</th>
+                <th>{$t("Comment")}</th>
+                <th>{$t("Status")}</th>
               </tr>
-            {/each}
-          </tbody>
-        </DataTable>
-      </SectionCard>
+            </thead>
+            <tbody>
+              {#each reportData.monthReport.entries as e, i (`${e.entry_date}-${e.start_time}-${e.end_time}-${i}`)}
+                <tr class:entry-rejected={e.status === "rejected"}>
+                  <td class="tab-num">{fmtDate(e.entry_date)}</td>
+                  <td class="tab-num">{e.start_time?.slice(0, 5)}</td>
+                  <td class="tab-num">{e.end_time?.slice(0, 5)}</td>
+                  <td class="tab-num">{minToHM(e.minutes || 0)}</td>
+                  <td>{e.category_name ? $t(e.category_name) : "-"}</td>
+                  <td>
+                    {#if e.comment}
+                      <span class="text-truncate-tooltip" title={e.comment}>
+                        {e.comment}
+                      </span>
+                    {:else}
+                      -
+                    {/if}
+                  </td>
+                  <td>
+                    <span class="zf-chip zf-chip-{e.status}"
+                      >{statusLabel(e.status)}</span
+                    >
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </DataTable>
+        </SectionCard>
+      </div>
     {/if}
 
     {#if reportData.absences?.length}
-      <SectionCard
-        title={$t("Absences")}
-        padded={false}
-        helpText={$t("help_absence_report")}
-        helpOpen={activeHelp === "absence"}
-        onHelpToggle={() => toggleHelp("absence")}
+      <div
+        id="report-absences"
+        class="report-focus-target"
+        role="region"
+        aria-label={$t("Absences")}
+        tabindex="-1"
+        bind:this={absencesSection}
       >
-        <DataTable>
-          <thead>
-            <tr>
-              <th>{$t("Type")}</th>
-              <th class="text-right">{$t("From")}</th>
-              <th class="text-right">{$t("To")}</th>
-              <th class="text-right">{$t("Days")}</th>
-              <th>{$t("Status")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each reportData.absences as a (a.id)}
+        <SectionCard
+          title={$t("Absences")}
+          padded={false}
+          helpText={$t("help_absence_report")}
+          helpOpen={activeHelp === "absence"}
+          onHelpToggle={() => toggleHelp("absence")}
+        >
+          <DataTable>
+            <thead>
               <tr>
-                <td>{absenceKindLabel(a.kind)}</td>
-                <td class="tab-num text-right">{fmtDate(a.start_date)}</td>
-                <td class="tab-num text-right">{fmtDate(a.end_date)}</td>
-                <td class="tab-num text-right">{formatDayCount(a.days)}</td>
-                <td>
-                  <span class="zf-chip zf-chip-{a.status}"
-                    >{statusLabel(a.status)}</span
-                  >
-                </td>
+                <th>{$t("Type")}</th>
+                <th class="text-right">{$t("From")}</th>
+                <th class="text-right">{$t("To")}</th>
+                <th class="text-right">{$t("Days")}</th>
+                <th>{$t("Comment")}</th>
+                <th>{$t("Status")}</th>
               </tr>
-            {/each}
-          </tbody>
-        </DataTable>
-      </SectionCard>
+            </thead>
+            <tbody>
+              {#each reportData.absences as a (a.id)}
+                <tr>
+                  <td>{absenceKindLabel(a.kind)}</td>
+                  <td class="tab-num text-right">{fmtDate(a.start_date)}</td>
+                  <td class="tab-num text-right">{fmtDate(a.end_date)}</td>
+                  <td class="tab-num text-right">{formatDayCount(a.days)}</td>
+                  <td>
+                    {#if a.comment}
+                      <span class="text-truncate-tooltip" title={a.comment}>
+                        {a.comment}
+                      </span>
+                    {:else}
+                      -
+                    {/if}
+                  </td>
+                  <td>
+                    <span class="zf-chip zf-chip-{a.status}"
+                      >{statusLabel(a.status)}</span
+                    >
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </DataTable>
+        </SectionCard>
+      </div>
     {/if}
 
     {#if reportData.hasFlextime}
@@ -689,6 +763,10 @@
      would otherwise stretch to the full container width. */
   .absence-stat-cards :global(.stat-card) {
     flex: 0 1 auto;
+  }
+
+  .report-focus-target {
+    scroll-margin-top: 16px;
   }
 
   .leave-account-cards {

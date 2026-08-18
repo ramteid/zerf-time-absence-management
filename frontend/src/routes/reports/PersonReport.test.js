@@ -135,6 +135,8 @@ describe("PersonReport", () => {
   let target;
   let component;
   let originalResizeObserver;
+  let originalScrollIntoView;
+  let scrollIntoView;
 
   beforeEach(() => {
     target = document.createElement("div");
@@ -147,6 +149,10 @@ describe("PersonReport", () => {
       unobserve() {}
       disconnect() {}
     };
+    originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    scrollIntoView = vi.fn();
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    history.replaceState({}, "", "/reports");
     setLanguage("en");
     settings.set({ ui_language: "en", time_format: "24h", timezone: "UTC" });
     currentUser.set({ id: 1, role: "employee", start_date: "2020-01-01" });
@@ -178,6 +184,8 @@ describe("PersonReport", () => {
       component = null;
     }
     globalThis.ResizeObserver = originalResizeObserver;
+    HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    history.replaceState({}, "", "/reports");
     target.remove();
   });
 
@@ -364,6 +372,21 @@ describe("PersonReport", () => {
     expect(target.querySelector(".zf-chip-approved")).not.toBeNull();
   });
 
+  it("scrolls and focuses the linked entries section after loading the report", async () => {
+    history.replaceState({}, "", "/reports#report-entries");
+    component = mount(PersonReport, {
+      target,
+      props: { userId: 1, users, periodMode: "month", month: "2026-06" },
+    });
+    await waitForText(target, "Development");
+    await settle();
+
+    const section = target.querySelector("#report-entries");
+    expect(section).not.toBeNull();
+    expect(document.activeElement).toBe(section);
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" });
+  });
+
   it("renders the entry comment truncated with a tooltip in the entries table", async () => {
     getMonthReport.mockResolvedValue(
       monthReportFixture({
@@ -420,6 +443,114 @@ describe("PersonReport", () => {
 
     expect(getUserAbsencesByYear).toHaveBeenCalledWith(2026);
     expect(getAbsenceReport).not.toHaveBeenCalled();
+  });
+
+  it("renders an absence comment with its full value available as a tooltip", async () => {
+    getUserAbsencesByYear.mockResolvedValue([
+      {
+        id: 5,
+        user_id: 1,
+        kind: "sick",
+        start_date: "2026-06-10",
+        end_date: "2026-06-10",
+        status: "approved",
+        comment: "Medical certificate was submitted electronically.",
+      },
+    ]);
+    component = mount(PersonReport, {
+      target,
+      props: { userId: 1, users, periodMode: "month", month: "2026-06" },
+    });
+    await waitForText(
+      target,
+      "Medical certificate was submitted electronically.",
+    );
+
+    const comment = [...target.querySelectorAll(".text-truncate-tooltip")].find(
+      (element) =>
+        element.textContent.includes(
+          "Medical certificate was submitted electronically.",
+        ),
+    );
+    expect(comment).not.toBeUndefined();
+    expect(comment.getAttribute("title")).toBe(
+      "Medical certificate was submitted electronically.",
+    );
+  });
+
+  it("scrolls and focuses the linked absences section after loading it", async () => {
+    history.replaceState({}, "", "/reports#report-absences");
+    getUserAbsencesByYear.mockResolvedValue([
+      {
+        id: 5,
+        user_id: 1,
+        kind: "sick",
+        start_date: "2026-06-10",
+        end_date: "2026-06-10",
+        status: "approved",
+        comment: "Medical certificate was submitted electronically.",
+      },
+    ]);
+    component = mount(PersonReport, {
+      target,
+      props: { userId: 1, users, periodMode: "month", month: "2026-06" },
+    });
+    await waitForText(
+      target,
+      "Medical certificate was submitted electronically.",
+    );
+    await settle();
+
+    const section = target.querySelector("#report-absences");
+    expect(section).not.toBeNull();
+    expect(document.activeElement).toBe(section);
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" });
+  });
+
+  it("follows a report fragment selected after the data has loaded", async () => {
+    getUserAbsencesByYear.mockResolvedValue([
+      {
+        id: 5,
+        user_id: 1,
+        kind: "sick",
+        start_date: "2026-06-10",
+        end_date: "2026-06-10",
+        status: "approved",
+        comment: "Medical certificate was submitted electronically.",
+      },
+    ]);
+    component = mount(PersonReport, {
+      target,
+      props: { userId: 1, users, periodMode: "month", month: "2026-06" },
+    });
+    await waitForText(
+      target,
+      "Medical certificate was submitted electronically.",
+    );
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    history.replaceState({}, "", "/reports#report-absences");
+    window.dispatchEvent(new Event("hashchange"));
+    await settle();
+
+    const section = target.querySelector("#report-absences");
+    expect(document.activeElement).toBe(section);
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" });
+  });
+
+  it("does not scroll or change focus for an unknown report fragment", async () => {
+    history.replaceState({}, "", "/reports#unknown-section");
+    component = mount(PersonReport, {
+      target,
+      props: { userId: 1, users, periodMode: "month", month: "2026-06" },
+    });
+    await waitForText(target, "Development");
+    await settle();
+
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    expect(document.activeElement).not.toBe(
+      target.querySelector("#report-entries"),
+    );
   });
 
   it("fetches another employee's absences via the team endpoint, filtered to that user", async () => {
