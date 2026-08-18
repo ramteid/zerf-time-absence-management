@@ -19,6 +19,7 @@ const TRANSLATIONS = {
   en: {
     hours_unit: "h",
     "{hours} / week": "{hours} / week",
+    "Weekly hours": "Weekly hours",
     "As of yesterday": "As of yesterday",
     help_team_report:
       "Compares target and actual hours for all active users in the selected month. For the current month, data is available including today.",

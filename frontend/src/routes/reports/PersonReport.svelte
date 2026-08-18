@@ -306,6 +306,11 @@
     {:else if reportData.monthReport}
       <div class="report-subheading report-subheading-help">
         <span>{isOwnReport ? $t("My Balance") : $t("Balance")}</span>
+        {#if selectedUser?.weekly_hours && selectedUser.weekly_hours > 0}
+          <span class="weekly-hours-tag">
+            {$t("Weekly hours")}: {formatHours(selectedUser.weekly_hours)}
+          </span>
+        {/if}
         <button
           class="zf-btn-icon-sm zf-btn-ghost help-icon"
           title={$t("help_employee_details")}
@@ -589,7 +594,14 @@
   .report-subheading-help {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .weekly-hours-tag {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 400;
   }
 
   .help-icon {

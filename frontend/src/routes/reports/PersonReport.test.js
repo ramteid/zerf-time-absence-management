@@ -117,6 +117,7 @@ const users = [
     last_name: "Employee",
     role: "employee",
     workdays_per_week: 5,
+    weekly_hours: 40,
     start_date: "2020-01-01",
   },
   {
@@ -125,6 +126,7 @@ const users = [
     last_name: "Assistant",
     role: "assistant",
     workdays_per_week: 5,
+    weekly_hours: 0,
     start_date: "2020-01-01",
   },
 ];
