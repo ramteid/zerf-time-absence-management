@@ -148,7 +148,7 @@ async fn start_date_full_workflow() {
             .await;
         assert_eq!(st, StatusCode::OK);
 
-        let rows = body.as_array().expect("overtime should be array");
+        let rows = body["rows"].as_array().expect("overtime rows array");
         // Admin was seeded with the reference date. Only the current month (or none) should appear.
         let current_month = ref_date.format("%Y-%m").to_string();
         for row in rows {
@@ -198,7 +198,7 @@ async fn start_date_full_workflow() {
             ))
             .await;
         assert_eq!(st, StatusCode::OK);
-        let rows = body.as_array().expect("overtime should be array");
+        let rows = body["rows"].as_array().expect("overtime rows array");
         assert!(!rows.is_empty(), "current year should have overtime rows");
         assert_eq!(
             rows[0]["cumulative_min"].as_i64(),

@@ -1,5 +1,9 @@
 import { api } from "../../api.js";
 import { tracksOwnTime } from "../../rolePolicy.js";
+import {
+  normalizeFlextimeResponse,
+  normalizeOvertimeResponse,
+} from "../domain/reports.js";
 
 export async function getApprovalDashboard() {
   const [
@@ -24,12 +28,17 @@ export async function getApprovalDashboard() {
   };
 }
 
-export function getFlextime({ from, to }) {
-  return api(`/reports/flextime?from=${from}&to=${to}`);
+// Both endpoints answer with `{ rows|days, balance_as_of }`. Normalizing right
+// here means every caller sees `{ days|rows, balanceAsOf }` and none of them
+// can accidentally treat the envelope as a plain array.
+export async function getFlextime({ from, to }) {
+  return normalizeFlextimeResponse(
+    await api(`/reports/flextime?from=${from}&to=${to}`),
+  );
 }
 
-export function getOvertimeSummary(year) {
-  return api(`/reports/overtime?year=${year}`);
+export async function getOvertimeSummary(year) {
+  return normalizeOvertimeResponse(await api(`/reports/overtime?year=${year}`));
 }
 
 export function getMonthSubmissionReport(month) {

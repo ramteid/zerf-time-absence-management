@@ -81,6 +81,10 @@
   let overtimeRows = [];
   let overtimeLoading = false;
   let overtimeError = "";
+  // Date the flextime balance is stated as of: the end of the last fully
+  // approved week. Shown next to the balance and above the chart so the
+  // numbers are never read as "as of today".
+  let balanceAsOf = null;
 
   // ── Month-by-month submission compliance (for all users) ─────────────────────
   let monthSubmissionChecks = [];
@@ -114,7 +118,9 @@
     }
     chartLoading = true;
     try {
-      chartData = await getFlextime({ from: chartFrom, to: chartTo });
+      const flextime = await getFlextime({ from: chartFrom, to: chartTo });
+      chartData = flextime.days;
+      balanceAsOf = flextime.balanceAsOf;
     } catch {
       chartData = [];
     } finally {
@@ -134,7 +140,9 @@
     overtimeError = "";
     try {
       const year = today.getFullYear();
-      overtimeRows = await getOvertimeSummary(year);
+      const overtime = await getOvertimeSummary(year);
+      overtimeRows = overtime.rows;
+      balanceAsOf = overtime.balanceAsOf;
     } catch (error) {
       overtimeRows = [];
       overtimeError = error?.message || "Overtime data unavailable.";
@@ -251,8 +259,6 @@
     overtimeRows.find((row) => row.month === currentMonthKey) ??
     (overtimeRows.length ? overtimeRows[overtimeRows.length - 1] : null);
   $: overtimeBalanceMin = currentOvertimeRow?.cumulative_min || 0;
-  $: submittedOvertimeBalanceMin =
-    currentOvertimeRow?.submitted_cumulative_min ?? overtimeBalanceMin;
   $: currentMonthDiffMin = currentOvertimeRow?.diff_min || 0;
 
   // ── Reactive derivations: submission compliance ───────────────────────────────
@@ -477,9 +483,9 @@
     <BalanceSection
       {isAssistantCurrentUser}
       {overtimeLoading}
-      {submittedOvertimeBalanceMin}
       {overtimeBalanceMin}
       {currentMonthDiffMin}
+      {balanceAsOf}
       {overtimeError}
       {monthSubmissionLoading}
       {allWeeksApproved}
@@ -536,6 +542,7 @@
       {todayIso}
       {chartData}
       {chartLoading}
+      {balanceAsOf}
       {activeHelp}
       onHelpToggle={toggleHelp}
       onSetRange={setRange}

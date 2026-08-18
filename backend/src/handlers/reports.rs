@@ -21,9 +21,20 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// Flextime ledger plus the date the closing balance is stated as of (the end
+/// of the user's last fully approved week). Days after that date are listed but
+/// contribute neither target nor actual minutes.
 #[derive(Serialize)]
 pub struct FlextimeResponse {
     pub days: Vec<FlextimeDay>,
+    pub balance_as_of: NaiveDate,
+}
+
+/// Monthly overtime rows plus the same cutoff date, so the dashboard tile can
+/// label its balance instead of implying it is current as of today.
+#[derive(Serialize)]
+pub struct OvertimeResponse {
+    pub rows: Vec<MonthRow>,
     pub balance_as_of: NaiveDate,
 }
 
@@ -316,24 +327,27 @@ pub async fn team(
                     0.0
                 };
 
-                let flextime_balance_min = if team_member_is_assistant {
-                    None
+                let (flextime_balance_min, flextime_balance_as_of) = if team_member_is_assistant {
+                    (None, None)
                 } else {
                     // Build the overtime rows for the selected month's year so
                     // the balance reflects the end of the selected period, not
-                    // today. For the current month, build_overtime_rows_for_year
-                    // already caps at yesterday, matching the "up to and
-                    // including yesterday" semantics. For past months the row for
-                    // query_month holds the balance at the end of that month.
-                    let overtime_rows =
+                    // today. The rows already stop contributing after the
+                    // flextime cutoff (end of the last fully approved week), so
+                    // the row for query_month holds the balance as of the
+                    // earlier of that month's end and the cutoff.
+                    let (overtime_rows, cutoff_date) =
                         build_overtime_rows_for_year(&pool, team_member.id, month_start.year())
                             .await?;
-                    Some(
-                        overtime_rows
-                            .iter()
-                            .find(|r| r.month == query_month)
-                            .map(|r| r.cumulative_min)
-                            .unwrap_or(team_member.overtime_start_balance_min),
+                    (
+                        Some(
+                            overtime_rows
+                                .iter()
+                                .find(|r| r.month == query_month)
+                                .map(|r| r.cumulative_min)
+                                .unwrap_or(team_member.overtime_start_balance_min),
+                        ),
+                        Some(month_end.min(cutoff_date)),
                     )
                 };
 
@@ -361,6 +375,7 @@ pub async fn team(
                     leave_account_usage,
                     sick_days: sick_workdays,
                     flextime_balance_min,
+                    flextime_balance_as_of,
                     weeks_all_submitted,
                 })
             })
@@ -531,7 +546,7 @@ pub async fn overtime(
     State(app_state): State<AppState>,
     requester: User,
     Query(query): Query<OvertimeQuery>,
-) -> AppResult<Json<Vec<MonthRow>>> {
+) -> AppResult<Json<OvertimeResponse>> {
     let target_user_id = query.user_id.unwrap_or(requester.id);
     assert_can_access_user(&app_state, &requester, target_user_id).await?;
     let year = match query.year {
@@ -544,9 +559,12 @@ pub async fn overtime(
         }
         None => crate::services::settings::app_current_year(&app_state.pool).await,
     };
-    Ok(Json(
-        build_overtime_rows_for_year(&app_state.pool, target_user_id, year).await?,
-    ))
+    let (rows, balance_as_of) =
+        build_overtime_rows_for_year(&app_state.pool, target_user_id, year).await?;
+    Ok(Json(OvertimeResponse {
+        rows,
+        balance_as_of,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -575,7 +593,10 @@ pub async fn flextime(
     );
     let (days, balance_as_of) =
         build_flextime_for_user(&app_state.pool, &user, query.from, query.to).await?;
-    Ok(Json(FlextimeResponse { days, balance_as_of }))
+    Ok(Json(FlextimeResponse {
+        days,
+        balance_as_of,
+    }))
 }
 
 /// Payroll report status for the dashboard tile: how far the previous month is

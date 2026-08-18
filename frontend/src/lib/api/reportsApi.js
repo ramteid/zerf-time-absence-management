@@ -1,6 +1,7 @@
 import { api } from "../../api.js";
 import { tracksOwnTime } from "../../rolePolicy.js";
 import { sortUsersByRoleThenName } from "../domain/users.js";
+import { normalizeFlextimeResponse } from "../domain/reports.js";
 
 function paramsFrom(values) {
   const params = new URLSearchParams();
@@ -32,8 +33,13 @@ export function getLeaveBalances({ userId, year }) {
   return api(`/leave-balances/${userId}?${paramsFrom({ year })}`);
 }
 
-export function getFlextimeReport({ userId, from, to }) {
-  return api(`/reports/flextime?${paramsFrom({ user_id: userId, from, to })}`);
+// Returns `{ days, balanceAsOf }` — see `normalizeFlextimeResponse`. The
+// balance stops at the end of the user's last fully approved week, which the
+// callers show next to every balance they render.
+export async function getFlextimeReport({ userId, from, to }) {
+  return normalizeFlextimeResponse(
+    await api(`/reports/flextime?${paramsFrom({ user_id: userId, from, to })}`),
+  );
 }
 
 export function getTeamReport({ month }) {

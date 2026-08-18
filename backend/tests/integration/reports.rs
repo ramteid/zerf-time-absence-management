@@ -1684,7 +1684,7 @@ async fn reports_full_workflow() {
             .await;
         assert_eq!(st, StatusCode::OK, "own overtime report");
         assert!(
-            overtime_body
+            overtime_body["rows"]
                 .as_array()
                 .unwrap()
                 .iter()
@@ -1765,7 +1765,7 @@ async fn reports_full_workflow() {
             .await;
         assert_eq!(st, StatusCode::OK, "assistant overtime request succeeds");
         assert_eq!(
-            assistant_overtime.as_array().unwrap().len(),
+            assistant_overtime["rows"].as_array().unwrap().len(),
             0,
             "assistants have no overtime rows"
         );

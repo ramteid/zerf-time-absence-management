@@ -118,6 +118,36 @@ describe("TeamReport", () => {
     expect(target.querySelectorAll(".team-report-header")).not.toHaveLength(0);
   });
 
+  it("prints the date each flextime balance is stated as of", async () => {
+    // Every balance stops at that person's last fully approved week, which is
+    // usually not the month's last day — without the date the column would
+    // invite comparing numbers that refer to different points in time.
+    getTeamReport.mockResolvedValueOnce({
+      leave_account_categories: [],
+      rows: [
+        {
+          user_id: 1,
+          name: "Alice Smith",
+          flextime_balance_min: 120,
+          flextime_balance_as_of: "2026-05-10",
+          diff_min: 30,
+          sick_days: 0,
+          leave_account_usage: [],
+          weeks_all_submitted: true,
+        },
+      ],
+    });
+    component = mount(TeamReport, {
+      target,
+      props: { users, periodMode: "month", month: "2026-05", from: "", to: "" },
+    });
+    await waitForText(target, "Alice Smith");
+
+    expect(target.querySelector(".balance-as-of")?.textContent).toContain("05");
+    // The column header no longer claims the balance is an end-of-month value.
+    expect(target.textContent).not.toContain("Flextime balance (end of month)");
+  });
+
   it("renders employee rows once the month table resolves", async () => {
     getTeamReport.mockResolvedValueOnce({
       leave_account_categories: [],
@@ -181,9 +211,7 @@ describe("TeamReport", () => {
       '[data-testid="team-leave-account-column-9"]',
     );
     expect(column).not.toBeNull();
-    const cell = target.querySelector(
-      '[data-testid="team-leave-account-1-9"]',
-    );
+    const cell = target.querySelector('[data-testid="team-leave-account-1-9"]');
     expect(cell).not.toBeNull();
     expect(cell.textContent).toContain("2");
     expect(cell.textContent).toContain("1");

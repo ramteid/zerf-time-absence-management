@@ -1,13 +1,15 @@
 <script>
   import { t, formatHours } from "../../i18n.js";
+  import { fmtDate } from "../../format.js";
   import Icon from "../../Icons.svelte";
   import StatCard from "../../lib/ui/StatCard.svelte";
 
   export let isAssistantCurrentUser = false;
   export let overtimeLoading = false;
-  export let submittedOvertimeBalanceMin = 0;
   export let overtimeBalanceMin = 0;
   export let currentMonthDiffMin = 0;
+  /// End of the last fully approved week — the date the balance is stated as of.
+  export let balanceAsOf = null;
   export let overtimeError = "";
   export let monthSubmissionLoading = false;
   export let allWeeksApproved = false;
@@ -37,23 +39,24 @@
 
   <div class="stat-cards">
     {#if !isAssistantCurrentUser}
+      <!-- Approved hours only: the balance runs to the end of the last fully
+           approved week, so the "as of" line below states which date it means. -->
       <StatCard
         label={$t("Overtime overview")}
         loading={overtimeLoading}
-        color={submittedOvertimeBalanceMin < 0
+        color={overtimeBalanceMin < 0
           ? "var(--danger-text)"
           : "var(--success-text)"}
       >
-        {formatHours((submittedOvertimeBalanceMin || 0) / 60)}
+        {formatHours((overtimeBalanceMin || 0) / 60)}
         <span slot="sub">
-          {#if submittedOvertimeBalanceMin !== overtimeBalanceMin}
-            {$t("Approved: {value}", {
-              value: formatHours((overtimeBalanceMin || 0) / 60),
-            })}
-          {:else}
-            {$t("This month: {value}", {
-              value: formatHours((currentMonthDiffMin || 0) / 60),
-            })}
+          {$t("This month: {value}", {
+            value: formatHours((currentMonthDiffMin || 0) / 60),
+          })}
+          {#if balanceAsOf}
+            <span class="balance-as-of"
+              >{$t("As of {date}", { date: fmtDate(balanceAsOf) })}</span
+            >
           {/if}
         </span>
       </StatCard>
@@ -91,6 +94,12 @@
 </div>
 
 <style>
+  /* Second line inside the tile's sub slot: the date the balance refers to. */
+  .balance-as-of {
+    display: block;
+    color: var(--text-tertiary);
+  }
+
   .stat-note {
     color: var(--text-tertiary);
     font-size: 0.75rem;

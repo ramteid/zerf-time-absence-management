@@ -7,8 +7,8 @@ import { setLanguage } from "../i18n.js";
 
 const mockState = vi.hoisted(() => ({
   monthReport: null,
-  overtimeRows: [],
-  flextimeRows: [],
+  overtimeResponse: { rows: [], balance_as_of: null },
+  flextimeResponse: { days: [], balance_as_of: null },
   payrollStatus: {
     enabled: true,
     period: "2026-07",
@@ -38,8 +38,10 @@ vi.mock("../confirm.js", () => ({
 vi.mock("../api.js", () => ({
   api: vi.fn(async (urlPath) => {
     if (urlPath.startsWith("/reports/month?")) return mockState.monthReport;
-    if (urlPath.startsWith("/reports/overtime?")) return mockState.overtimeRows;
-    if (urlPath.startsWith("/reports/flextime?")) return mockState.flextimeRows;
+    if (urlPath.startsWith("/reports/overtime?"))
+      return mockState.overtimeResponse;
+    if (urlPath.startsWith("/reports/flextime?"))
+      return mockState.flextimeResponse;
     // Approver-only endpoints, reached when can_approve is set below.
     if (urlPath === "/reports/payroll-status") return mockState.payrollStatus;
     if (urlPath.startsWith("/time-entries/all")) return [];
@@ -97,10 +99,11 @@ describe("Dashboard", () => {
     ]);
     setLanguage("en");
     mockState.monthReport = null;
-    mockState.overtimeRows = [
-      { month: "2026-05", cumulative_min: 0, diff_min: 0 },
-    ];
-    mockState.flextimeRows = [];
+    mockState.overtimeResponse = {
+      rows: [{ month: "2026-05", cumulative_min: 0, diff_min: 0 }],
+      balance_as_of: "2026-05-10",
+    };
+    mockState.flextimeResponse = { days: [], balance_as_of: "2026-05-10" };
   });
 
   afterEach(() => {
@@ -280,6 +283,28 @@ describe("Dashboard", () => {
     );
     expect(overtimeCall).toBeTruthy();
     expect(overtimeCall[0]).toMatch(/^\/reports\/overtime\?year=\d{4}$/);
+  });
+
+  it("shows the approved balance with the date it is stated as of", async () => {
+    // The tile no longer mixes in submitted-but-unapproved hours, so the
+    // number is only meaningful together with its cutoff date.
+    mockState.monthReport = {
+      month: "2026-05",
+      days: [],
+      weeks_all_submitted: true,
+    };
+    mockState.overtimeResponse = {
+      rows: [{ month: "2026-05", cumulative_min: 120, diff_min: 30 }],
+      balance_as_of: "2026-05-10",
+    };
+
+    component = mount(Dashboard, { target });
+    await waitForText(target, "As of");
+
+    expect(target.textContent).toContain("2.00h");
+    expect(target.textContent).toContain("This month: 0.50h");
+    // The removed "Approved: X" subtext must not come back.
+    expect(target.textContent).not.toContain("Approved:");
   });
 
   describe("pure-admin (tracks_time=false)", () => {

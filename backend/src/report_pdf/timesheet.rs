@@ -240,6 +240,19 @@ fn render_section(
             &format_signed_minutes(closing_balance),
             DURATION_COLUMN,
         );
+        // Name the date the closing balance refers to. The balance stops at the
+        // end of the user's last fully approved week, which can be days or
+        // weeks before the report's end date — without this line the number
+        // would silently read as "as of the end of the report".
+        if let Some(cutoff) = section.flextime_balance_as_of {
+            let as_of = section
+                .flextime_data
+                .last()
+                .map(|day| day.date.min(cutoff))
+                .unwrap_or(cutoff);
+            let label = i18n::translate(renderer.language, "pdf_flextime_as_of", &[]);
+            renderer.draw_summary_row(&label, &as_of.to_string(), DURATION_COLUMN);
+        }
     }
 }
 

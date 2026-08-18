@@ -1,15 +1,18 @@
 <script>
-  import { currentUser } from "../../stores.js";
   import { t } from "../../i18n.js";
+  import { fmtDate } from "../../format.js";
   import Icon from "../../Icons.svelte";
   import FlextimeChart from "../../FlextimeChart.svelte";
-  import DatePicker from "../../DatePicker.svelte";
+  import FlextimeRangeControls from "./FlextimeRangeControls.svelte";
 
   export let chartFrom;
   export let chartTo;
   export let todayIso;
   export let chartData = [];
   export let chartLoading = false;
+  /// End of the last fully approved week — everything after it is flat in the
+  /// chart, so the date is spelled out above it.
+  export let balanceAsOf = null;
   export let activeHelp = null;
   export let onHelpToggle = () => {};
   export let onSetRange = () => {};
@@ -30,49 +33,19 @@
       </button>
     </div>
 
-    <div class="flextime-controls">
-      <div class="flextime-ranges">
-        <button class="zf-btn zf-btn-sm" on:click={() => onSetRange(30)}
-          >{$t("Last 30 days")}</button
-        >
-        <button class="zf-btn zf-btn-sm" on:click={() => onSetRange(90)}
-          >{$t("Last 90 days")}</button
-        >
-        <button class="zf-btn zf-btn-sm" on:click={() => onSetRange(182)}
-          >{$t("Last 6 months")}</button
-        >
-        <button class="zf-btn zf-btn-sm" on:click={() => onSetRange(365)}
-          >{$t("Last year")}</button
-        >
-      </div>
-      <div class="flextime-date-range">
-        <span class="flextime-date-picker">
-          <DatePicker
-            bind:value={chartFrom}
-            min={$currentUser?.start_date}
-            max={chartTo}
-            class="zf-input range-select"
-          />
-        </span>
-        <span class="flextime-date-separator">-</span>
-        <span class="flextime-date-picker">
-          <DatePicker
-            bind:value={chartTo}
-            min={chartFrom}
-            max={todayIso}
-            class="zf-input range-select"
-          />
-        </span>
-        <button
-          class="zf-btn zf-btn-sm"
-          on:click={onLoadChart}
-          aria-label={$t("Show")}
-        >
-          <Icon name="Search" size={13} />
-        </button>
-      </div>
-    </div>
+    <FlextimeRangeControls
+      bind:from={chartFrom}
+      bind:to={chartTo}
+      {todayIso}
+      {onSetRange}
+      onLoad={onLoadChart}
+    />
   </div>
+  {#if balanceAsOf}
+    <div class="flextime-as-of">
+      {$t("As of {date}", { date: fmtDate(balanceAsOf) })}
+    </div>
+  {/if}
   {#if activeHelp === "flextime"}
     <div class="flextime-help">
       {$t("help_flextime_chart")}
@@ -95,17 +68,6 @@
 </div>
 
 <style>
-  /* Compact date inputs for choosing the chart range. They keep the shared
-     `.zf-input` styling (border, surface background, light/dark theming and
-     width: 100%) and only shrink the height and type scale to align with the
-     range/search buttons next to them. The `.zf-input.range-select` compound
-     outweighs both the base `.zf-input` rule and DatePicker's
-     `.date-picker-wrap :global(.zf-input)`, so these overrides always win. */
-  .flextime-date-picker :global(.zf-input.range-select) {
-    height: 28px;
-    font-size: 0.84375rem;
-  }
-
   .flextime-section {
     padding: 16px 20px;
     margin-top: 16px;
@@ -134,39 +96,10 @@
     min-width: 0;
   }
 
-  .flextime-controls {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 8px;
-    flex: 0 1 auto;
-    flex-wrap: wrap;
-    min-width: 0;
-  }
-
-  .flextime-ranges,
-  .flextime-date-range {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    /* flex: 0 1 auto allows the row to shrink when the tile is narrow;
-       min-width: 0 prevents flex children from overflowing their container. */
-    flex: 0 1 auto;
-    min-width: 0;
-  }
-
-  .flextime-date-picker {
-    display: block;
-    /* flex-shrink: 1 allows the picker to shrink below 126px when the tile
-       is too narrow, preventing overflow beyond the card boundary. */
-    flex: 0 1 126px;
-    width: 126px;
-    min-width: 80px;
-  }
-
-  .flextime-date-separator {
+  .flextime-as-of {
     font-size: 0.8125rem;
     color: var(--text-tertiary);
+    margin-bottom: 10px;
   }
 
   .flextime-help {
@@ -208,33 +141,13 @@
     pointer-events: none;
   }
 
-  @media (max-width: 1024px) {
-    .flextime-controls {
-      width: 100%;
-      justify-content: flex-start;
-    }
-
-    .flextime-ranges,
-    .flextime-date-range {
-      flex-wrap: wrap;
-    }
-  }
-
   @media (max-width: 640px) {
     .flextime-section {
       padding: 14px;
     }
 
-    .flextime-title-group,
-    .flextime-controls,
-    .flextime-ranges,
-    .flextime-date-range {
+    .flextime-title-group {
       width: 100%;
-    }
-
-    .flextime-date-picker {
-      flex: 1 1 126px;
-      width: auto;
     }
   }
 </style>

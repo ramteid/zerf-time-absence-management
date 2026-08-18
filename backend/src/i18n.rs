@@ -193,6 +193,7 @@ static LANGUAGES: &[LangDef] = &[
             ("pdf_total", "Total (approved)"),
             ("pdf_flextime_opening_balance", "Flextime opening balance"),
             ("pdf_flextime_closing_balance", "Flextime closing balance"),
+            ("pdf_flextime_as_of", "Flextime balance as of"),
             // Short status labels for individual time-entry rows. These appear
             // in the Status column so readers can reconcile per-row Duration
             // values against the Total row, which counts only approved,
@@ -370,6 +371,7 @@ static LANGUAGES: &[LangDef] = &[
             ("pdf_total", "Gesamt (genehmigt)"),
             ("pdf_flextime_opening_balance", "Gleitzeitkontostand Anfang"),
             ("pdf_flextime_closing_balance", "Gleitzeitkontostand Ende"),
+            ("pdf_flextime_as_of", "Gleitzeitkontostand per"),
             ("pdf_status_draft",       "Entwurf"),
             ("pdf_status_submitted",   "Eingereicht"),
             ("pdf_status_approved",    "Genehmigt"),

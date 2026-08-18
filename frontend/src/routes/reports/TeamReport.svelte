@@ -272,7 +272,9 @@
         <thead>
           <tr>
             <th class="col-employee team-report-header">{$t("Employee")}</th>
-            <th class="text-right team-report-header">{$t("Flextime balance (end of month)")}</th>
+            <th class="text-right team-report-header"
+              >{$t("Flextime balance")}</th
+            >
             <th class="text-right team-report-header">{$t("Monthly diff")}</th>
             <th class="text-right team-report-header">{$t("Sick days")}</th>
             {#each teamLeaveAccountColumns as col (col.category_id)}
@@ -287,70 +289,79 @@
                 </span>
               </th>
             {/each}
-            <th class="text-center team-report-header">{$t("All weeks submitted")}</th>
+            <th class="text-center team-report-header"
+              >{$t("All weeks submitted")}</th
+            >
           </tr>
         </thead>
-      <tbody>
-        {#each sortedTeamReport as r (r.user_id)}
-          <tr>
-            <td class="fw-500">{r.name}</td>
-            <td
-              class="tab-num text-right fw-500"
-              style:color={r.flextime_balance_min == null
-                ? "var(--text-tertiary)"
-                : r.flextime_balance_min < 0
-                  ? "var(--danger-text)"
-                  : "var(--success-text)"}
-            >
-              {#if r.flextime_balance_min == null}
-                -
-              {:else}
-                {r.flextime_balance_min >= 0 ? "+" : ""}{minToHM(
-                  r.flextime_balance_min,
-                )}
-              {/if}
-            </td>
-            <td
-              class="tab-num text-right"
-              style:color={r.diff_min == null
-                ? "var(--text-tertiary)"
-                : r.diff_min < 0
-                  ? "var(--danger-text)"
-                  : "var(--success-text)"}
-            >
-              {#if r.diff_min == null}
-                -
-              {:else}
-                {r.diff_min >= 0 ? "+" : ""}{minToHM(r.diff_min)}
-              {/if}
-            </td>
-            <td class="tab-num text-right text-tertiary">
-              {r.sick_days > 0
-                ? fmtDecimal(r.sick_days, r.sick_days % 1 === 0 ? 0 : 1)
-                : "-"}
-            </td>
-            {#each teamLeaveAccountColumns as col (col.category_id)}
-              {@const usage = leaveAccountUsage(r, col.category_id)}
+        <tbody>
+          {#each sortedTeamReport as r (r.user_id)}
+            <tr>
+              <td class="fw-500">{r.name}</td>
               <td
-                class="tab-num text-right text-tertiary"
-                data-testid={`team-leave-account-${r.user_id}-${col.category_id}`}
-                title={`${$t("Taken")}: ${formatDayCount(usage.taken_days)} · ${$t("Approved planned")}: ${formatDayCount(usage.planned_days)}`}
+                class="tab-num text-right fw-500"
+                style:color={r.flextime_balance_min == null
+                  ? "var(--text-tertiary)"
+                  : r.flextime_balance_min < 0
+                    ? "var(--danger-text)"
+                    : "var(--success-text)"}
               >
-                {usage.taken_days > 0 || usage.planned_days > 0
-                  ? `${formatDayCount(usage.taken_days)} / ${formatDayCount(usage.planned_days)}`
+                {#if r.flextime_balance_min == null}
+                  -
+                {:else}
+                  {r.flextime_balance_min >= 0 ? "+" : ""}{minToHM(
+                    r.flextime_balance_min,
+                  )}
+                  <!-- The balance stops at the end of this person's last fully
+                     approved week, which is rarely the month's last day. -->
+                  {#if r.flextime_balance_as_of}
+                    <span class="balance-as-of"
+                      >{fmtDate(r.flextime_balance_as_of)}</span
+                    >
+                  {/if}
+                {/if}
+              </td>
+              <td
+                class="tab-num text-right"
+                style:color={r.diff_min == null
+                  ? "var(--text-tertiary)"
+                  : r.diff_min < 0
+                    ? "var(--danger-text)"
+                    : "var(--success-text)"}
+              >
+                {#if r.diff_min == null}
+                  -
+                {:else}
+                  {r.diff_min >= 0 ? "+" : ""}{minToHM(r.diff_min)}
+                {/if}
+              </td>
+              <td class="tab-num text-right text-tertiary">
+                {r.sick_days > 0
+                  ? fmtDecimal(r.sick_days, r.sick_days % 1 === 0 ? 0 : 1)
                   : "-"}
               </td>
-            {/each}
-            <td class="text-center">
-              {#if r.weeks_all_submitted}
-                <span class="text-success">{$t("Yes")}</span>
-              {:else}
-                <span class="text-danger">{$t("No")}</span>
-              {/if}
-            </td>
-          </tr>
-        {/each}
-      </tbody>
+              {#each teamLeaveAccountColumns as col (col.category_id)}
+                {@const usage = leaveAccountUsage(r, col.category_id)}
+                <td
+                  class="tab-num text-right text-tertiary"
+                  data-testid={`team-leave-account-${r.user_id}-${col.category_id}`}
+                  title={`${$t("Taken")}: ${formatDayCount(usage.taken_days)} · ${$t("Approved planned")}: ${formatDayCount(usage.planned_days)}`}
+                >
+                  {usage.taken_days > 0 || usage.planned_days > 0
+                    ? `${formatDayCount(usage.taken_days)} / ${formatDayCount(usage.planned_days)}`
+                    : "-"}
+                </td>
+              {/each}
+              <td class="text-center">
+                {#if r.weeks_all_submitted}
+                  <span class="text-success">{$t("Yes")}</span>
+                {:else}
+                  <span class="text-danger">{$t("No")}</span>
+                {/if}
+              </td>
+            </tr>
+          {/each}
+        </tbody>
       </DataTable>
     </div>
   {/if}
@@ -481,6 +492,14 @@
 </SectionCard>
 
 <style>
+  /* Date under a flextime balance: which day the number is stated as of. */
+  .balance-as-of {
+    display: block;
+    font-size: 0.8125rem;
+    font-weight: 400;
+    color: var(--text-tertiary);
+  }
+
   .team-report-table {
     width: 100%;
   }

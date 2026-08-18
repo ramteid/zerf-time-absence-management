@@ -475,13 +475,18 @@ Flextime (positive or negative balance) is calculated as:
 
 Only **crediting entries** count as actual work hours in this calculation. Non-crediting entries are recorded and approved like all others, but they do not contribute to your flextime.
 
-**The flextime balance is calculated up to and including yesterday — today's
-hours are not yet counted toward the balance.** This applies everywhere the
-balance is shown (dashboard, reports, team overview, balance chart, exports)
-and regardless of whether the days are inside a submitted or approved week.
-Today's hours still appear in your time entries, the monthly logged-hours
-tile, and category breakdowns; they only stop short of contributing to the
-running balance until tomorrow.
+**The flextime balance runs up to the end of your last fully approved week.**
+A week counts once every workday in it is either approved, a public holiday, or
+covered by an approved absence — and nothing in that week is still waiting for
+approval. Everything after that date is left out of the balance: those days add
+neither hours nor targets, so a week you have not booked or submitted yet can
+never pull your balance down.
+
+Wherever a balance is shown (dashboard, reports, team overview, balance chart,
+CSV and PDF exports) the date it refers to is shown right next to it, as
+"As of <date>". Hours from days after that date still appear in your time
+entries, the monthly logged-hours tile, and category breakdowns — they simply
+do not move the balance until the week they belong to is approved.
 
 Users with role `assistant` do not have a flextime account. This behavior is
 role-based (not inferred from weekly hours). For assistants, flextime and
@@ -511,11 +516,11 @@ Example: If you work 40 hours per week over 5 days, your daily target is 8 hours
 ### What counts toward flextime actuals
 
 - **Approved crediting entries:** hours count fully.
-- **Submitted crediting entries:** hours do NOT count in the official flextime actuals, but they are included in the Overtime overview tile balance as a projected total (see note below).
+- **Submitted crediting entries:** hours do NOT count — they count once the week is approved.
 - **Draft crediting entries:** hours do NOT count.
 - **Non-crediting entries (all statuses):** hours do NOT count, regardless of approval status.
 
-**Overtime overview tile:** The balance shown in the `Overtime overview` tile on the dashboard includes both approved and submitted (pending approval) crediting hours filed up to and including yesterday. This gives you a projected total reflecting everything you have filed so far (today's hours are still excluded — see above). If there are no pending approvals, the displayed value equals the official approved balance. When submitted hours are pending, the sub-text shows the approved-only balance for reference.
+**Overtime overview tile:** The `Overtime overview` tile on the dashboard shows the approved balance only, with the date it is stated as of underneath. Hours you have filed but that are not approved yet are not part of that number; they are added when your approver approves the week.
 
 Example flextime scenario:
 
@@ -929,13 +934,14 @@ Zerf distinguishes between workflow coverage and work-credit math.
 	relevant status rules (for example approved for actuals).
 - Non-crediting entries remain visible in workflow but do not inflate worked
 	hour balances.
-- The flextime balance is always calculated up to and including yesterday;
-	today is excluded everywhere the balance is displayed (dashboard, reports,
-	team overview, balance chart, CSV/PDF exports).
+- The flextime balance always runs up to the end of the last fully approved
+	week. That date is shown next to the balance everywhere it appears
+	(dashboard, reports, team overview, balance chart, CSV/PDF exports), so two
+	people's balances can be read for the date each one actually refers to.
 - Flextime balance charts mark absences, public holidays, and weekends with
 	colored background bars so non-working days are visible in the timeline.
-	Today's data point is included on the chart axis but contributes zero to
-	the running balance until tomorrow.
+	Days after the balance date are still drawn on the axis, but they add
+	nothing, so the curve runs flat there.
 
 ### Category breakdown reports
 
@@ -991,13 +997,15 @@ Because approved absence sets target to `0`, and recorded work still counts as a
 
 Current week is excluded. Missing status is based on incomplete past full weeks.
 
-### Why don't the hours I booked today change my flextime balance?
+### Why don't the hours I booked this week change my flextime balance?
 
-The flextime balance is intentionally calculated up to and including yesterday
-only. Today's hours move the balance starting tomorrow. This avoids a balance
-that shifts up and down during the day as hours are logged. Your today entries
-still appear in the time entry list and in the monthly logged-hours tile;
-they simply do not contribute to the balance yet.
+The balance only counts weeks your approver has already approved. Hours in the
+current week — and in any earlier week still waiting for approval — are not in
+it yet; they are added as soon as that week is approved. The upside is that a
+week you have not booked yet does not count against you either: the balance
+simply stops at the date shown under it instead of showing a deficit for days
+nobody has looked at yet. Your entries still appear in the time entry list and
+in the monthly logged-hours tile the whole time.
 
 ---
 

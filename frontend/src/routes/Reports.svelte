@@ -198,17 +198,18 @@
         exportError = $t("future_period_no_time_data");
         return;
       }
-      const [report, flextimeData] = await Promise.all([
+      const [report, flextime] = await Promise.all([
         getRangeReport({ userId: selectedUserId, from: qFrom, to: qTo }),
         getFlextimeReport({
           userId: selectedUserId,
           from: qFrom,
           to: qTo,
-        }).catch(() => []),
+        }).catch(() => ({ days: [], balanceAsOf: null })),
       ]);
       const csvText = buildTimesheetCsv({
         report,
-        flextimeData,
+        flextimeData: flextime.days,
+        balanceAsOf: flextime.balanceAsOf,
         translate: $t,
       });
       downloadBlob(

@@ -20,7 +20,7 @@ const TRANSLATIONS = {
     hours_unit: "h",
     "{hours} / week": "{hours} / week",
     "Weekly hours": "Weekly hours",
-    "As of yesterday": "As of yesterday",
+    "As of {date}": "As of {date}",
     help_team_report:
       "Compares target and actual hours for all active users in the selected month. For the current month, data is available including today.",
     help_category_breakdown:
@@ -32,9 +32,9 @@ const TRANSLATIONS = {
     help_employee_details:
       "View detailed information about a user including balance and statistics.",
     help_my_balance:
-      "Overview of your current flextime balance and submission status. The balance is calculated up to and including yesterday; today's hours are not yet counted. The overtime overview also factors in submitted hours pending approval.",
+      "Overview of your current flextime balance and submission status. The balance counts approved hours only and runs up to the end of your last fully approved week — the date shown below it. Hours from weeks that are still open or awaiting approval are not included yet.",
     help_flextime_chart:
-      "Your cumulative flextime balance over the selected period. The balance is calculated up to and including yesterday; today's hours are not yet counted.",
+      "Your cumulative flextime balance over the selected period. It counts approved hours only and runs up to the end of your last fully approved week, so the curve stays flat after that date.",
     "Show explanation": "Show explanation",
     label_cost_type_none: "Uses nothing (no vacation, no flextime)",
     help_cost_type_none:
@@ -50,7 +50,8 @@ const TRANSLATIONS = {
     label_unpaid: "Unpaid (reduces salary)",
     help_unpaid:
       "Only available when the category uses nothing: marks days in this category as unpaid, so they reduce the salary payout. Leave unchecked for paid days off that happen to use neither vacation nor flextime, such as special leave or paid training — those don't affect pay and must not appear in the monthly payroll report. Sick leave is always included in the payroll report regardless of this setting, since it needs separate handling for health-insurance reimbursement.",
-    label_medical_certificate_relevant: "Counts toward the medical certificate (eAU) threshold",
+    label_medical_certificate_relevant:
+      "Counts toward the medical certificate (eAU) threshold",
     help_medical_certificate_relevant:
       "Absences in this category count toward the consecutive-sick-days threshold configured under Admin Settings. Once a continuous illness period reaches that threshold, affected requests are marked as requiring an electronic certificate of incapacity for work (eAU). Independent of the other options above — a category can behave like sick leave without this, or vice versa.",
     medical_certificate_chain_days_hint:
@@ -101,7 +102,6 @@ const TRANSLATIONS = {
     "All submitted": "All submitted",
     "All submitted and approved": "All submitted and approved",
     "All submitted (approvals pending)": "All submitted (approvals pending)",
-    "Approved: {value}": "Approved: {value}",
     "Weeks missing": "Weeks missing",
     "Current week: still open": "Current week: still open",
     "Current week: draft": "Current week: draft",
@@ -278,14 +278,12 @@ const TRANSLATIONS = {
       "The team overview table is only available in month view.",
     report_range_too_long:
       "The selected period is too long. Please choose a range of one year or less.",
-    "Flextime balance (end of month)": "Flextime balance (end of month)",
+    "Flextime balance as of": "Flextime balance as of",
     "Monthly diff": "Monthly diff",
     Weekend: "Weekend",
     Weekends: "Weekends",
     "Sick days": "Sick days",
     "All weeks submitted": "All weeks submitted",
-    "Note: current month - data up to yesterday":
-      "Note: current month - data including today",
     // Dashboard request detail labels
     Approval: "Approval",
     Change: "Change",
@@ -756,14 +754,14 @@ const TRANSLATIONS = {
     label_cost_type_vacation: "Verwendet ein Tageskonto",
     label_cost_type_flextime: "Verbraucht Gleitzeitstunden",
     label_unpaid: "Unbezahlt (mindert das Gehalt)",
-    label_medical_certificate_relevant:
-      "Zählt für die eAU-Pflicht-Berechnung",
+    label_medical_certificate_relevant: "Zählt für die eAU-Pflicht-Berechnung",
     medical_certificate_chain_days_hint:
       "Durchgehender Krankheitszeitraum: {days} Tag(e). Ab {threshold} Tag(en) ist eine eAU erforderlich.",
     medical_certificate_required_warning_title: "Bitte eAU einholen",
     medical_certificate_required_warning_body:
       "Ihr durchgehender Krankheitszeitraum hat {days} Tag(e) erreicht. Bitte lassen Sie sich von Ihrer Ärztin oder Ihrem Arzt eine elektronische Arbeitsunfähigkeitsbescheinigung (eAU) ausstellen und informieren Sie Ihren Arbeitgeber.",
-    "Medical certificate (AU)": "Elektronische Arbeitsunfähigkeitsbescheinigung (eAU)",
+    "Medical certificate (AU)":
+      "Elektronische Arbeitsunfähigkeitsbescheinigung (eAU)",
     "Consecutive sick days before a certificate is required":
       "Durchgehende Krankheitstage, ab denen eine eAU erforderlich ist",
     "Applies only to absence categories marked accordingly under Categories. Counts consecutive calendar days, bridging weekends and public holidays.":
@@ -1179,7 +1177,7 @@ const TRANSLATIONS = {
     "Public holiday": "Feiertag",
     Absent: "Abwesend",
     // Reports help tooltips
-    "As of yesterday": "Stand gestern",
+    "As of {date}": "Stand: {date}",
     help_team_report:
       "Vergleicht Soll- und Ist-Stunden aller aktiven Benutzer für den gewählten Monat. Für den laufenden Monat sind Daten inklusive heute verfügbar.",
     help_category_breakdown:
@@ -1191,9 +1189,9 @@ const TRANSLATIONS = {
     help_employee_details:
       "Zeigt detaillierte Informationen über einen Mitarbeiter einschließlich Saldo und Statistiken.",
     help_my_balance:
-      "Überblick über deinen aktuellen Gleitzeitstand und den Einreichungen. Der Gleitzeitstand wird bis einschließlich gestern berechnet; die heute geleisteten Stunden werden noch nicht mitgezählt. Die Überstundenübersicht berücksichtigt zusätzlich eingereichte, noch ausstehende Stunden.",
+      "Überblick über deinen aktuellen Gleitzeitstand und deine Einreichungen. Der Gleitzeitstand zählt nur genehmigte Stunden und reicht bis zum Ende deiner letzten vollständig genehmigten Woche — das Datum steht darunter. Stunden aus Wochen, die noch offen oder noch nicht genehmigt sind, sind noch nicht enthalten.",
     help_flextime_chart:
-      "Verlauf deines kumulierten Gleitzeitkontostands über den gewählten Zeitraum. Der Gleitzeitstand wird bis einschließlich gestern berechnet; die heute geleisteten Stunden werden noch nicht mitgezählt.",
+      "Verlauf deines kumulierten Gleitzeitkontostands über den gewählten Zeitraum. Gezählt werden nur genehmigte Stunden bis zum Ende deiner letzten vollständig genehmigten Woche — danach verläuft die Kurve flach.",
     "Show explanation": "Erklärung anzeigen",
     help_cost_type_none:
       "Der Tag ist entschuldigt: Es muss keine Zeit erfasst werden, das Arbeitssoll für den Tag entfällt. Es wird weder ein Tageskonto noch Gleitzeit verbraucht — die Stunden müssen also nicht nachgearbeitet werden. Wird an einem solchen Tag trotzdem Zeit gebucht (möglich bei Kategorien mit automatischer Genehmigung, z. B. vormittags gearbeitet, mittags krankgemeldet), zählen diese Stunden voll als Plus auf dem Gleitzeitkonto. Ob der Tag bezahlt wird, entscheidet die Lohnabrechnung und nicht die Anwendung: Fortbildung ist normalerweise bezahlt, unbezahlter Urlaub nicht.",
@@ -1216,7 +1214,6 @@ const TRANSLATIONS = {
     "All submitted and approved": "Alles eingereicht und genehmigt",
     "All submitted (approvals pending)":
       "Alles eingereicht (Genehmigungen ausstehend)",
-    "Approved: {value}": "Genehmigt: {value}",
     "Weeks missing": "Wochen fehlen",
     "Current week: still open": "Aktuelle Woche: noch offen",
     "Current week: draft": "Aktuelle Woche: Entwurf",
@@ -1378,12 +1375,10 @@ const TRANSLATIONS = {
       "Die Teamübersichtstabelle ist nur in der Monatsansicht verfügbar.",
     report_range_too_long:
       "Der gewählte Zeitraum ist zu lang. Bitte wählen Sie einen Zeitraum von einem Jahr oder weniger.",
-    "Flextime balance (end of month)": "Gleitzeitkontostand (Monatsende)",
+    "Flextime balance as of": "Gleitzeitkontostand per",
     "Monthly diff": "Monatsdifferenz",
     "Sick days": "Krankheitstage",
     "All weeks submitted": "Alle Wochen eingereicht",
-    "Note: current month - data up to yesterday":
-      "Hinweis: Laufender Monat - Daten inklusive heute",
     // Dashboard request detail labels
     Approval: "Genehmigung",
     Change: "Änderung",

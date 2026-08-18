@@ -148,6 +148,49 @@ describe("buildTimesheetCsv", () => {
     expect(csv).toContain("+2:30");
   });
 
+  it("adds the balance cutoff row, capped at the last ledger day", () => {
+    // The closing balance stops at the last fully approved week; the export
+    // must say so instead of letting the number read as "end of range".
+    const csv = buildTimesheetCsv({
+      report: baseReport,
+      flextimeData: [
+        { date: "2026-05-04", cumulative_min: 100, diff_min: 20 },
+        { date: "2026-05-05", cumulative_min: 150, diff_min: 50 },
+      ],
+      balanceAsOf: "2026-05-03",
+      translate,
+    });
+    expect(csv).toContain("Flextime balance as of");
+    expect(csv).toContain("2026-05-03");
+  });
+
+  it("caps the balance cutoff row at the exported range's last day", () => {
+    // A cutoff after the exported range would otherwise name a date the
+    // document says nothing about.
+    const csv = buildTimesheetCsv({
+      report: baseReport,
+      flextimeData: [
+        { date: "2026-05-04", cumulative_min: 100, diff_min: 20 },
+        { date: "2026-05-05", cumulative_min: 150, diff_min: 50 },
+      ],
+      balanceAsOf: "2026-06-30",
+      translate,
+    });
+    expect(csv).toContain("Flextime balance as of");
+    expect(csv).toContain("2026-05-05");
+    expect(csv).not.toContain("2026-06-30");
+  });
+
+  it("omits the cutoff row when there is no flextime data", () => {
+    const csv = buildTimesheetCsv({
+      report: baseReport,
+      flextimeData: [],
+      balanceAsOf: "2026-05-03",
+      translate,
+    });
+    expect(csv).not.toContain("Flextime balance as of");
+  });
+
   it("guards absence cells against formula injection", () => {
     // absenceKindLabel falls back to the raw slug when it isn't a known
     // absence category — "=cmd" round-trips unchanged and must be csvSafe'd.

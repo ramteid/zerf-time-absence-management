@@ -190,10 +190,15 @@ impl ReportDb {
         Ok(rows.into_iter().map(|(d,)| d).collect())
     }
 
-    /// Dates with at least one entry whose status is anything other than
-    /// `'approved'` (draft, submitted, or rejected). Any such date blocks its
-    /// week from counting as "fully approved" for the flextime balance cutoff,
-    /// even if every required day already has an approved entry alongside it.
+    /// Dates with at least one entry that is not settled: draft, submitted, or
+    /// a rejection nobody has corrected yet. Any such date blocks its week from
+    /// counting as "fully approved" for the flextime balance cutoff, even if
+    /// every required day already has an approved entry alongside it.
+    ///
+    /// Rejections that an approved correction already closed
+    /// (`rejection_resolved_at IS NOT NULL`) are pure history — same rule as
+    /// `INCOMPLETE_TIME_ENTRY_CONDITION`. Counting them would freeze the cutoff
+    /// forever on the week of any rejection that was later fixed.
     pub async fn unapproved_entry_dates_in_range(
         &self,
         user_id: i64,
@@ -202,7 +207,8 @@ impl ReportDb {
     ) -> AppResult<HashSet<NaiveDate>> {
         let rows: Vec<(NaiveDate,)> = sqlx::query_as(
             "SELECT DISTINCT entry_date FROM time_entries \
-             WHERE user_id=$1 AND status != 'approved' \
+             WHERE user_id=$1 AND status <> 'approved' \
+             AND (status <> 'rejected' OR rejection_resolved_at IS NULL) \
              AND entry_date BETWEEN $2 AND $3",
         )
         .bind(user_id)

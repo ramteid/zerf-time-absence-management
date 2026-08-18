@@ -695,6 +695,12 @@ pub async fn carryover_remaining_days(input: CarryoverRemainingInput<'_>) -> App
 ///
 /// `exclude_id` excludes the absence being edited/approved from (2) so it is
 /// not double-counted with (3).
+///
+/// Known limitation: the guard covers absence cost only. Approving a timesheet
+/// week is never floor-checked, so a week whose booked hours fall short of the
+/// target still lowers the balance — possibly below the floor — the moment it
+/// is approved and the cutoff moves past it. That is independent of any
+/// absence and predates the cutoff rule.
 pub async fn validate_flextime_balance(
     pool: &crate::db::DatabasePool,
     tx: &mut crate::db::PgConnection,
@@ -734,8 +740,12 @@ pub async fn validate_flextime_balance(
         user.overtime_start_balance_min
     } else {
         let (flextime_days, _) =
-            crate::services::reports::build_flextime_for_user(pool, user, cutoff_date, cutoff_date).await?;
-        flextime_days.first().map(|d| d.cumulative_min).unwrap_or(user.overtime_start_balance_min)
+            crate::services::reports::build_flextime_for_user(pool, user, cutoff_date, cutoff_date)
+                .await?;
+        flextime_days
+            .first()
+            .map(|d| d.cumulative_min)
+            .unwrap_or(user.overtime_start_balance_min)
     };
 
     let unaccounted_from = cutoff_date + Duration::days(1);

@@ -131,3 +131,22 @@ export function totalAbsenceDays(absences) {
     .filter((absence) => costTypeBySlug.get(absence.kind) !== "flextime")
     .reduce((total, absence) => total + (absence.days || 0), 0);
 }
+
+// The flextime and overtime endpoints return their rows together with the date
+// the closing balance is stated as of (the end of the user's last fully
+// approved week). Both shapes are normalized in one place so no call site has
+// to know the wire format, and a failed request that fell back to `[]` still
+// yields a usable object instead of crashing the chart.
+export function normalizeFlextimeResponse(raw) {
+  return {
+    days: Array.isArray(raw) ? raw : Array.isArray(raw?.days) ? raw.days : [],
+    balanceAsOf: (!Array.isArray(raw) && raw?.balance_as_of) || null,
+  };
+}
+
+export function normalizeOvertimeResponse(raw) {
+  return {
+    rows: Array.isArray(raw) ? raw : Array.isArray(raw?.rows) ? raw.rows : [],
+    balanceAsOf: (!Array.isArray(raw) && raw?.balance_as_of) || null,
+  };
+}

@@ -38,7 +38,15 @@ export function flextimeBounds(flextimeData) {
 
 // Builds the full CSV text (one row per entry, empty days included) from a
 // range report plus optional flextime rows. `translate` is the current `$t`.
-export function buildTimesheetCsv({ report, flextimeData, translate }) {
+// `balanceAsOf` is the date the closing balance is stated as of (end of the
+// last fully approved week); it gets its own row so the number cannot be
+// mistaken for "as of the end of the export range".
+export function buildTimesheetCsv({
+  report,
+  flextimeData,
+  balanceAsOf = null,
+  translate,
+}) {
   const { opening, closing } = flextimeBounds(flextimeData);
   const header = csvEncode([
     translate("Date"),
@@ -151,6 +159,23 @@ export function buildTimesheetCsv({ report, flextimeData, translate }) {
         "",
       ]),
     );
+    if (balanceAsOf) {
+      const lastLedgerDay = flextimeData[flextimeData.length - 1].date;
+      rows.push(
+        csvEncode([
+          "",
+          translate("Flextime balance as of"),
+          "",
+          "",
+          "",
+          balanceAsOf < lastLedgerDay ? balanceAsOf : lastLedgerDay,
+          "",
+          "",
+          "",
+          "",
+        ]),
+      );
+    }
   }
   return rows.join("\r\n");
 }

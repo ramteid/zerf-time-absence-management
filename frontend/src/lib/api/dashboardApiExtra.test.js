@@ -47,6 +47,43 @@ describe("dashboardApi — additional functions", () => {
     expect(api).toHaveBeenCalledWith("/reports/overtime?year=2026");
   });
 
+  it("unwraps the flextime envelope into days + balanceAsOf", async () => {
+    // The endpoint answers with `{ days, balance_as_of }`. Callers feed the
+    // days straight into the chart, so handing them the envelope instead would
+    // break every chart on the page.
+    api.mockResolvedValue({
+      days: [{ date: "2026-01-05", cumulative_min: 60 }],
+      balance_as_of: "2026-01-04",
+    });
+    const result = await getFlextime({ from: "2026-01-01", to: "2026-01-31" });
+    expect(result.days).toHaveLength(1);
+    expect(result.balanceAsOf).toBe("2026-01-04");
+  });
+
+  it("unwraps the overtime envelope into rows + balanceAsOf", async () => {
+    api.mockResolvedValue({
+      rows: [{ month: "2026-01", cumulative_min: 120 }],
+      balance_as_of: "2026-01-04",
+    });
+    const result = await getOvertimeSummary(2026);
+    expect(result.rows).toHaveLength(1);
+    expect(result.balanceAsOf).toBe("2026-01-04");
+  });
+
+  it("still yields usable shapes when the response carries no rows", async () => {
+    // A failed or empty response must not leave the caller with `undefined`
+    // where it expects an array.
+    api.mockResolvedValue(null);
+    expect(await getFlextime({ from: "a", to: "b" })).toEqual({
+      days: [],
+      balanceAsOf: null,
+    });
+    expect(await getOvertimeSummary(2026)).toEqual({
+      rows: [],
+      balanceAsOf: null,
+    });
+  });
+
   it("getMonthSubmissionReport includes the month parameter", async () => {
     // The month submission status card on the Dashboard uses this endpoint.
     // Month must be in YYYY-MM format; a wrong format returns a 400 from the backend.

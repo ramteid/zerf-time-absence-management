@@ -166,7 +166,7 @@ describe("PersonReport", () => {
     getMonthReport.mockResolvedValue(monthReportFixture());
     getRangeReport.mockResolvedValue(monthReportFixture());
     getLeaveBalances.mockResolvedValue([]);
-    getFlextimeReport.mockResolvedValue([]);
+    getFlextimeReport.mockResolvedValue({ days: [], balanceAsOf: null });
     getAbsenceReport.mockResolvedValue([]);
     getUserAbsencesByYear.mockResolvedValue([]);
     getHolidaysByYear.mockResolvedValue([]);
@@ -459,23 +459,93 @@ describe("PersonReport", () => {
   });
 
   it("renders the flextime chart section when the user has a flextime account and data", async () => {
-    getFlextimeReport.mockResolvedValue([
-      {
-        date: "2026-06-01",
-        actual_min: 480,
-        target_min: 480,
-        diff_min: 0,
-        cumulative_min: 60,
-        absence: null,
-        holiday: null,
-      },
-    ]);
+    getFlextimeReport.mockResolvedValue({
+      days: [
+        {
+          date: "2026-06-01",
+          actual_min: 480,
+          target_min: 480,
+          diff_min: 0,
+          cumulative_min: 60,
+          absence: null,
+          holiday: null,
+        },
+      ],
+      balanceAsOf: "2026-06-07",
+    });
     component = mount(PersonReport, {
       target,
       props: { userId: 1, users, periodMode: "month", month: "2026-06" },
     });
     await waitForText(target, "Flextime balance");
     expect(target.querySelector("svg")).not.toBeNull();
+  });
+
+  it("labels the flextime balance with the date it is stated as of", async () => {
+    // The balance stops at the last fully approved week, so the stat card and
+    // the chart both name that date instead of implying "as of the period end".
+    getFlextimeReport.mockResolvedValue({
+      days: [
+        {
+          date: "2026-06-01",
+          actual_min: 480,
+          target_min: 480,
+          diff_min: 0,
+          cumulative_min: 60,
+          absence: null,
+          holiday: null,
+        },
+      ],
+      balanceAsOf: "2026-06-07",
+    });
+    component = mount(PersonReport, {
+      target,
+      props: { userId: 1, users, periodMode: "month", month: "2026-06" },
+    });
+    await waitForText(target, "Flextime balance");
+
+    expect(target.textContent).toContain("As of");
+    // Quick-range buttons let the chart look beyond the reported month.
+    expect(
+      [...target.querySelectorAll("button")].some((b) =>
+        b.textContent.includes("Last 90 days"),
+      ),
+    ).toBe(true);
+  });
+
+  it("reloads only the chart when a quick range is picked", async () => {
+    getFlextimeReport.mockResolvedValue({
+      days: [
+        {
+          date: "2026-06-01",
+          actual_min: 480,
+          target_min: 480,
+          diff_min: 0,
+          cumulative_min: 60,
+          absence: null,
+          holiday: null,
+        },
+      ],
+      balanceAsOf: "2026-06-07",
+    });
+    component = mount(PersonReport, {
+      target,
+      props: { userId: 1, users, periodMode: "month", month: "2026-06" },
+    });
+    await waitForText(target, "Flextime balance");
+    getMonthReport.mockClear();
+    getFlextimeReport.mockClear();
+
+    const rangeButton = [...target.querySelectorAll("button")].find((b) =>
+      b.textContent.includes("Last 90 days"),
+    );
+    rangeButton.click();
+    await settle();
+
+    expect(getFlextimeReport).toHaveBeenCalledTimes(1);
+    // The month report is untouched: the chart range is independent of the
+    // period the rest of the page reports on.
+    expect(getMonthReport).not.toHaveBeenCalled();
   });
 
   it("shows a future-period note and skips time-based fetches for a fully-future custom range", async () => {

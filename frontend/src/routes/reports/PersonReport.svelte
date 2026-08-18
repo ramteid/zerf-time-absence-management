@@ -12,7 +12,13 @@
     formatHours,
     formatDayCount,
   } from "../../i18n.js";
-  import { isoDate, appTodayDate, minToHM, fmtDate } from "../../format.js";
+  import {
+    isoDate,
+    appTodayDate,
+    addDays,
+    minToHM,
+    fmtDate,
+  } from "../../format.js";
   import {
     normalizeMonthReport,
     countWorkdays,
@@ -20,6 +26,7 @@
   } from "../../apiMappers.js";
   import Icon from "../../Icons.svelte";
   import FlextimeChart from "../../FlextimeChart.svelte";
+  import FlextimeRangeControls from "../dashboard/FlextimeRangeControls.svelte";
   import SectionCard from "../../lib/ui/SectionCard.svelte";
   import StatCard from "../../lib/ui/StatCard.svelte";
   import DataTable from "../../lib/ui/DataTable.svelte";
@@ -142,6 +149,17 @@
     });
   }
 
+  // Shape returned by `getFlextimeReport`, used wherever the request is
+  // skipped or failed so callers never have to null-check.
+  function emptyFlextime() {
+    return { days: [], balanceAsOf: null };
+  }
+
+  // Closing balance of a flextime ledger: the last day's cumulative value.
+  function closingBalance(days) {
+    return days.length ? days[days.length - 1].cumulative_min : null;
+  }
+
   // --- Time-based data (month report or range report + flextime). ---
   async function loadReportData(id, mode, m, f, t2) {
     const user = findUserById(users, id, $currentUser);
@@ -161,7 +179,7 @@
       const canFetchChart = chartFrom <= todayIso;
       const leaveYear = leaveYearForPeriod(period);
 
-      const [monthRaw, leaveRaw, flextimeRaw, absences] = await Promise.all([
+      const [monthRaw, leaveRaw, flextime, absences] = await Promise.all([
         getMonthReport({ userId: id, month: m }),
         getLeaveBalances({ userId: id, year: leaveYear }).catch(() => []),
         canFetchChart && flexAccount
@@ -169,8 +187,8 @@
               userId: id,
               from: chartFrom,
               to: chartTo,
-            }).catch(() => [])
-          : Promise.resolve([]),
+            }).catch(() => emptyFlextime())
+          : Promise.resolve(emptyFlextime()),
         loadAbsencesFor(id, absenceFrom, absenceTo),
       ]);
 
@@ -179,10 +197,10 @@
         periodMode: mode,
         monthReport,
         leaveBalances: Array.isArray(leaveRaw) ? leaveRaw : [],
-        flextimeBalance: flextimeRaw.length
-          ? flextimeRaw[flextimeRaw.length - 1].cumulative_min
-          : null,
-        flextimeChartData: flextimeRaw || [],
+        flextimeBalance: closingBalance(flextime.days),
+        flextimeChartData: flextime.days,
+        flextimeBalanceAsOf: flextime.balanceAsOf,
+        chartRange: { from: chartFrom, to: chartTo },
         absences,
         targetForSub: monthReport.full_month_target_min,
         isFutureOnly: false,
@@ -200,7 +218,7 @@
     } = timeQueryRange(period, todayIso);
     const leaveYear = leaveYearForPeriod(period);
 
-    const [rangeRaw, leaveRaw, flextimeRaw, absences] = await Promise.all([
+    const [rangeRaw, leaveRaw, flextime, absences] = await Promise.all([
       active
         ? getRangeReport({ userId: id, from: rangeFrom, to: cappedTo })
         : Promise.resolve(null),
@@ -212,8 +230,8 @@
             userId: id,
             from: rangeFrom,
             to: cappedTo,
-          }).catch(() => [])
-        : Promise.resolve([]),
+          }).catch(() => emptyFlextime())
+        : Promise.resolve(emptyFlextime()),
       loadAbsencesFor(id, f, t2),
     ]);
 
@@ -224,10 +242,10 @@
       periodMode: mode,
       monthReport,
       leaveBalances: Array.isArray(leaveRaw) ? leaveRaw : [],
-      flextimeBalance: flextimeRaw.length
-        ? flextimeRaw[flextimeRaw.length - 1].cumulative_min
-        : null,
-      flextimeChartData: flextimeRaw || [],
+      flextimeBalance: closingBalance(flextime.days),
+      flextimeChartData: flextime.days,
+      flextimeBalanceAsOf: flextime.balanceAsOf,
+      chartRange: { from: rangeFrom, to: cappedTo },
       absences,
       targetForSub: monthReport?.target_min ?? null,
       isFutureOnly: !active,
@@ -284,6 +302,68 @@
       reportData = null;
     }
   }
+
+  // --- Flextime chart: its own range, independent of the report period. ---
+  // Seeded from the period each time a report finishes loading, then steerable
+  // with the same quick ranges the dashboard chart offers.
+  let chartFrom = "";
+  let chartTo = "";
+  let chartDays = [];
+  let chartBalanceAsOf = null;
+  let chartLoading = false;
+  let lastSyncedReport = null;
+
+  // Re-seed whenever a new report object arrives (new user or new period), so
+  // the chart starts out showing exactly the period the report describes and
+  // reuses the ledger that load already fetched.
+  function syncChartWithReport(data) {
+    if (data === lastSyncedReport) return;
+    lastSyncedReport = data;
+    chartFrom = data?.chartRange?.from ?? "";
+    chartTo = data?.chartRange?.to ?? "";
+    chartDays = data?.flextimeChartData ?? [];
+    chartBalanceAsOf = data?.flextimeBalanceAsOf ?? null;
+  }
+
+  $: syncChartWithReport(reportData);
+
+  async function loadChart() {
+    if (userId == null || !chartFrom || !chartTo || chartFrom > chartTo) return;
+    chartLoading = true;
+    try {
+      const flextime = await getFlextimeReport({
+        userId,
+        from: chartFrom,
+        to: chartTo,
+      });
+      chartDays = flextime.days;
+      chartBalanceAsOf = flextime.balanceAsOf;
+    } catch (e) {
+      toast($t(e?.message || "Error"), "error");
+    } finally {
+      chartLoading = false;
+    }
+  }
+
+  // Quick range: the last `days` days ending today, clamped to the selected
+  // employee's start date so the chart never opens before their employment.
+  function setChartRange(days) {
+    const start = isoDate(addDays(today, -(days - 1)));
+    const employeeStart = selectedUser?.start_date;
+    chartFrom = employeeStart && employeeStart > start ? employeeStart : start;
+    chartTo = todayIso;
+    loadChart();
+  }
+
+  // Date the stat card's balance refers to: the report period ends where it
+  // ends, but the balance itself stops at the flextime cutoff, so the earlier
+  // of the two is what the number actually describes.
+  $: statBalanceAsOf =
+    reportData?.flextimeBalanceAsOf && reportData?.chartRange?.to
+      ? reportData.flextimeBalanceAsOf < reportData.chartRange.to
+        ? reportData.flextimeBalanceAsOf
+        : reportData.chartRange.to
+      : (reportData?.flextimeBalanceAsOf ?? null);
 
   $: reportAbsenceSummary = reportData
     ? absenceKindTotals(reportData.absences)
@@ -352,6 +432,9 @@
         {#if reportData.hasFlextime}
           <StatCard
             label={$t("Flextime balance")}
+            sub={statBalanceAsOf
+              ? $t("As of {date}", { date: fmtDate(statBalanceAsOf) })
+              : ""}
             color={reportData.flextimeBalance === null
               ? "var(--text-tertiary)"
               : reportData.flextimeBalance < 0
@@ -557,12 +640,35 @@
       </SectionCard>
     {/if}
 
-    {#if reportData.hasFlextime && reportData.flextimeChartData?.length}
+    {#if reportData.hasFlextime}
       <SectionCard
         title={$t("Flextime balance")}
         helpText={$t("help_flextime_chart")}
       >
-        <FlextimeChart data={reportData.flextimeChartData} />
+        <!-- The chart has its own range, seeded from the report period: the
+             balance curve is usually worth looking at over a longer window
+             than the month currently being reported on. -->
+        <FlextimeRangeControls
+          slot="actions"
+          bind:from={chartFrom}
+          bind:to={chartTo}
+          {todayIso}
+          minDate={selectedUser?.start_date}
+          onSetRange={setChartRange}
+          onLoad={loadChart}
+        />
+        {#if chartBalanceAsOf}
+          <div class="chart-as-of">
+            {$t("As of {date}", { date: fmtDate(chartBalanceAsOf) })}
+          </div>
+        {/if}
+        {#if chartLoading && chartDays.length === 0}
+          <div class="zf-card-empty">{$t("Loading...")}</div>
+        {:else if chartDays.length}
+          <FlextimeChart data={chartDays} />
+        {:else}
+          <div class="zf-card-empty">{$t("No data.")}</div>
+        {/if}
       </SectionCard>
     {/if}
   {/if}
@@ -608,6 +714,14 @@
     color: var(--text-tertiary);
     font-size: 13px;
     cursor: help;
+  }
+
+  /* Stichtag line above the flextime chart: the curve is flat after this date
+     because nothing beyond it is approved yet. */
+  .chart-as-of {
+    font-size: 0.8125rem;
+    color: var(--text-tertiary);
+    margin-bottom: 10px;
   }
 
   .report-note {
