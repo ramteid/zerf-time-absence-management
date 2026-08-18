@@ -8,6 +8,18 @@ import { setLanguage } from "../i18n.js";
 const mockState = vi.hoisted(() => ({
   failUsers: false,
   holidays: [],
+  absences: [],
+  timeEntries: [
+    {
+      id: 11,
+      user_id: 2,
+      entry_date: "2026-05-04",
+      start_time: "09:00:00",
+      end_time: "11:00:00",
+      category_id: 7,
+      status: "approved",
+    },
+  ],
 }));
 
 vi.mock("svelte", async () => {
@@ -16,21 +28,9 @@ vi.mock("svelte", async () => {
 
 vi.mock("../api.js", () => ({
   api: vi.fn(async (urlPath) => {
-    if (urlPath.startsWith("/absences/calendar?")) return [];
+    if (urlPath.startsWith("/absences/calendar?")) return mockState.absences;
     if (urlPath.startsWith("/holidays?")) return mockState.holidays;
-    if (urlPath.startsWith("/time-entries/all?")) {
-      return [
-        {
-          id: 11,
-          user_id: 2,
-          entry_date: "2026-05-04",
-          start_time: "09:00:00",
-          end_time: "11:00:00",
-          category_id: 7,
-          status: "approved",
-        },
-      ];
-    }
+    if (urlPath.startsWith("/time-entries/all?")) return mockState.timeEntries;
     if (urlPath === "/categories") {
       return [{ id: 7, name: "Project", color: "#2f7d32" }];
     }
@@ -105,6 +105,7 @@ describe("Calendar", () => {
     setLanguage("en");
     mockState.failUsers = false;
     mockState.holidays = [];
+    mockState.absences = [];
     api.mockClear();
   });
 
@@ -190,5 +191,78 @@ describe("Calendar", () => {
     nextButton.click();
     await waitForPath("/calendar?year=2027&month=1");
     await waitForText(target, "January 2027");
+  });
+
+  it("renders two different people's overlapping same-category absences on one day without crashing", async () => {
+    // Regression test for a Svelte `each_key_duplicate` crash: the calendar's
+    // event key used to be derived only from the absence/category kind
+    // (`absence:vacation`), not the record itself. Two different employees
+    // with overlapping absences of the same kind on the same day (e.g.
+    // overlapping vacations during the summer holiday period) then produced
+    // two events with an identical key inside the day cell's keyed
+    // `{#each ev.key}` block. Svelte throws on that duplicate key, and
+    // because the throw happens inside Svelte's own render effect (not
+    // synchronously inside `mount()`), it surfaces as an unhandled
+    // exception/rejection that aborts the whole component's render — the
+    // grid stays up but every event and the legend disappear, even though
+    // the fetched data was correct. This test fails on the old behaviour
+    // (via the captured uncaught-exception/rejection below) and only
+    // passes once each event key is unique per record.
+    mockState.absences = [
+      {
+        id: 101,
+        user_id: 2,
+        name: "Alice Approver",
+        kind: "vacation",
+        category_name: "Vacation",
+        start_date: "2026-05-10",
+        end_date: "2026-05-12",
+        comment: null,
+        status: "approved",
+      },
+      {
+        id: 102,
+        user_id: 3,
+        name: "Bob Report",
+        kind: "vacation",
+        category_name: "Vacation",
+        start_date: "2026-05-10",
+        end_date: "2026-05-14",
+        comment: null,
+        status: "approved",
+      },
+    ];
+
+    const capturedErrors = [];
+    const onUncaught = (err) => capturedErrors.push(err);
+    process.on("uncaughtException", onUncaught);
+    process.on("unhandledRejection", onUncaught);
+
+    try {
+      component = mount(Calendar, { target });
+      await settle();
+    } finally {
+      process.off("uncaughtException", onUncaught);
+      process.off("unhandledRejection", onUncaught);
+    }
+
+    if (capturedErrors.length > 0) {
+      throw capturedErrors[0];
+    }
+
+    // The day grid shows the category label (e.g. "Vacation"), not the
+    // person's name — the name only appears in the click-through popup — so
+    // assert on the label, and specifically that BOTH overlapping absences
+    // render as distinct events rather than being silently collapsed into
+    // one (the crash isn't the only possible failure mode of a duplicate key).
+    await waitForText(target, "Vacation");
+    const vacationEvents = Array.from(
+      target.querySelectorAll(".cal-event"),
+    ).filter((el) => el.textContent.trim() === "Vacation");
+    if (vacationEvents.length < 2) {
+      throw new Error(
+        `expected at least 2 separate "Vacation" events to render (one per overlapping absence), found ${vacationEvents.length}`,
+      );
+    }
   });
 });
