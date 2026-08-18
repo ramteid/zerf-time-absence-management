@@ -720,22 +720,26 @@ pub async fn validate_flextime_balance(
             .parse::<i64>()
             .unwrap_or(0);
 
-    // (1) Current flextime balance = cumulative balance through end-of-yesterday.
-    // `build_flextime_for_user(today, today)` seeds cumulative_min with the
-    // balance as it stood yesterday, then iterates one day (today). Today's
-    // contribution is zero because `after_today` zeroes both `target` and
-    // `actual` for today and beyond, so the first row's `cumulative_min`
-    // equals the seeded yesterday-balance unchanged.
+    // (1) Current flextime balance = cumulative balance through the cutoff date
+    // (end of last fully approved week).
+    let cutoff_date = crate::services::reports::flex_balance_cutoff_date(
+        pool,
+        user.id,
+        user.start_date,
+        user.workdays_per_week,
+    )
+    .await?;
+    let (flextime_days, _) =
+        crate::services::reports::build_flextime_for_user(pool, user, cutoff_date, cutoff_date).await?;
+    let current_balance_min = flextime_days.first().map(|d| d.cumulative_min).unwrap_or(user.overtime_start_balance_min);
+
     let today = crate::services::settings::app_today(pool).await;
-    let flextime_days =
-        crate::services::reports::build_flextime_for_user(pool, user, today, today).await?;
-    let current_balance_min = flextime_days.first().map(|d| d.cumulative_min).unwrap_or(0);
 
     // (2) Committed-but-not-yet-realised flextime usage from OTHER absences.
     //
     // cost_type='flextime' absences cost `target_per_day_min` per workday
     // because the day keeps its target while the user logs zero hours. Past
-    // portions of these absences are ALREADY reflected in current_balance
+    // portions of these absences (through the cutoff) are ALREADY reflected in current_balance
     // (build_flextime_for_user processed those days with target = target_per_day_min
     // and actual = 0), so we count only the future portion (`max(start, today)`
     // through `end`) to avoid double-charging.

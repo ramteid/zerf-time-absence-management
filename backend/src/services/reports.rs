@@ -455,19 +455,22 @@ pub async fn build_range_with_user(
 }
 
 /// Build the per-day flextime ledger for an already-resolved user across
-/// `from..=to`. This is the data behind the `/reports/flextime` endpoint,
-/// factored out so the timesheet PDF can reuse the exact same seeding and
-/// accumulation logic for potentially many users within a single request
-/// without going through the HTTP layer.
+/// `from..=to`. Returns both the ledger days and the cutoff date (end of the
+/// last fully approved week, or start_date-1 if none exists).
+///
+/// This is the data behind the `/reports/flextime` endpoint, factored out so
+/// the timesheet PDF can reuse the exact same seeding and accumulation logic
+/// for potentially many users within a single request without going through
+/// the HTTP layer.
 pub async fn build_flextime_for_user(
     pool: &crate::db::DatabasePool,
     user: &crate::middleware::auth::User,
     from: NaiveDate,
     to: NaiveDate,
-) -> AppResult<Vec<FlextimeDay>> {
+) -> AppResult<(Vec<FlextimeDay>, NaiveDate)> {
     // Assistant role is the canonical source for "no flextime account" behavior.
     if is_assistant_role(&user.role) {
-        return Ok(vec![]);
+        return Ok((vec![], user.start_date - Duration::days(1)));
     }
     let target_user_id = user.id;
     let target_per_day_min = {
@@ -482,14 +485,8 @@ pub async fn build_flextime_for_user(
 
     let reports_db = crate::repository::ReportDb::new(pool.clone());
 
-    // Seed cumulative at `from - 1` via month-level overtime plus a small
-    // partial-month report, so per-day flextime processing stays within the
-    // requested output range.
-    // Fetch today early so the seed clamp below can use it. The flextime balance
-    // is defined as "balance at end of yesterday", so seed and main loop alike
-    // must never include today's contribution.
-    let today = crate::services::settings::app_today(pool).await;
-    let last_balance_day = today - Duration::days(1);
+    // Fetch the cutoff date (end of last fully approved week).
+    let cutoff_date = flex_balance_cutoff_date(pool, target_user_id, user.start_date, user.workdays_per_week).await?;
 
     let mut cumulative_min = if from < user.start_date {
         0
@@ -497,9 +494,9 @@ pub async fn build_flextime_for_user(
         user.overtime_start_balance_min
     };
     if from > user.start_date {
-        // Cap the seed end at yesterday so today's diff cannot leak into the
-        // seeded cumulative when the requested range starts at or after today.
-        let day_before_from = (from - Duration::days(1)).min(last_balance_day);
+        // Cap the seed end at the cutoff date so contributions beyond it
+        // cannot leak into the seeded cumulative.
+        let day_before_from = (from - Duration::days(1)).min(cutoff_date);
         let month_start =
             NaiveDate::from_ymd_opt(day_before_from.year(), day_before_from.month(), 1)
                 .ok_or_else(|| AppError::BadRequest("date".into()))?;
@@ -617,9 +614,9 @@ pub async fn build_flextime_for_user(
         let holiday = holiday_map.get(&current_date).cloned();
         let absence = absence_by_day.get(&current_date).cloned();
         let before_start = current_date < user.start_date;
-        // The flextime balance is defined as "up to and including yesterday";
-        // today and any future day contribute zero to the cumulative balance.
-        let after_today = current_date >= today;
+        // The flextime balance is defined as "up to and including the cutoff date"
+        // (end of last fully approved week). Days beyond the cutoff contribute zero.
+        let after_cutoff = current_date > cutoff_date;
         let absence_blocks_target = absence
             .as_deref()
             .map(|kind| absence_removes_target(&category_flags, kind))
@@ -628,9 +625,9 @@ pub async fn build_flextime_for_user(
             && holiday.is_none()
             && !absence_blocks_target
             && !before_start
-            && !after_today;
+            && !after_cutoff;
         let target = if is_workday { target_per_day_min } else { 0 };
-        let actual = if before_start || after_today {
+        let actual = if before_start || after_cutoff {
             0
         } else {
             approved_crediting_minutes_by_day
@@ -651,7 +648,7 @@ pub async fn build_flextime_for_user(
         });
         current_date += Duration::days(1);
     }
-    Ok(flextime_days)
+    Ok((flextime_days, cutoff_date))
 }
 
 pub async fn build_range(
@@ -771,6 +768,130 @@ async fn load_export_week_check_data(
     Ok((holiday_set, absent_days, submitted_dates, incomplete_dates))
 }
 
+/// Check whether a single week (given by its Monday) is fully covered.
+/// A week is covered when every required workday is either before the user's start,
+/// a holiday, covered by an absence, or has an entry with the given status_check.
+///
+/// Used by both `check_weeks_all_submitted` (checks for submitted/approved) and
+/// the flextime balance cutoff (checks for fully approved entries).
+fn week_is_fully_covered(
+    week_monday: NaiveDate,
+    holiday_set: &std::collections::HashSet<NaiveDate>,
+    absent_days: &std::collections::HashSet<NaiveDate>,
+    status_check_dates: &std::collections::HashSet<NaiveDate>,
+    user_start_date: NaiveDate,
+    workdays_per_week: i16,
+) -> bool {
+    let mut potential_days = 0i64;
+    let mut covered_days = 0i64;
+    for d in 0..7i64 {
+        let day = week_monday + Duration::days(d);
+        if !crate::time_calc::is_potential_workday(day, workdays_per_week) {
+            continue;
+        }
+        potential_days += 1;
+
+        if day < user_start_date
+            || holiday_set.contains(&day)
+            || absent_days.contains(&day)
+            || status_check_dates.contains(&day)
+        {
+            covered_days += 1;
+        }
+    }
+
+    let required_days = i64::from(workdays_per_week.max(0)).min(potential_days);
+    covered_days >= required_days
+}
+
+/// Determine the cutoff date for flextime balance calculation.
+///
+/// The flextime balance is calculated up to and including the last Sunday of the
+/// last fully approved week. A week is fully approved when:
+/// 1. Every required workday has either an approved entry, is a holiday, covered
+///    by an approved absence, or is before the user's start date.
+/// 2. NO day in the week has any unapproved entry (draft, submitted, rejected).
+///
+/// If no such week exists (e.g., a new employee, first week still being worked),
+/// returns `user_start_date - 1` (nothing counts yet).
+pub async fn flex_balance_cutoff_date(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    user_start_date: NaiveDate,
+    workdays_per_week: i16,
+) -> AppResult<NaiveDate> {
+    // Assistant role: no flextime account.
+    if workdays_per_week == 0 {
+        return Ok(user_start_date - Duration::days(1));
+    }
+
+    let today = crate::services::settings::app_today(pool).await;
+    let last_elapsed_week_monday = {
+        let mut candidate = crate::time_calc::week_monday(today);
+        if candidate + Duration::days(6) >= today {
+            candidate -= Duration::days(7);
+        }
+        candidate
+    };
+
+    if last_elapsed_week_monday < user_start_date {
+        return Ok(user_start_date - Duration::days(1));
+    }
+
+    // Load all data for the entire history once.
+    let reports_db = crate::repository::ReportDb::new(pool.clone());
+    let history_from = crate::time_calc::week_monday(user_start_date);
+    let history_to = last_elapsed_week_monday + Duration::days(6);
+
+    let holiday_set = reports_db.holiday_set(history_from, history_to).await?;
+    let absence_rows = reports_db
+        .finalized_absence_ranges_in_period(user_id, history_from, history_to)
+        .await?;
+    let category_flags = AbsenceCategoryFlags::load(pool).await?;
+    let absent_days =
+        expand_absence_date_set(&absence_rows, history_from, history_to, &category_flags);
+    let approved_dates = reports_db
+        .approved_dates_in_range(user_id, history_from, history_to)
+        .await?;
+    let unapproved_dates = reports_db
+        .unapproved_entry_dates_in_range(user_id, history_from, history_to)
+        .await?;
+
+    // Scan backwards from the last elapsed week to find the first (most recent)
+    // week that is fully approved.
+    let mut current_monday = last_elapsed_week_monday;
+    loop {
+        if current_monday < user_start_date {
+            break;
+        }
+
+        // Check if this week has any unapproved entries at all.
+        let week_has_unapproved = (0..7i64).any(|d| {
+            let day = current_monday + Duration::days(d);
+            unapproved_dates.contains(&day)
+        });
+        if !week_has_unapproved {
+            // Check if all required workdays are covered by approved entries, holidays, or absences.
+            if week_is_fully_covered(
+                current_monday,
+                &holiday_set,
+                &absent_days,
+                &approved_dates,
+                user_start_date,
+                workdays_per_week,
+            ) {
+                // Found the cutoff: return the Sunday of this week.
+                return Ok(current_monday + Duration::days(6));
+            }
+        }
+
+        current_monday -= Duration::days(7);
+    }
+
+    // No fully approved week found.
+    Ok(user_start_date - Duration::days(1))
+}
+
 /// Returns true when every week in `complete_week_mondays` is considered submitted.
 #[allow(clippy::too_many_arguments)]
 pub fn check_weeks_all_submitted(
@@ -794,26 +915,14 @@ pub fn check_weeks_all_submitted(
             return false;
         }
 
-        let mut potential_days = 0i64;
-        let mut covered_days = 0i64;
-        for d in 0..7i64 {
-            let day = week_monday + Duration::days(d);
-            if !crate::time_calc::is_potential_workday(day, workdays_per_week) {
-                continue;
-            }
-            potential_days += 1;
-
-            if day < user_start_date
-                || holiday_set.contains(&day)
-                || absent_days.contains(&day)
-                || submitted_dates.contains(&day)
-            {
-                covered_days += 1;
-            }
-        }
-
-        let required_days = i64::from(workdays_per_week.max(0)).min(potential_days);
-        if covered_days < required_days {
+        if !week_is_fully_covered(
+            week_monday,
+            holiday_set,
+            absent_days,
+            submitted_dates,
+            user_start_date,
+            workdays_per_week,
+        ) {
             return false;
         }
     }
@@ -1275,8 +1384,6 @@ pub struct MonthRow {
     pub actual_min: i64,
     pub diff_min: i64,
     pub cumulative_min: i64,
-    /// Cumulative balance including submitted-but-not-yet-approved entries.
-    pub submitted_cumulative_min: i64,
 }
 
 pub async fn build_overtime_rows_for_year(
@@ -1323,7 +1430,6 @@ pub async fn build_overtime_rows_for_year(
     let mut month_rows = vec![];
     // Accumulate all prior-year months to seed the running overtime balance.
     let mut cumulative_min = overtime_start_balance_min;
-    let mut submitted_cumulative_min = overtime_start_balance_min;
     for prior_year in user_start_date.year()..year {
         let prior_year_first_month = if prior_year == user_start_date.year() {
             user_start_date.month()
@@ -1335,7 +1441,6 @@ pub async fn build_overtime_rows_for_year(
             let month_report =
                 build_month_without_submission_status(pool, target_user_id, &month_label).await?;
             cumulative_min += month_report.diff_min;
-            submitted_cumulative_min += month_report.submitted_min - month_report.target_min;
         }
     }
 
@@ -1373,14 +1478,12 @@ pub async fn build_overtime_rows_for_year(
             build_month_without_submission_status(pool, target_user_id, &month_label).await?
         };
         cumulative_min += month_report.diff_min;
-        submitted_cumulative_min += month_report.submitted_min - month_report.target_min;
         month_rows.push(MonthRow {
             month: month_label,
             target_min: month_report.target_min,
             actual_min: month_report.actual_min,
             diff_min: month_report.diff_min,
             cumulative_min,
-            submitted_cumulative_min,
         });
     }
 
@@ -1648,11 +1751,12 @@ pub async fn build_timesheet_section(
     label: &str,
 ) -> AppResult<crate::report_pdf::TimesheetSection> {
     let report = build_range_with_user(pool, user, from, to, label).await?;
-    let flextime_data = build_flextime_for_user(pool, user, from, to).await?;
+    let (flextime_data, flextime_balance_as_of) = build_flextime_for_user(pool, user, from, to).await?;
     Ok(crate::report_pdf::TimesheetSection {
         user_name: format!("{} {}", user.first_name, user.last_name),
         report,
         flextime_data,
+        flextime_balance_as_of: if crate::roles::is_assistant_role(&user.role) { None } else { Some(flextime_balance_as_of) },
     })
 }
 

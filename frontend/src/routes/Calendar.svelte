@@ -26,6 +26,7 @@
     buildColorMap,
     calendarEventTitle,
     cellEvents,
+    rawCellEvents,
   } from "../lib/domain/calendar.js";
   import { tracksOwnTime } from "../rolePolicy.js";
 
@@ -37,6 +38,7 @@
   // eslint-disable-next-line no-useless-assignment
   let popupCell = null;
   let loadSeq = 0;
+  let activeFilters = new Set(); // colorKey -> active
 
   async function fallbackToEmpty(promise) {
     try {
@@ -208,9 +210,8 @@
 
   $: absCatBySlug = new Map($absenceCategories.map((c) => [c.slug, c]));
   $: colorByKey = buildColorMap(cells, teMap, categoryById, absCatBySlug, $t);
-  $: eventCells = cells.map((cell) => ({
-    ...cell,
-    events: cellEvents(
+  $: eventCells = cells.map((cell) => {
+    const allEvents = cellEvents(
       cell,
       teMap,
       categoryById,
@@ -219,8 +220,14 @@
       $t,
       userById,
       $currentUser?.id,
-    ),
-  }));
+    );
+    // Filter events based on active filters
+    const filteredEvents =
+      activeFilters.size === 0
+        ? allEvents
+        : allEvents.filter((event) => activeFilters.has(event.colorKey));
+    return { ...cell, events: filteredEvents };
+  });
 
   // ── Heading: "Team Calendar" for team leads and admins (they can always see
   // other users' data), "My Calendar" for employees and assistants.
@@ -255,18 +262,62 @@
     : eventCells.filter((cell) => !cell.weekend);
   $: calGridColumns = showWeekends ? 7 : 5;
 
-  $: legendItems = (() => {
+  $: allLegendItems = (() => {
     const seen = new Map();
-    for (const cell of eventCells) {
+    // Build legend from all cells (before filtering)
+    for (const cell of cells) {
       if (cell.other) continue;
-      for (const event of cell.events) {
+      // Use rawCellEvents to get unfiltered events for legend generation
+      const rawEvents = rawCellEvents(
+        cell,
+        teMap,
+        categoryById,
+        absCatBySlug,
+        $t,
+        userById,
+        $currentUser?.id,
+      );
+      for (const event of rawEvents) {
         if (!seen.has(event.colorKey)) {
-          seen.set(event.colorKey, { color: event.color, label: event.label });
+          seen.set(event.colorKey, {
+            colorKey: event.colorKey,
+            color: colorByKey.get(event.colorKey) || event.color,
+            label: event.label
+          });
         }
       }
     }
     return [...seen.values()];
   })();
+
+  $: {
+    // Sync activeFilters when legend changes (e.g., month navigation)
+    if (allLegendItems.length > 0) {
+      const currentKeys = new Set(allLegendItems.map((item) => item.colorKey));
+      if (activeFilters.size === 0) {
+        // First load: enable all
+        activeFilters = new Set(currentKeys);
+      } else {
+        // Remove filters for items no longer in the legend
+        activeFilters = new Set([...activeFilters].filter((key) => currentKeys.has(key)));
+      }
+    }
+  }
+
+  function toggleFilter(colorKey) {
+    const newFilters = new Set(activeFilters);
+    if (newFilters.has(colorKey)) {
+      newFilters.delete(colorKey);
+    } else {
+      newFilters.add(colorKey);
+    }
+    activeFilters = newFilters;
+  }
+
+  $: legendItems = allLegendItems.map((item) => ({
+    ...item,
+    active: activeFilters.has(item.colorKey),
+  }));
 
   function clickDay(cell) {
     const cellEventsList = cell.events;
@@ -375,11 +426,17 @@
   </div>
 
   <div class="cal-legend">
-    {#each legendItems as item (item.label)}
-      <div class="cal-legend-item">
+    {#each legendItems as item (item.colorKey)}
+      <button
+        type="button"
+        class="cal-legend-item"
+        class:inactive={!item.active}
+        on:click={() => toggleFilter(item.colorKey)}
+        title={item.active ? $t("Hide") : $t("Show")}
+      >
         <span class="cal-swatch" style:background={item.color}></span>
         <span>{item.label}</span>
-      </div>
+      </button>
     {/each}
   </div>
 </div>
@@ -416,7 +473,7 @@
 
   .cal-legend {
     display: flex;
-    gap: 12px;
+    gap: 8px;
     margin-top: 16px;
     flex-wrap: wrap;
   }
@@ -426,6 +483,21 @@
     align-items: center;
     gap: 6px;
     font-size: 0.8125rem;
+    padding: 6px 10px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--bg-surface);
+    cursor: pointer;
+    transition: all 150ms ease-in-out;
+  }
+
+  .cal-legend-item:hover {
+    border-color: var(--border-strong);
+    background: var(--bg-muted);
+  }
+
+  .cal-legend-item.inactive {
+    opacity: 0.45;
   }
 
   .cal-swatch {
@@ -433,6 +505,7 @@
     width: 12px;
     height: 12px;
     border-radius: 2px;
+    flex-shrink: 0;
   }
 
   .cal-event {

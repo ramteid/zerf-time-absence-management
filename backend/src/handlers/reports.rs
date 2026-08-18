@@ -17,9 +17,15 @@ use axum::{
     Json,
 };
 use chrono::{Datelike, Duration, NaiveDate};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+
+#[derive(Serialize)]
+pub struct FlextimeResponse {
+    pub days: Vec<FlextimeDay>,
+    pub balance_as_of: NaiveDate,
+}
 
 #[derive(Deserialize)]
 pub struct MonthQuery {
@@ -554,7 +560,7 @@ pub async fn flextime(
     State(app_state): State<AppState>,
     requester: User,
     Query(query): Query<FlextimeQuery>,
-) -> AppResult<Json<Vec<FlextimeDay>>> {
+) -> AppResult<Json<FlextimeResponse>> {
     let target_user_id = query.user_id.unwrap_or(requester.id);
     assert_can_access_user(&app_state, &requester, target_user_id).await?;
     validate_range(query.from, query.to)?;
@@ -567,9 +573,9 @@ pub async fn flextime(
             .await?
             .ok_or(AppError::NotFound)?,
     );
-    let flextime_days =
+    let (days, balance_as_of) =
         build_flextime_for_user(&app_state.pool, &user, query.from, query.to).await?;
-    Ok(Json(flextime_days))
+    Ok(Json(FlextimeResponse { days, balance_as_of }))
 }
 
 /// Payroll report status for the dashboard tile: how far the previous month is

@@ -128,6 +128,8 @@ const TRANSLATIONS = {
     "PDF download started.": "PDF download started.",
     Timesheet: "Timesheet",
     Filter: "Filter",
+    Show: "Show",
+    Hide: "Hide",
     Entries: "Entries",
     Days: "Days",
     audit_table_users: "User",
@@ -1226,6 +1228,7 @@ const TRANSLATIONS = {
     Flextime: "Gleitzeit",
     "Flextime Reduction": "Gleitzeitabbau",
     Filter: "Filter",
+    Hide: "Ausblenden",
     // Reports help (English defaults)
     // (English keys fall through)
     // Audit log

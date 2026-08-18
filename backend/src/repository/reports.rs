@@ -168,6 +168,51 @@ impl ReportDb {
         Ok(rows.into_iter().map(|(d,)| d).collect())
     }
 
+    /// Dates with at least one `status='approved'` entry (for the flextime
+    /// balance cutoff: weeks are approved as a whole, so a day only "counts"
+    /// once its entries have cleared approval).
+    pub async fn approved_dates_in_range(
+        &self,
+        user_id: i64,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<HashSet<NaiveDate>> {
+        let rows: Vec<(NaiveDate,)> = sqlx::query_as(
+            "SELECT DISTINCT entry_date FROM time_entries \
+             WHERE user_id=$1 AND status='approved' \
+             AND entry_date BETWEEN $2 AND $3",
+        )
+        .bind(user_id)
+        .bind(from)
+        .bind(to)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|(d,)| d).collect())
+    }
+
+    /// Dates with at least one entry whose status is anything other than
+    /// `'approved'` (draft, submitted, or rejected). Any such date blocks its
+    /// week from counting as "fully approved" for the flextime balance cutoff,
+    /// even if every required day already has an approved entry alongside it.
+    pub async fn unapproved_entry_dates_in_range(
+        &self,
+        user_id: i64,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<HashSet<NaiveDate>> {
+        let rows: Vec<(NaiveDate,)> = sqlx::query_as(
+            "SELECT DISTINCT entry_date FROM time_entries \
+             WHERE user_id=$1 AND status != 'approved' \
+             AND entry_date BETWEEN $2 AND $3",
+        )
+        .bind(user_id)
+        .bind(from)
+        .bind(to)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|(d,)| d).collect())
+    }
+
     /// Returns presence flags `(has_draft, has_submitted, has_approved, has_rejected)`
     /// for time entries in the given range. Used to derive the frontend
     /// `weekStatus` value on the backend without shipping every entry.

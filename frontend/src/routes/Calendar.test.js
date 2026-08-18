@@ -265,4 +265,78 @@ describe("Calendar", () => {
       );
     }
   });
+
+  it("filters time and absence categories independently by clicking legend items", async () => {
+    mockState.absences = [
+      {
+        id: 101,
+        user_id: 2,
+        name: "Tina Team",
+        kind: "vacation",
+        category_name: "Vacation",
+        start_date: "2026-05-04",
+        end_date: "2026-05-05",
+        comment: null,
+        status: "approved",
+      },
+    ];
+
+    component = mount(Calendar, { target });
+    await settle();
+
+    // Both the time entry and absence should be visible initially
+    await waitForText(target, "Project");
+    await waitForText(target, "Vacation");
+
+    // The legend should have both items
+    const legendButtons = target.querySelectorAll(".cal-legend-item");
+    const projectButton = Array.from(legendButtons).find((btn) =>
+      btn.textContent.includes("Project"),
+    );
+    const vacationButton = Array.from(legendButtons).find((btn) =>
+      btn.textContent.includes("Vacation"),
+    );
+
+    if (!projectButton || !vacationButton) {
+      throw new Error("Could not find Project or Vacation filter buttons");
+    }
+
+    if (projectButton.classList.contains("inactive")) {
+      throw new Error("Project filter should be active initially");
+    }
+
+    // Click the Project filter to hide it
+    projectButton.click();
+    await settle();
+
+    // Check that the Project button is now inactive
+    const updatedProjectButton = Array.from(
+      target.querySelectorAll(".cal-legend-item"),
+    ).find((btn) => btn.textContent.includes("Project"));
+
+    if (!updatedProjectButton.classList.contains("inactive")) {
+      throw new Error("Project filter should be inactive after clicking");
+    }
+
+    // Vacation should still be visible (active)
+    const updatedVacationButton = Array.from(
+      target.querySelectorAll(".cal-legend-item"),
+    ).find((btn) => btn.textContent.includes("Vacation"));
+
+    if (updatedVacationButton.classList.contains("inactive")) {
+      throw new Error("Vacation filter should remain active");
+    }
+
+    // Re-enable the Project filter
+    updatedProjectButton.click();
+    await settle();
+
+    const finalProjectButton = Array.from(
+      target.querySelectorAll(".cal-legend-item"),
+    ).find((btn) => btn.textContent.includes("Project"));
+
+    if (finalProjectButton.classList.contains("inactive")) {
+      throw new Error("Project filter should be active again after re-clicking");
+    }
+  });
 });

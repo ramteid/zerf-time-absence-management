@@ -85,6 +85,7 @@ pub struct TimesheetSection {
     pub user_name: String,
     pub report: MonthReport,
     pub flextime_data: Vec<FlextimeDay>,
+    pub flextime_balance_as_of: Option<chrono::NaiveDate>,
 }
 
 /// Render one combined PDF containing one section per entry in `sections`,
