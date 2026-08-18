@@ -405,6 +405,7 @@ mod tests {
             user_name: "Alice Lead".into(),
             report,
             flextime_data: vec![],
+            flextime_balance_as_of: None,
         }];
         let from = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
         let to = NaiveDate::from_ymd_opt(2026, 6, 30).unwrap();
