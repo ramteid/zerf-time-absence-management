@@ -1,25 +1,40 @@
-import { afterEach, beforeEach, describe, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount, unmount } from "svelte";
 import Calendar from "./Calendar.svelte";
 import { api } from "../api.js";
 import { categories, currentUser, path, settings } from "../stores.js";
 import { setLanguage } from "../i18n.js";
 
+const DEFAULT_USER = {
+  id: 2,
+  first_name: "Tina",
+  last_name: "Team",
+  role: "employee",
+  active: true,
+  tracks_time: true,
+};
+
+const DEFAULT_TIME_ENTRIES = [
+  {
+    id: 11,
+    user_id: 2,
+    entry_date: "2026-05-04",
+    start_time: "09:00:00",
+    end_time: "11:00:00",
+    category_id: 7,
+    status: "approved",
+  },
+];
+
 const mockState = vi.hoisted(() => ({
   failUsers: false,
   holidays: [],
   absences: [],
-  timeEntries: [
-    {
-      id: 11,
-      user_id: 2,
-      entry_date: "2026-05-04",
-      start_time: "09:00:00",
-      end_time: "11:00:00",
-      category_id: 7,
-      status: "approved",
-    },
-  ],
+  timeEntries: [],
+  // Returned by /time-entries (the viewer's own entries). Employees only ever
+  // hit this endpoint; leads hit it in addition to /time-entries/all.
+  ownTimeEntries: [],
+  users: [],
 }));
 
 vi.mock("svelte", async () => {
@@ -31,21 +46,13 @@ vi.mock("../api.js", () => ({
     if (urlPath.startsWith("/absences/calendar?")) return mockState.absences;
     if (urlPath.startsWith("/holidays?")) return mockState.holidays;
     if (urlPath.startsWith("/time-entries/all?")) return mockState.timeEntries;
+    if (urlPath.startsWith("/time-entries?")) return mockState.ownTimeEntries;
     if (urlPath === "/categories") {
       return [{ id: 7, name: "Project", color: "#2f7d32" }];
     }
     if (urlPath === "/users") {
       if (mockState.failUsers) throw new Error("users failed");
-      return [
-        {
-          id: 2,
-          first_name: "Tina",
-          last_name: "Team",
-          role: "employee",
-          active: true,
-          tracks_time: true,
-        },
-      ];
+      return mockState.users;
     }
     throw new Error(`Unhandled API path: ${urlPath}`);
   }),
@@ -85,6 +92,46 @@ async function waitForPath(expectedPath, timeout = 10000) {
   );
 }
 
+// Open a day cell's popup and return its rendered groups: one entry per
+// category, each with its colour swatch, its title and its rows.
+async function openDay(target, dateString) {
+  const dayButton = target.querySelector(`.cal-day[data-date="${dateString}"]`);
+  if (!dayButton) throw new Error(`No day cell rendered for ${dateString}`);
+  dayButton.click();
+  await settle();
+  const dialog = document.querySelector(".cal-popup");
+  if (!dialog) throw new Error(`Clicking ${dateString} did not open a popup`);
+  return Array.from(dialog.querySelectorAll(".cal-popup-group")).map(
+    (group) => ({
+      label: group.querySelector(".cal-popup-group-head span:last-child")
+        .textContent,
+      rows: Array.from(group.querySelectorAll(".cal-popup-row")).map((row) => ({
+        primary: row.querySelector(".cal-popup-primary").textContent,
+        secondary:
+          row.querySelector(".cal-popup-secondary")?.textContent ?? null,
+      })),
+    }),
+  );
+}
+
+function closePopup() {
+  const dialog = document.querySelector("dialog");
+  const closeButton = Array.from(dialog.querySelectorAll("button")).find(
+    (button) => button.textContent.trim() === "Close",
+  );
+  closeButton.click();
+}
+
+// The chips rendered inside one day cell, as `{ title, count }` pairs.
+function dayChips(target, dateString) {
+  const dayButton = target.querySelector(`.cal-day[data-date="${dateString}"]`);
+  if (!dayButton) throw new Error(`No day cell rendered for ${dateString}`);
+  return Array.from(dayButton.querySelectorAll(".cal-event")).map((chip) => ({
+    title: chip.querySelector(".cal-event-title").textContent,
+    count: chip.querySelector(".cal-event-count")?.textContent ?? null,
+  }));
+}
+
 describe("Calendar", () => {
   let target;
   let component;
@@ -106,6 +153,9 @@ describe("Calendar", () => {
     mockState.failUsers = false;
     mockState.holidays = [];
     mockState.absences = [];
+    mockState.timeEntries = DEFAULT_TIME_ENTRIES;
+    mockState.ownTimeEntries = [];
+    mockState.users = [DEFAULT_USER];
     api.mockClear();
   });
 
@@ -124,7 +174,15 @@ describe("Calendar", () => {
     await settle();
 
     await waitForText(target, "Team Calendar");
-    await waitForText(target, "09:00 - 11:00");
+    // The grid shows the category; the times are one click away in the popup.
+    await waitForText(target, "Project");
+    const groups = await openDay(target, "2026-05-04");
+    expect(groups).toEqual([
+      {
+        label: "Project",
+        rows: [{ primary: "09:00 - 11:00 (2:00)", secondary: null }],
+      },
+    ]);
   });
 
   it("renders all loaded holidays in the visible month", async () => {
@@ -238,9 +296,14 @@ describe("Calendar", () => {
     process.on("uncaughtException", onUncaught);
     process.on("unhandledRejection", onUncaught);
 
+    let groups;
     try {
       component = mount(Calendar, { target });
       await settle();
+      await waitForText(target, "Vacation");
+      // The popup's rows are keyed per record too, so open it inside the
+      // capture window as well.
+      groups = await openDay(target, "2026-05-11");
     } finally {
       process.off("uncaughtException", onUncaught);
       process.off("unhandledRejection", onUncaught);
@@ -250,20 +313,21 @@ describe("Calendar", () => {
       throw capturedErrors[0];
     }
 
-    // The day grid shows the category label (e.g. "Vacation"), not the
-    // person's name — the name only appears in the click-through popup — so
-    // assert on the label, and specifically that BOTH overlapping absences
-    // render as distinct events rather than being silently collapsed into
-    // one (the crash isn't the only possible failure mode of a duplicate key).
-    await waitForText(target, "Vacation");
-    const vacationEvents = Array.from(
-      target.querySelectorAll(".cal-event"),
-    ).filter((el) => el.textContent.trim() === "Vacation");
-    if (vacationEvents.length < 2) {
-      throw new Error(
-        `expected at least 2 separate "Vacation" events to render (one per overlapping absence), found ${vacationEvents.length}`,
-      );
-    }
+    // The day grid shows one chip per category — two people on vacation is
+    // still a single "Vacation" chip, carrying the number of people — while
+    // the popup lists both of them, so neither absence is lost.
+    expect(dayChips(target, "2026-05-11")).toEqual([
+      { title: "Vacation", count: "2" },
+    ]);
+    expect(groups).toEqual([
+      {
+        label: "Vacation",
+        rows: [
+          { primary: "Alice Approver", secondary: null },
+          { primary: "Bob Report", secondary: null },
+        ],
+      },
+    ]);
   });
 
   it("filters time and absence categories independently by clicking legend items", async () => {
@@ -307,7 +371,9 @@ describe("Calendar", () => {
 
     // Check accessibility: legend buttons should have aria-labels
     if (!projectButton.getAttribute("aria-label")) {
-      throw new Error("Project filter button should have aria-label for accessibility");
+      throw new Error(
+        "Project filter button should have aria-label for accessibility",
+      );
     }
 
     // Click the Project filter to hide it
@@ -341,7 +407,9 @@ describe("Calendar", () => {
     ).find((btn) => btn.textContent.includes("Project"));
 
     if (finalProjectButton.classList.contains("inactive")) {
-      throw new Error("Project filter should be active again after re-clicking");
+      throw new Error(
+        "Project filter should be active again after re-clicking",
+      );
     }
   });
 
@@ -373,7 +441,9 @@ describe("Calendar", () => {
     component = mount(Calendar, { target });
     await settle();
 
-    const legendButtons = Array.from(target.querySelectorAll(".cal-legend-item"));
+    const legendButtons = Array.from(
+      target.querySelectorAll(".cal-legend-item"),
+    );
     const labels = legendButtons.map((btn) => btn.textContent.trim());
 
     // Expected order: Holiday first, then Vacation (absence), then Project (work)
@@ -382,10 +452,208 @@ describe("Calendar", () => {
       throw new Error(`Holiday should be first, got: ${labels[0]}`);
     }
     if (labels[1] !== "Vacation") {
-      throw new Error(`Absence categories should come before work categories, got: ${labels[1]}`);
+      throw new Error(
+        `Absence categories should come before work categories, got: ${labels[1]}`,
+      );
     }
     if (labels[2] !== "Project") {
       throw new Error(`Work categories should be last, got: ${labels[2]}`);
     }
+  });
+
+  it("shows one chip per time category, titled by the category and not by the employee", async () => {
+    // Three entries from two people in the same category used to render three
+    // chips, each starting with the employee's name. The day cell is about
+    // what was worked on, so it shows the category once, with how many
+    // records it covers.
+    mockState.users = [
+      DEFAULT_USER,
+      {
+        id: 3,
+        first_name: "Ben",
+        last_name: "Busy",
+        role: "employee",
+        active: true,
+        tracks_time: true,
+      },
+    ];
+    mockState.timeEntries = [
+      {
+        id: 11,
+        user_id: 2,
+        entry_date: "2026-05-04",
+        start_time: "09:00:00",
+        end_time: "11:00:00",
+        category_id: 7,
+        status: "approved",
+      },
+      {
+        id: 12,
+        user_id: 3,
+        entry_date: "2026-05-04",
+        start_time: "13:00:00",
+        end_time: "17:00:00",
+        category_id: 7,
+        status: "approved",
+      },
+      {
+        id: 13,
+        user_id: 3,
+        entry_date: "2026-05-04",
+        start_time: "08:00:00",
+        end_time: "09:00:00",
+        category_id: 7,
+        status: "approved",
+      },
+    ];
+
+    component = mount(Calendar, { target });
+    await settle();
+    await waitForText(target, "Project");
+
+    expect(dayChips(target, "2026-05-04")).toEqual([
+      { title: "Project", count: "3" },
+    ]);
+
+    // The popup lists every record, sorted by employee and then by time.
+    const groups = await openDay(target, "2026-05-04");
+    expect(groups).toEqual([
+      {
+        label: "Project",
+        rows: [
+          { primary: "Ben Busy", secondary: "08:00 - 09:00 (1:00)" },
+          { primary: "Ben Busy", secondary: "13:00 - 17:00 (4:00)" },
+          { primary: "Tina Team", secondary: "09:00 - 11:00 (2:00)" },
+        ],
+      },
+    ]);
+  });
+
+  it("opens the same grouped popup for a day holding a holiday, an absence and working time", async () => {
+    mockState.holidays = [
+      {
+        id: 1,
+        holiday_date: "2026-05-04",
+        name: "May Day",
+        year: 2026,
+        is_auto: true,
+      },
+    ];
+    mockState.absences = [
+      {
+        id: 101,
+        user_id: 2,
+        name: "Tina Team",
+        kind: "vacation",
+        category_name: "Vacation",
+        start_date: "2026-05-04",
+        end_date: "2026-05-05",
+        comment: "Long weekend",
+        status: "approved",
+      },
+    ];
+
+    component = mount(Calendar, { target });
+    await settle();
+    await waitForText(target, "Project");
+
+    // Chips and popup groups follow the same order everywhere: holiday first,
+    // then absences, then work categories.
+    expect(dayChips(target, "2026-05-04")).toEqual([
+      { title: "May Day", count: null },
+      { title: "Vacation", count: null },
+      { title: "Project", count: null },
+    ]);
+
+    const groups = await openDay(target, "2026-05-04");
+    expect(groups).toEqual([
+      { label: "Holiday", rows: [{ primary: "May Day", secondary: null }] },
+      {
+        label: "Vacation",
+        rows: [{ primary: "Tina Team", secondary: "Long weekend" }],
+      },
+      {
+        label: "Project",
+        rows: [{ primary: "Tina Team", secondary: "09:00 - 11:00 (2:00)" }],
+      },
+    ]);
+
+    // Every row sits in its group's row container, which carries the single
+    // fixed indent — no row is indented by its own content width.
+    const popup = document.querySelector(".cal-popup");
+    const rows = Array.from(popup.querySelectorAll(".cal-popup-row"));
+    expect(rows).toHaveLength(3);
+    for (const row of rows) {
+      expect(row.parentElement.classList.contains("cal-popup-rows")).toBe(true);
+      expect(row.querySelectorAll(".cal-popup-primary")).toHaveLength(1);
+    }
+  });
+
+  it("names the viewer's own entries in the popup even without a team lookup", async () => {
+    // An employee never loads /users, so their own name has to come from the
+    // session — otherwise their rows would be the only nameless ones.
+    currentUser.set({
+      id: 2,
+      first_name: "Tina",
+      last_name: "Team",
+      role: "employee",
+      permissions: { can_approve: false },
+      tracks_time: true,
+    });
+    // Employees see only their own entries, and get no /users lookup at all.
+    mockState.timeEntries = [];
+    mockState.ownTimeEntries = DEFAULT_TIME_ENTRIES;
+    mockState.users = [];
+
+    component = mount(Calendar, { target });
+    await settle();
+    await waitForText(target, "Project");
+
+    const groups = await openDay(target, "2026-05-04");
+    expect(groups).toEqual([
+      {
+        label: "Project",
+        rows: [{ primary: "Tina Team", secondary: "09:00 - 11:00 (2:00)" }],
+      },
+    ]);
+  });
+
+  it("hides a filtered-out category from both the day cells and the popup", async () => {
+    mockState.absences = [
+      {
+        id: 101,
+        user_id: 2,
+        name: "Tina Team",
+        kind: "vacation",
+        category_name: "Vacation",
+        start_date: "2026-05-04",
+        end_date: "2026-05-05",
+        comment: null,
+        status: "approved",
+      },
+    ];
+
+    component = mount(Calendar, { target });
+    await settle();
+    await waitForText(target, "Vacation");
+
+    expect(dayChips(target, "2026-05-04").map((chip) => chip.title)).toEqual([
+      "Vacation",
+      "Project",
+    ]);
+
+    const vacationFilter = Array.from(
+      target.querySelectorAll(".cal-legend-item"),
+    ).find((button) => button.textContent.includes("Vacation"));
+    vacationFilter.click();
+    await settle();
+
+    expect(dayChips(target, "2026-05-04").map((chip) => chip.title)).toEqual([
+      "Project",
+    ]);
+    const groups = await openDay(target, "2026-05-04");
+    expect(groups.map((group) => group.label)).toEqual(["Project"]);
+    closePopup();
+    await settle();
   });
 });

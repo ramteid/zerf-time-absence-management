@@ -289,7 +289,13 @@
   min-width: 0;
 }
 
+/* Day-cell chip: one per category, showing the category title plus — when the
+   category covers more than one record that day — how many. The count is
+   pushed to the right edge so the titles stay aligned down the cell. */
 .cal-event {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-size: 0.6875rem;
   padding: 2px 5px;
   border-radius: 3px;
@@ -297,9 +303,20 @@
   margin-bottom: 2px;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
   font-weight: 500;
   opacity: 0.9;
+}
+
+.cal-event-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cal-event-count {
+  margin-left: auto;
+  flex-shrink: 0;
+  opacity: 0.85;
 }
 
 .cal-more {

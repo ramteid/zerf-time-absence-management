@@ -26,6 +26,8 @@
     buildColorMap,
     calendarEventTitle,
     cellEvents,
+    compareEventGroups,
+    groupDayEvents,
     rawCellEvents,
   } from "../lib/domain/calendar.js";
   import { tracksOwnTime } from "../rolePolicy.js";
@@ -209,24 +211,31 @@
   })();
 
   $: absCatBySlug = new Map($absenceCategories.map((c) => [c.slug, c]));
-  $: colorByKey = buildColorMap(cells, teMap, categoryById, absCatBySlug, $t);
+  // Own time entries carry only a user id; the /users lookup is empty for
+  // employees, so the viewer's own name comes from the session instead.
+  $: currentUserName =
+    `${$currentUser?.first_name ?? ""} ${$currentUser?.last_name ?? ""}`.trim() ||
+    null;
+  $: calendarContext = {
+    entryMap: teMap,
+    categoryMap: categoryById,
+    absenceCategoryMap: absCatBySlug,
+    translate: $t,
+    userMap: userById,
+    currentUserId: $currentUser?.id ?? null,
+    currentUserName,
+  };
+  $: colorByKey = buildColorMap(cells, calendarContext);
   $: eventCells = cells.map((cell) => {
-    const allEvents = cellEvents(
-      cell,
-      teMap,
-      categoryById,
-      colorByKey,
-      absCatBySlug,
-      $t,
-      userById,
-      $currentUser?.id,
-    );
+    const allEvents = cellEvents(cell, calendarContext, colorByKey);
     // Filter events based on active filters
     const filteredEvents =
       activeFilters.size === 0
         ? allEvents
         : allEvents.filter((event) => activeFilters.has(event.colorKey));
-    return { ...cell, events: filteredEvents };
+    // One group per category: the day cell shows a single chip per category
+    // and the popup lists every record inside it.
+    return { ...cell, groups: groupDayEvents(filteredEvents) };
   });
 
   // ── Heading: "Team Calendar" for team leads and admins (they can always see
@@ -252,7 +261,7 @@
   // one visible cell on Saturday or Sunday actually has events. If either
   // weekend day has events, both columns are shown so the week stays paired.
   $: showWeekends = eventCells.some(
-    (cell) => cell.weekend && cell.events.length > 0,
+    (cell) => cell.weekend && cell.groups.length > 0,
   );
   $: visibleWeekdayLabels = showWeekends
     ? weekdayLabels()
@@ -268,21 +277,13 @@
     for (const cell of cells) {
       if (cell.other) continue;
       // Use rawCellEvents to get unfiltered events for legend generation
-      const rawEvents = rawCellEvents(
-        cell,
-        teMap,
-        categoryById,
-        absCatBySlug,
-        $t,
-        userById,
-        $currentUser?.id,
-      );
+      const rawEvents = rawCellEvents(cell, calendarContext);
       for (const event of rawEvents) {
         if (!seen.has(event.colorKey)) {
           seen.set(event.colorKey, {
             colorKey: event.colorKey,
             color: colorByKey.get(event.colorKey) || event.color,
-            label: event.label
+            label: event.label,
           });
         }
       }
@@ -299,7 +300,9 @@
       if (activeFilters.size === 0) {
         activeFilters = new Set(currentKeys);
       } else {
-        activeFilters = new Set([...activeFilters].filter((key) => currentKeys.has(key)));
+        activeFilters = new Set(
+          [...activeFilters].filter((key) => currentKeys.has(key)),
+        );
       }
     }
   }
@@ -314,30 +317,18 @@
     activeFilters = newFilters;
   }
 
-  $: legendItems = (() => {
-    // Sort legend items consistently: holidays first, then absences, then work categories
-    const sortKey = (item) => {
-      if (item.colorKey === "holiday") return [0, item.label];
-      if (item.colorKey.startsWith("absence:")) return [1, item.label];
-      return [2, item.label];
-    };
-    return allLegendItems
-      .map((item) => ({
-        ...item,
-        active: activeFilters.has(item.colorKey),
-      }))
-      .sort((a, b) => {
-        const [aGroup, aLabel] = sortKey(a);
-        const [bGroup, bLabel] = sortKey(b);
-        if (aGroup !== bGroup) return aGroup - bGroup;
-        return aLabel.localeCompare(bLabel);
-      });
-  })();
+  // Legend order follows the same holiday → absence → work-category ranking
+  // the day cells and the day popup use, so a category never moves around.
+  $: legendItems = allLegendItems
+    .map((item) => ({
+      ...item,
+      active: activeFilters.has(item.colorKey),
+    }))
+    .sort(compareEventGroups);
 
   function clickDay(cell) {
-    const cellEventsList = cell.events;
-    if (cellEventsList.length === 0) return;
-    popupCell = { ...cell, events: cellEventsList };
+    if (cell.groups.length === 0) return;
+    popupCell = cell;
   }
 
   function monthFromPath() {
@@ -402,8 +393,8 @@
       style:grid-template-columns={`repeat(${calGridColumns},minmax(28px,1fr))`}
     >
       {#each visibleEventCells as c (c.ds)}
-        {@const evts = c.events}
-        {#if c.weekend && evts.length === 0}
+        {@const groups = c.groups}
+        {#if c.weekend && groups.length === 0}
           <!-- Keeps the grid slot so the shared 7-column grid stays aligned,
                without showing a visible box for a weekend day with no
                entries. Saturday and Sunday are hidden independently: one
@@ -413,24 +404,34 @@
           <button
             type="button"
             class="cal-day"
-            class:has-events={evts.length > 0}
+            data-date={c.ds}
+            class:has-events={groups.length > 0}
             class:today={c.today}
             class:weekend={c.weekend && !c.today}
             class:other-month={c.other}
-            style:border-left={evts.length ? `3px solid ${evts[0].color}` : null}
+            style:border-left={groups.length
+              ? `3px solid ${groups[0].color}`
+              : null}
             on:click={() => clickDay(c)}
-            disabled={evts.length === 0}
+            disabled={groups.length === 0}
           >
             <div class="cal-day-number tab-num">{c.d.getDate()}</div>
-            {#if evts.length}
+            {#if groups.length}
               <div class="cal-events">
-                {#each evts.slice(0, 3) as ev (ev.key)}
-                  <div class="cal-event" style:background={ev.color}>
-                    {calendarEventTitle(ev)}
+                <!-- One chip per category, never one per record: six people on
+                     vacation show a single "Vacation" chip carrying the count. -->
+                {#each groups.slice(0, 3) as group (group.key)}
+                  <div class="cal-event" style:background={group.color}>
+                    <span class="cal-event-title"
+                      >{calendarEventTitle(group)}</span
+                    >
+                    {#if group.count > 1}
+                      <span class="cal-event-count tab-num">{group.count}</span>
+                    {/if}
                   </div>
                 {/each}
-                {#if evts.length > 3}
-                  <div class="cal-more">+{evts.length - 3}</div>
+                {#if groups.length > 3}
+                  <div class="cal-more">+{groups.length - 3}</div>
                 {/if}
               </div>
             {/if}
@@ -459,15 +460,31 @@
 
 {#if popupCell}
   <Dialog title={fmtDate(popupCell.ds)} onClose={() => (popupCell = null)}>
-    {#each popupCell.events as ev (ev.key)}
-      <div class="cal-event">
-        <span class="cal-event-dot" style:background={ev.color}></span>
-        <span class="fw-500">{ev.popupLabel || ev.label}</span>
-        {#if ev.detail}
-          <span class="text-tertiary">{ev.detail}</span>
-        {/if}
-      </div>
-    {/each}
+    <!-- Every day opens this same view: one block per category, and inside it
+         one row per record, so the layout never depends on which chip was
+         clicked or on how many people share a category. -->
+    <div class="cal-popup">
+      {#each popupCell.groups as group (group.key)}
+        <div class="cal-popup-group">
+          <div class="cal-popup-group-head">
+            <span class="cal-popup-dot" style:background={group.color}></span>
+            <span class="fw-500">{group.label}</span>
+          </div>
+          <div class="cal-popup-rows">
+            {#each group.items as item (item.key)}
+              <div class="cal-popup-row">
+                <span class="cal-popup-primary">{item.primary}</span>
+                {#if item.secondary}
+                  <span class="cal-popup-secondary text-tertiary"
+                    >{item.secondary}</span
+                  >
+                {/if}
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/each}
+    </div>
     <svelte:fragment slot="footer">
       <span class="flex-1"></span>
       <button class="zf-btn" on:click={() => (popupCell = null)}
@@ -504,7 +521,10 @@
     border: 1px solid var(--border);
     background: var(--bg-surface);
     cursor: pointer;
-    transition: opacity 150ms ease-in-out, border-color 150ms ease-in-out, background-color 150ms ease-in-out;
+    transition:
+      opacity 150ms ease-in-out,
+      border-color 150ms ease-in-out,
+      background-color 150ms ease-in-out;
   }
 
   .cal-legend-item:hover {
@@ -524,19 +544,53 @@
     flex-shrink: 0;
   }
 
-  .cal-event {
+  /* Day popup. Indentation is fixed rather than content-derived: the rows of
+     every group start at the same offset (swatch width + gap) no matter how
+     long the category name or a person's name is. */
+  .cal-popup {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .cal-popup-group-head {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 0;
     font-size: 0.875rem;
   }
 
-  .cal-event-dot {
+  .cal-popup-dot {
     display: inline-block;
     width: 10px;
     height: 10px;
     border-radius: 2px;
     flex-shrink: 0;
+  }
+
+  .cal-popup-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 4px;
+    padding-left: 18px;
+  }
+
+  .cal-popup-row {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    font-size: 0.875rem;
+  }
+
+  .cal-popup-primary {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .cal-popup-secondary {
+    margin-left: auto;
+    flex-shrink: 0;
+    white-space: nowrap;
   }
 </style>

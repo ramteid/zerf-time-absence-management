@@ -432,8 +432,8 @@ Review and privacy behavior:
 	- Employees and assistants see only their own absences and time entries.
 	- Team leads see their own data plus the absences and time entries of
 		every user who has them assigned as approver (their direct reports,
-		excluding admin subjects). For direct reports' time entries, the
-		person's name is shown in the event detail.
+		excluding admin subjects). Who an entry belongs to is shown when you
+		open the day.
 	- Admins see all users' data regardless of approver assignments.
 - **Calendar visibility is governed solely by the requester's scope**:
 	admins see all absences, leads see their own plus their direct reports',
@@ -445,6 +445,17 @@ Review and privacy behavior:
 	admin) sees the comment along with the rest of the entry. There is no
 	redacted or masked view — see [Information disclosure
 	prevention](#information-disclosure-prevention).
+
+How a day looks in the calendar:
+
+- A day shows one coloured label per category, never one per person: if six
+	people are on vacation, you see a single "Vacation" label with the number
+	of people beside it.
+- Click any day to see everything on it in one list, grouped by category and
+	sorted by person, with the booked times or the request's note next to each
+	name. Public holidays come first, then absences, then working time.
+- The labels below the calendar switch categories on and off. A hidden
+	category disappears from the days and from the day list.
 
 Vacations and sick leave are checked against the employee's own work schedule.
 A one-day request on a public holiday or on a non-working weekday does not
