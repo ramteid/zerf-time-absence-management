@@ -1206,6 +1206,68 @@ async fn flextime_balance_reserves_past_requests_after_cutoff() {
     app.cleanup().await;
 }
 
+/// Flextime-cost absence validation must charge every potential weekday in
+/// the range, not just the user's contracted weekly quota. A 1-4 day/week
+/// contract is not pinned to fixed weekdays (see `time_calc::is_potential_workday`),
+/// so the flextime ledger keeps a target on every Mon-Fri regardless of how
+/// many days the contract actually requires — a full calendar week of
+/// flextime_reduction therefore costs the full weekly target, not a
+/// quota-capped fraction of it. The balance guard has to charge the same
+/// amount or it under-reserves and lets the balance go negative once the
+/// absence is approved and the ledger catches up.
+#[tokio::test]
+async fn flextime_balance_charges_every_potential_weekday_for_reduced_schedules() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, _lead_pw, emp_id, emp_pw, _, _cat_id) =
+        bootstrap_team(&app, &admin, false).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+
+    // 3 days/week at 24h/week => daily target = 24h / 5 potential days = 4.8h
+    // (288 min), same as a full-time schedule's per-day math but spread over
+    // the flexible 5-day pool. No completed week exists yet (start_date is
+    // the request week itself), so the balance cutoff stays before it and
+    // current_balance_min is exactly the seed — no historical ledger noise.
+    let target_per_day_min: i64 = 288;
+    let monday = next_monday(7);
+    sqlx::query(
+        "UPDATE users SET start_date=$1, weekly_hours=24, workdays_per_week=3, \
+         overtime_start_balance_min=$2 WHERE id=$3",
+    )
+    .bind(monday)
+    .bind(target_per_day_min * 4) // 1152 min: enough for the 3-day quota (864)
+    // but short of the true 5-day cost (1440).
+    .bind(emp_id)
+    .execute(&app.state.pool)
+    .await
+    .expect("seed reduced-schedule flextime balance");
+
+    let friday = monday + chrono::Duration::days(4);
+    let (st, body) = emp
+        .post(
+            "/api/v1/absences",
+            &json!({
+                "kind":"flextime_reduction",
+                "start_date": monday.format("%Y-%m-%d").to_string(),
+                "end_date": friday.format("%Y-%m-%d").to_string(),
+            }),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "a full Mon-Fri flextime absence costs 5 days' target, not the 3-day \
+         quota — the seeded balance covers the quota-capped cost but not the \
+         true cost, so this must be rejected: {body}"
+    );
+    assert!(
+        body.to_string().contains("flextime balance"),
+        "rejection should mention flextime balance: {body}"
+    );
+
+    app.cleanup().await;
+}
+
 /// Covers Bug 6: editing a requested absence whose category was deactivated
 /// by an admin in the meantime must succeed when the user is NOT changing the
 /// category — otherwise users can never adjust dates or comment on an

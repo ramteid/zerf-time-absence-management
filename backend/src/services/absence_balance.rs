@@ -681,6 +681,46 @@ pub async fn carryover_remaining_days(input: CarryoverRemainingInput<'_>) -> App
     Ok((carryover_days as f64 - consumed).max(0.0))
 }
 
+/// Count target-bearing days in `[from, to]` for flextime-cost absence
+/// accounting: every day the flextime ledger charges a target on (see
+/// `services::reports::build_flextime_for_user`'s day loop) minus public
+/// holidays.
+///
+/// This is deliberately NOT the same day count as `workdays()`/
+/// `workdays_for_ranges_in_window`, which cap at the configured weekly quota
+/// (`workdays_per_week`) — correct for leave-account billing, where a 3-day/
+/// week contract should only be charged 3 leave days for a calendar week off.
+/// A `cost_type='flextime'` absence works differently: it keeps every
+/// potential weekday's target in the ledger (1-4 day/week contracts are not
+/// pinned to fixed weekdays — see `time_calc::is_potential_workday`), so a
+/// full calendar week off costs the full weekly target across all 5 (or 6/7)
+/// potential weekdays, not just the contracted count. Using the capped count
+/// here would under-reserve a full-week flextime-cost absence for anyone on a
+/// reduced schedule.
+async fn flextime_cost_workdays(
+    pool: &crate::db::DatabasePool,
+    workdays_per_week: i16,
+    from: NaiveDate,
+    to: NaiveDate,
+) -> AppResult<f64> {
+    if to < from {
+        return Ok(0.0);
+    }
+    let holidays = crate::repository::HolidayDb::new(pool.clone())
+        .get_dates_in_range(from, to)
+        .await?;
+    let mut count = 0.0;
+    let mut day = from;
+    while day <= to {
+        if crate::time_calc::is_potential_workday(day, workdays_per_week) && !holidays.contains(&day)
+        {
+            count += 1.0;
+        }
+        day += Duration::days(1);
+    }
+    Ok(count)
+}
+
 /// Validate that a flextime-cost absence (cost_type='flextime') does not
 /// push the user's flextime balance below the configured floor.
 ///
@@ -700,7 +740,8 @@ pub async fn carryover_remaining_days(input: CarryoverRemainingInput<'_>) -> App
 /// week is never floor-checked, so a week whose booked hours fall short of the
 /// target still lowers the balance — possibly below the floor — the moment it
 /// is approved and the cutoff moves past it. That is independent of any
-/// absence and predates the cutoff rule.
+/// absence and predates the cutoff rule. Fixing it needs a prospective-cutoff
+/// simulation at approval time and is out of scope here.
 pub async fn validate_flextime_balance(
     pool: &crate::db::DatabasePool,
     tx: &mut crate::db::PgConnection,
@@ -773,7 +814,9 @@ pub async fn validate_flextime_balance(
             // Range was entirely before the cutoff and is already accounted for.
             continue;
         }
-        let days = workdays(pool, user.id, effective_start, *range_end).await?;
+        let days =
+            flextime_cost_workdays(pool, user.workdays_per_week, effective_start, *range_end)
+                .await?;
         committed_cost_min += (days * target_per_day_min as f64).round() as i64;
     }
 
@@ -789,7 +832,8 @@ pub async fn validate_flextime_balance(
         // pending commitments do not already breach the floor.
         0
     } else {
-        let days = workdays(pool, user.id, proposed_start, end_date).await?;
+        let days =
+            flextime_cost_workdays(pool, user.workdays_per_week, proposed_start, end_date).await?;
         (days * target_per_day_min as f64).round() as i64
     };
 
