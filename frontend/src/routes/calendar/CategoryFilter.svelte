@@ -94,7 +94,9 @@
             disabled={allHidden}>{$t("Hide all")}</button
           >
         </div>
-        <div class="cal-filter-list">
+        <!-- `menuitemcheckbox` is only valid inside a `menu`, and the list is
+             the element that actually holds the checkable items. -->
+        <div class="cal-filter-list" role="menu" aria-label={$t("Categories")}>
           {#each items as item (item.colorKey)}
             {@const isVisible = !hidden.has(item.colorKey)}
             <button

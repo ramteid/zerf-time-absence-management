@@ -470,6 +470,56 @@ describe("Calendar", () => {
     ]);
   });
 
+  it("keeps the filter when the next month holds the same categories", async () => {
+    // Changing month rebuilds the grid before the new month's entries have
+    // been fetched, so for one render the new days are matched against the old
+    // data and nearly every category looks gone. Pruning the filter on that
+    // render cleared it on every single navigation — which broke the most
+    // natural use of the feature: filtering to one category and paging through
+    // the months to follow it.
+    const mayAbsence = {
+      id: 101,
+      user_id: 2,
+      name: "Tina Team",
+      kind: "vacation",
+      category_name: "Vacation",
+      start_date: "2026-05-04",
+      end_date: "2026-05-05",
+      comment: null,
+      status: "approved",
+    };
+    mockState.absences = [mayAbsence];
+
+    component = mount(Calendar, { target });
+    await settle();
+    await waitForText(target, "Vacation");
+    await openFilterMenu(target);
+    await clickFilterOption(target, "Vacation");
+    expect(target.querySelector(".cal-filter-count").textContent).toBe("1/2");
+
+    // June holds the very same two categories, on different days.
+    mockState.absences = [
+      {
+        ...mayAbsence,
+        id: 102,
+        start_date: "2026-06-08",
+        end_date: "2026-06-09",
+      },
+    ];
+    mockState.timeEntries = [
+      { ...DEFAULT_TIME_ENTRIES[0], id: 12, entry_date: "2026-06-08" },
+    ];
+    target.querySelector('[aria-label="Next month"]').click();
+    await waitForPath("/calendar?year=2026&month=6");
+    await settle();
+    await waitForText(target, "Vacation");
+
+    expect(target.querySelector(".cal-filter-count").textContent).toBe("1/2");
+    expect(dayChips(target, "2026-06-08").map((chip) => chip.title)).toEqual([
+      "Vacation",
+    ]);
+  });
+
   it("drops the filter for a category the next month does not contain", async () => {
     // A filter is only meaningful against categories that are on screen: after
     // navigating away from the month that had the absence, the menu must not

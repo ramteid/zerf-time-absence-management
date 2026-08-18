@@ -45,6 +45,11 @@
   let loadSeq = 0;
   // Category filter: the colorKeys the viewer has hidden. Empty = show all.
   let hiddenCategories = new Set();
+  // The loadKey whose data is currently in `entries`/`timeEntries`/`holidays`.
+  // Between navigating to a month and its fetch returning, the grid is built
+  // from the previous month's data, so the category list is not yet the new
+  // month's — see the filter pruning below.
+  let loadedKey = "";
 
   async function fallbackToEmpty(promise) {
     try {
@@ -87,6 +92,7 @@
 
   async function load() {
     const seq = ++loadSeq;
+    const requestedKey = loadKey;
     const loadYear = year;
     const loadMonth = month;
     const monthString = `${loadYear}-${String(loadMonth).padStart(2, "0")}`;
@@ -137,12 +143,14 @@
       users = (nextUsers || []).filter(
         (u) => tracksOwnTime(u) && u.active !== false,
       );
+      loadedKey = requestedKey;
     } catch {
       if (seq !== loadSeq) return;
       entries = [];
       holidays = [];
       timeEntries = [];
       users = [];
+      loadedKey = requestedKey;
     }
   }
   $: loadKey =
@@ -295,9 +303,13 @@
   $: categoryKeys = categoryItems.map((item) => item.colorKey);
 
   // Navigating to a month without one of the hidden categories drops it from
-  // the filter. The identity check keeps this from re-assigning (and so
-  // re-running) on every render when there is nothing to drop.
-  $: {
+  // the filter — but only once that month's own data has arrived. Changing
+  // month rebuilds the grid immediately while the fetch is still in flight, so
+  // for one render the new month's days are matched against the previous
+  // month's entries and almost every category looks absent. Pruning then would
+  // silently clear the whole filter on every single navigation. The identity
+  // check keeps this from re-assigning (and so re-running) when nothing drops.
+  $: if (loadedKey === loadKey) {
     const pruned = pruneCategoryFilter(hiddenCategories, categoryKeys);
     if (pruned !== hiddenCategories) hiddenCategories = pruned;
   }
