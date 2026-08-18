@@ -246,7 +246,7 @@ async fn start_date_full_workflow() {
             ))
             .await;
         assert_eq!(st, StatusCode::OK, "flextime report");
-        let rows = body.as_array().expect("flextime should be array");
+        let rows = body["days"].as_array().expect("flextime should be array");
         assert_eq!(
             rows.first().unwrap()["cumulative_min"].as_i64(),
             Some(0),

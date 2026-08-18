@@ -729,9 +729,14 @@ pub async fn validate_flextime_balance(
         user.workdays_per_week,
     )
     .await?;
-    let (flextime_days, _) =
-        crate::services::reports::build_flextime_for_user(pool, user, cutoff_date, cutoff_date).await?;
-    let current_balance_min = flextime_days.first().map(|d| d.cumulative_min).unwrap_or(user.overtime_start_balance_min);
+    let current_balance_min = if cutoff_date < user.start_date {
+        // Cutoff is before start date: no approved history yet, use seed only
+        user.overtime_start_balance_min
+    } else {
+        let (flextime_days, _) =
+            crate::services::reports::build_flextime_for_user(pool, user, cutoff_date, cutoff_date).await?;
+        flextime_days.first().map(|d| d.cumulative_min).unwrap_or(user.overtime_start_balance_min)
+    };
 
     let today = crate::services::settings::app_today(pool).await;
 

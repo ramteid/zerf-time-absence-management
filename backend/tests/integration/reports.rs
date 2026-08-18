@@ -1175,7 +1175,7 @@ async fn reports_full_workflow() {
             StatusCode::OK,
             "flextime report with flextime reduction"
         );
-        let rows = body.as_array().unwrap();
+        let rows = body["days"].as_array().unwrap();
         assert_eq!(rows[0]["target_min"], per_day_target_minutes(39));
         assert_eq!(rows[0]["actual_min"], 0);
         assert_eq!(rows[1]["target_min"], per_day_target_minutes(39));
