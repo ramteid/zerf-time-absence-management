@@ -511,8 +511,8 @@ describe("Reports", () => {
     await waitFor(
       () => target.querySelector("#reports-user-select")?.value === "7",
     );
-    expect(
-      api.mock.calls.some(([p]) => p.startsWith("/reports/range?")),
-    ).toBe(false);
+    expect(api.mock.calls.some(([p]) => p.startsWith("/reports/range?"))).toBe(
+      false,
+    );
   }, 20000);
 });

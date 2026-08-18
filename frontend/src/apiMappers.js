@@ -89,7 +89,10 @@ export function countWorkdays(
     current = addCalendarDays(current, 1)
   ) {
     const currentDate = formatIsoDate(current);
-    if (isPotentialWorkday(current, configuredDays) && !holidays.has(currentDate)) {
+    if (
+      isPotentialWorkday(current, configuredDays) &&
+      !holidays.has(currentDate)
+    ) {
       const weekKey = formatIsoDate(weekMonday(current));
       countedByWeek.set(weekKey, (countedByWeek.get(weekKey) || 0) + 1);
     }
@@ -111,9 +114,7 @@ export function normalizeMonthReport(report, workdaysPerWeek = 5) {
   const absences = [];
   let activeAbsence = null;
   const holidaySet = new Set(
-    report.days
-      .filter((day) => !!day.holiday)
-      .map((day) => day.date),
+    report.days.filter((day) => !!day.holiday).map((day) => day.date),
   );
 
   function flushActiveAbsence() {

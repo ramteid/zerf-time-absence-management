@@ -33,7 +33,8 @@
   // "sick-like" for the AU (medical certificate) threshold calculation in
   // services::medical_certificate, so an org can opt a category in/out of
   // that calculation regardless of its other behavior flags.
-  let medical_certificate_relevant = template.medical_certificate_relevant ?? false;
+  let medical_certificate_relevant =
+    template.medical_certificate_relevant ?? false;
   $: hasLeaveAccount = cost_type === "vacation";
   // cost_type is immutable once a category exists at all: "none" and
   // "flextime" stay freely interchangeable for an existing category (no

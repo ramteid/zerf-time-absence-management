@@ -98,7 +98,8 @@
         return {
           [entry.id]: {
             positionFraction: Math.min((breakTime - start) / entryDuration, 1),
-            deductionFraction: info.appliedRule.deductionMinutes / entryDuration,
+            deductionFraction:
+              info.appliedRule.deductionMinutes / entryDuration,
           },
         };
       }

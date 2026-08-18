@@ -353,7 +353,8 @@ describe("extractDetailRows", () => {
       action: "rejected",
       before_data:
         '{"user_id":3,"kind":"vacation","start_date":"2026-08-05","end_date":"2026-08-05","status":"requested","comment":"Actually sick, see doctor note"}',
-      after_data: '{"status":"rejected","reason":"This is a sick leave, not vacation"}',
+      after_data:
+        '{"status":"rejected","reason":"This is a sick leave, not vacation"}',
     };
     const rows = extractDetailRows(entry, new Map(), translate);
     expect(rows).not.toBeNull();

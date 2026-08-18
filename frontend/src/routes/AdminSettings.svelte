@@ -419,7 +419,9 @@
       <div class="field-row">
         <div>
           <label class="zf-label" for="settings-medical-certificate-threshold"
-            >{$t("Consecutive sick days before a certificate is required")}</label
+            >{$t(
+              "Consecutive sick days before a certificate is required",
+            )}</label
           >
           <input
             id="settings-medical-certificate-threshold"

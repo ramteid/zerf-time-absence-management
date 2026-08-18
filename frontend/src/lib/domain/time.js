@@ -256,7 +256,14 @@ export function computeDayBreakInfo(items, categories, rules) {
   const requiredMin = appliedRule?.deductionMinutes ?? 0;
   const deductionMin = Math.max(0, requiredMin - takenMin);
 
-  return { blocks, workedMin, requiredMin, takenMin, deductionMin, appliedRule };
+  return {
+    blocks,
+    workedMin,
+    requiredMin,
+    takenMin,
+    deductionMin,
+    appliedRule,
+  };
 }
 
 /**

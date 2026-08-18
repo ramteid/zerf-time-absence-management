@@ -28,8 +28,7 @@
         class="tab-num"
         style:color={available < 0
           ? "var(--danger-text)"
-          : "var(--success-text)"}
-        >{formatDayCount(available)}</span
+          : "var(--success-text)"}>{formatDayCount(available)}</span
       >
       <span class="leave-account-card-count-total tab-num"
         ><span class="sr-only">{$t("Entitlement")}</span>/ {formatDayCount(
