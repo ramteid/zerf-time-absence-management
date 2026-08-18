@@ -1152,6 +1152,60 @@ async fn flextime_balance_revalidated_at_approval() {
     app.cleanup().await;
 }
 
+/// Flextime requests after the last fully approved week must reserve balance
+/// even when their dates are already in the past.
+#[tokio::test]
+async fn flextime_balance_reserves_past_requests_after_cutoff() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, _lead_pw, emp_id, emp_pw, _, _cat_id) =
+        bootstrap_team(&app, &admin, false).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+
+    // Give the user exactly one workday of balance. No completed week exists,
+    // so the balance cutoff stays before this start date.
+    let past_monday = next_monday(-21);
+    let future_monday = next_monday(7);
+    sqlx::query("UPDATE users SET start_date = $1, overtime_start_balance_min = 468 WHERE id = $2")
+        .bind(past_monday)
+        .bind(emp_id)
+        .execute(&app.state.pool)
+        .await
+        .expect("set flextime test balance");
+
+    let past_date = past_monday.format("%Y-%m-%d").to_string();
+    let (st, body) = emp
+        .post(
+            "/api/v1/absences",
+            &json!({"kind":"flextime_reduction","start_date":past_date,"end_date":past_date}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "past flextime request must reserve the available balance: {body}"
+    );
+
+    let future_date = future_monday.format("%Y-%m-%d").to_string();
+    let (st, body) = emp
+        .post(
+            "/api/v1/absences",
+            &json!({"kind":"flextime_reduction","start_date":future_date,"end_date":future_date}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "past request after cutoff must reduce the balance available to a future request: {body}"
+    );
+    assert!(
+        body.to_string().contains("flextime balance"),
+        "rejection should mention flextime balance: {body}"
+    );
+
+    app.cleanup().await;
+}
+
 /// Covers Bug 6: editing a requested absence whose category was deactivated
 /// by an admin in the meantime must succeed when the user is NOT changing the
 /// category — otherwise users can never adjust dates or comment on an

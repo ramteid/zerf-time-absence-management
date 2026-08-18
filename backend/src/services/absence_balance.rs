@@ -685,13 +685,13 @@ pub async fn carryover_remaining_days(input: CarryoverRemainingInput<'_>) -> App
 /// push the user's flextime balance below the configured floor.
 ///
 /// The check accounts for:
-/// 1. The current balance as of end-of-yesterday (from `build_flextime_for_user`).
-/// 2. The future-portion cost of OTHER pending/approved/cancellation_pending
-///    flextime-cost absences — these are committed deductions that haven't
-///    yet been realised in the balance. Without this, multiple requests that
-///    each individually fit could be approved together and breach the floor.
-/// 3. The future-portion cost of the proposed range itself (past days are
-///    already reflected in current_balance).
+/// 1. The current balance through the end of the last fully approved week
+///    (from `build_flextime_for_user`).
+/// 2. The post-cutoff cost of OTHER pending/approved/cancellation_pending
+///    flextime-cost absences. These are committed deductions that are not yet
+///    reflected in the balance. Without this, multiple requests that each
+///    individually fit could be approved together and breach the floor.
+/// 3. The post-cutoff cost of the proposed range itself.
 ///
 /// `exclude_id` excludes the absence being edited/approved from (2) so it is
 /// not double-counted with (3).
@@ -738,46 +738,45 @@ pub async fn validate_flextime_balance(
         flextime_days.first().map(|d| d.cumulative_min).unwrap_or(user.overtime_start_balance_min)
     };
 
-    let today = crate::services::settings::app_today(pool).await;
+    let unaccounted_from = cutoff_date + Duration::days(1);
 
-    // (2) Committed-but-not-yet-realised flextime usage from OTHER absences.
+    // (2) Committed-but-not-yet-accounted flextime usage from OTHER absences.
     //
     // cost_type='flextime' absences cost `target_per_day_min` per workday
-    // because the day keeps its target while the user logs zero hours. Past
-    // portions of these absences (through the cutoff) are ALREADY reflected in current_balance
-    // (build_flextime_for_user processed those days with target = target_per_day_min
-    // and actual = 0), so we count only the future portion (`max(start, today)`
-    // through `end`) to avoid double-charging.
+    // because the day keeps its target while the user logs zero hours. Portions
+    // through the cutoff are already reflected in current_balance, so count
+    // every later day, including a past day after the cutoff, to avoid a gap
+    // between the ledger cutoff and today.
     //
     // Including `requested` and `cancellation_pending` is conservative: a
     // pending request will probably be approved; a cancellation request might
-    // not be honoured. Both COULD reduce the future balance, so we treat them
-    // as committed for safety. The `exclude_id` skips the absence we're
+    // not be honoured. Both can reduce the balance, so we treat them as
+    // committed for safety. The `exclude_id` skips the absence we're
     // validating right now (it would otherwise count itself in step 2 AND in
     // step 3 below).
     let committed_ranges =
-        AbsenceDb::flextime_cost_ranges_after_tx(tx, user.id, today, exclude_id).await?;
+        AbsenceDb::flextime_cost_ranges_after_tx(tx, user.id, unaccounted_from, exclude_id).await?;
     let mut committed_cost_min: i64 = 0;
     for (range_start, range_end) in &committed_ranges {
-        let effective_start = std::cmp::max(*range_start, today);
+        let effective_start = std::cmp::max(*range_start, unaccounted_from);
         if effective_start > *range_end {
-            // Range was entirely in the past — already in current_balance, skip.
+            // Range was entirely before the cutoff and is already accounted for.
             continue;
         }
         let days = workdays(pool, user.id, effective_start, *range_end).await?;
         committed_cost_min += (days * target_per_day_min as f64).round() as i64;
     }
 
-    // (3) Future portion of the proposed range. Same reasoning as (2): days
-    // before today were already counted in current_balance with the target
-    // preserved (because cost_type='flextime' never removes the target),
-    // so approving/creating the absence doesn't add NEW cost for those days.
-    // Only the future portion of the new range is a fresh deduction.
-    let proposed_start = std::cmp::max(start_date, today);
+    // (3) Post-cutoff portion of the proposed range. Same reasoning as (2):
+    // days through the cutoff were already counted in current_balance with
+    // the target preserved (because cost_type='flextime' never removes the
+    // target), so approving or creating the absence does not add new cost for
+    // those days.
+    let proposed_start = std::cmp::max(start_date, unaccounted_from);
     let proposed_cost_min = if proposed_start > end_date {
-        // Entirely backdated — no new future cost. The check below then
-        // reduces to "current_balance - committed_cost >= floor", verifying
-        // that already-pending commitments don't already breach the floor.
+        // Entirely accounted for. The check below then reduces to
+        // "current_balance - committed_cost >= floor", verifying that already
+        // pending commitments do not already breach the floor.
         0
     } else {
         let days = workdays(pool, user.id, proposed_start, end_date).await?;
