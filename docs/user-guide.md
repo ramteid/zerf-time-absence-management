@@ -454,8 +454,14 @@ How a day looks in the calendar:
 - Click any day to see everything on it in one list, grouped by category and
 	sorted by person, with the booked times or the request's note next to each
 	name. Public holidays come first, then absences, then working time.
-- The labels below the calendar switch categories on and off. A hidden
-	category disappears from the days and from the day list.
+- The **Categories** button above the calendar filters what you see. It lists
+	only the categories the shown month actually contains. Picking one while
+	everything is visible shows just that category; from then on each click
+	switches a single category on or off. Hidden categories stay in the list,
+	greyed out, so you can bring them back. **Hide all** and **Show all** switch
+	everything at once, and the button shows how many categories are visible
+	while a filter is on. A hidden category disappears from the days and from
+	the day list.
 
 Vacations and sick leave are checked against the employee's own work schedule.
 A one-day request on a public holiday or on a non-working weekday does not

@@ -28,8 +28,11 @@
     cellEvents,
     compareEventGroups,
     groupDayEvents,
+    pruneCategoryFilter,
     rawCellEvents,
+    toggleCategoryFilter,
   } from "../lib/domain/calendar.js";
+  import CategoryFilter from "./calendar/CategoryFilter.svelte";
   import { tracksOwnTime } from "../rolePolicy.js";
 
   let entries = [];
@@ -40,7 +43,8 @@
   // eslint-disable-next-line no-useless-assignment
   let popupCell = null;
   let loadSeq = 0;
-  let activeFilters = new Set(); // colorKey -> active
+  // Category filter: the colorKeys the viewer has hidden. Empty = show all.
+  let hiddenCategories = new Set();
 
   async function fallbackToEmpty(promise) {
     try {
@@ -227,15 +231,12 @@
   };
   $: colorByKey = buildColorMap(cells, calendarContext);
   $: eventCells = cells.map((cell) => {
-    const allEvents = cellEvents(cell, calendarContext, colorByKey);
-    // Filter events based on active filters
-    const filteredEvents =
-      activeFilters.size === 0
-        ? allEvents
-        : allEvents.filter((event) => activeFilters.has(event.colorKey));
+    const visibleEvents = cellEvents(cell, calendarContext, colorByKey).filter(
+      (event) => !hiddenCategories.has(event.colorKey),
+    );
     // One group per category: the day cell shows a single chip per category
     // and the popup lists every record inside it.
-    return { ...cell, groups: groupDayEvents(filteredEvents) };
+    return { ...cell, groups: groupDayEvents(visibleEvents) };
   });
 
   // ── Heading: "Team Calendar" for team leads and admins (they can always see
@@ -271,60 +272,51 @@
     : eventCells.filter((cell) => !cell.weekend);
   $: calGridColumns = showWeekends ? 7 : 5;
 
-  $: allLegendItems = (() => {
+  // Every category the month contains, filter state aside — the filter menu is
+  // built from this, so hiding a category never removes it from the menu and
+  // leaves the viewer with no way back. Order follows the same holiday →
+  // absence → work-category ranking the day cells and the popup use, so a
+  // category never moves around between views.
+  $: categoryItems = (() => {
     const seen = new Map();
-    // Build legend from all cells (before filtering)
     for (const cell of cells) {
       if (cell.other) continue;
-      // Use rawCellEvents to get unfiltered events for legend generation
-      const rawEvents = rawCellEvents(cell, calendarContext);
-      for (const event of rawEvents) {
-        if (!seen.has(event.colorKey)) {
-          seen.set(event.colorKey, {
-            colorKey: event.colorKey,
-            color: colorByKey.get(event.colorKey) || event.color,
-            label: event.label,
-          });
-        }
+      for (const event of rawCellEvents(cell, calendarContext)) {
+        if (seen.has(event.colorKey)) continue;
+        seen.set(event.colorKey, {
+          colorKey: event.colorKey,
+          color: colorByKey.get(event.colorKey) || event.color,
+          label: event.label,
+        });
       }
     }
-    return [...seen.values()];
+    return [...seen.values()].sort(compareEventGroups);
   })();
+  $: categoryKeys = categoryItems.map((item) => item.colorKey);
 
+  // Navigating to a month without one of the hidden categories drops it from
+  // the filter. The identity check keeps this from re-assigning (and so
+  // re-running) on every render when there is nothing to drop.
   $: {
-    // Sync activeFilters when legend changes (e.g., month navigation).
-    // On first load (activeFilters.size === 0), enable all categories.
-    // On subsequent loads, remove filters for categories no longer in the legend.
-    if (allLegendItems.length > 0) {
-      const currentKeys = new Set(allLegendItems.map((item) => item.colorKey));
-      if (activeFilters.size === 0) {
-        activeFilters = new Set(currentKeys);
-      } else {
-        activeFilters = new Set(
-          [...activeFilters].filter((key) => currentKeys.has(key)),
-        );
-      }
-    }
+    const pruned = pruneCategoryFilter(hiddenCategories, categoryKeys);
+    if (pruned !== hiddenCategories) hiddenCategories = pruned;
   }
 
-  function toggleFilter(colorKey) {
-    const newFilters = new Set(activeFilters);
-    if (newFilters.has(colorKey)) {
-      newFilters.delete(colorKey);
-    } else {
-      newFilters.add(colorKey);
-    }
-    activeFilters = newFilters;
+  function toggleCategory(colorKey) {
+    hiddenCategories = toggleCategoryFilter(
+      hiddenCategories,
+      colorKey,
+      categoryKeys,
+    );
   }
 
-  // Legend order follows the same holiday → absence → work-category ranking
-  // the day cells and the day popup use, so a category never moves around.
-  $: legendItems = allLegendItems
-    .map((item) => ({
-      ...item,
-      active: activeFilters.has(item.colorKey),
-    }))
-    .sort(compareEventGroups);
+  function showAllCategories() {
+    hiddenCategories = new Set();
+  }
+
+  function hideAllCategories() {
+    hiddenCategories = new Set(categoryKeys);
+  }
 
   function clickDay(cell) {
     if (cell.groups.length === 0) return;
@@ -353,6 +345,13 @@
     <h1>{$t(calendarHeadingKey)}</h1>
   </div>
   <div class="top-bar-actions calendar-top-actions">
+    <CategoryFilter
+      items={categoryItems}
+      hidden={hiddenCategories}
+      onToggle={toggleCategory}
+      onShowAll={showAllCategories}
+      onHideAll={hideAllCategories}
+    />
     <div class="zf-nav-slider">
       <button
         type="button"
@@ -440,22 +439,6 @@
       {/each}
     </div>
   </div>
-
-  <div class="cal-legend">
-    {#each legendItems as item (item.colorKey)}
-      <button
-        type="button"
-        class="cal-legend-item"
-        class:inactive={!item.active}
-        on:click={() => toggleFilter(item.colorKey)}
-        title={item.active ? $t("Hide") : $t("Show")}
-        aria-label="{item.active ? $t('Hide') : $t('Show')}: {item.label}"
-      >
-        <span class="cal-swatch" style:background={item.color}></span>
-        <span>{item.label}</span>
-      </button>
-    {/each}
-  </div>
 </div>
 
 {#if popupCell}
@@ -502,46 +485,6 @@
 
   .cal-card {
     padding: 16px;
-  }
-
-  .cal-legend {
-    display: flex;
-    gap: 8px;
-    margin-top: 16px;
-    flex-wrap: wrap;
-  }
-
-  .cal-legend-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.8125rem;
-    padding: 6px 10px;
-    border-radius: 4px;
-    border: 1px solid var(--border);
-    background: var(--bg-surface);
-    cursor: pointer;
-    transition:
-      opacity 150ms ease-in-out,
-      border-color 150ms ease-in-out,
-      background-color 150ms ease-in-out;
-  }
-
-  .cal-legend-item:hover {
-    border-color: var(--border-strong);
-    background: var(--bg-muted);
-  }
-
-  .cal-legend-item.inactive {
-    opacity: 0.45;
-  }
-
-  .cal-swatch {
-    display: inline-block;
-    width: 12px;
-    height: 12px;
-    border-radius: 2px;
-    flex-shrink: 0;
   }
 
   /* Day popup. Indentation is fixed rather than content-derived: the rows of

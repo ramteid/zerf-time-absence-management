@@ -21,7 +21,9 @@ import {
   fallbackColor,
   groupDayEvents,
   normalizeColor,
+  pruneCategoryFilter,
   rawCellEvents,
+  toggleCategoryFilter,
   workBaseColor,
   workLabel,
 } from "./calendar.js";
@@ -541,5 +543,66 @@ describe("calendarEventTitle", () => {
   it("returns an empty string for a null or empty group", () => {
     expect(calendarEventTitle(null)).toBe("");
     expect(calendarEventTitle({})).toBe("");
+  });
+});
+
+describe("toggleCategoryFilter", () => {
+  const allKeys = ["holiday", "absence:vacation", "work:1"];
+
+  it("focuses the picked category when nothing is filtered yet", () => {
+    // One click on a calendar showing everything means "only this one",
+    // instead of making the viewer deselect every other category by hand.
+    expect(toggleCategoryFilter(new Set(), "work:1", allKeys)).toEqual(
+      new Set(["holiday", "absence:vacation"]),
+    );
+  });
+
+  it("toggles a single category once a filter is active", () => {
+    const hidden = new Set(["holiday", "absence:vacation"]);
+    expect(toggleCategoryFilter(hidden, "holiday", allKeys)).toEqual(
+      new Set(["absence:vacation"]),
+    );
+    expect(toggleCategoryFilter(hidden, "work:1", allKeys)).toEqual(
+      new Set(["holiday", "absence:vacation", "work:1"]),
+    );
+  });
+
+  it("hides the only category of a month instead of focusing it", () => {
+    // "Show only this" is already the state, so the click can only mean hide.
+    expect(toggleCategoryFilter(new Set(), "work:1", ["work:1"])).toEqual(
+      new Set(["work:1"]),
+    );
+  });
+
+  it("brings a category back when everything is hidden", () => {
+    const hidden = new Set(allKeys);
+    expect(toggleCategoryFilter(hidden, "work:1", allKeys)).toEqual(
+      new Set(["holiday", "absence:vacation"]),
+    );
+  });
+
+  it("leaves the passed-in set untouched", () => {
+    const hidden = new Set(["holiday"]);
+    toggleCategoryFilter(hidden, "work:1", allKeys);
+    expect(hidden).toEqual(new Set(["holiday"]));
+  });
+});
+
+describe("pruneCategoryFilter", () => {
+  it("drops hidden keys the month no longer contains", () => {
+    expect(
+      pruneCategoryFilter(new Set(["holiday", "work:1"]), ["work:1", "work:2"]),
+    ).toEqual(new Set(["work:1"]));
+  });
+
+  it("returns the same set when nothing needs dropping", () => {
+    // Identity matters: the calendar assigns the result back into its filter
+    // state, and a new-but-equal set would re-trigger that on every render.
+    const hidden = new Set(["work:1"]);
+    expect(pruneCategoryFilter(hidden, ["work:1", "work:2"])).toBe(hidden);
+  });
+
+  it("returns an empty set when the month has no categories at all", () => {
+    expect(pruneCategoryFilter(new Set(["work:1"]), [])).toEqual(new Set());
   });
 });

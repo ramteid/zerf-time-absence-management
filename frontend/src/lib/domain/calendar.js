@@ -254,3 +254,41 @@ export function groupDayEvents(events) {
 export function calendarEventTitle(group) {
   return String(group?.title || group?.label || "").trim();
 }
+
+// ── Category filter ─────────────────────────────────────────────────────────
+// The filter is stored as the set of colorKeys the viewer has hidden, not as
+// the set they kept: an empty set then means "no filter", and a category that
+// only appears after navigating to another month starts out visible instead of
+// silently filtered away.
+
+// Clicking a category in the filter menu.
+//
+// The first click while nothing is filtered focuses rather than toggles: on a
+// calendar that currently shows everything, picking one category out of the
+// menu means "show me only this one" — that is what the click is for, and
+// hiding a single category is one further click away. Once a filter is active
+// every click plainly toggles the category it names.
+export function toggleCategoryFilter(hiddenKeys, colorKey, allKeys) {
+  if (hiddenKeys.size === 0) {
+    const others = allKeys.filter((key) => key !== colorKey);
+    // With only one category in the month there is nothing to focus away
+    // from, so the click can only mean "hide it" — fall through to the toggle.
+    if (others.length > 0) return new Set(others);
+  }
+  const next = new Set(hiddenKeys);
+  if (next.has(colorKey)) next.delete(colorKey);
+  else next.add(colorKey);
+  return next;
+}
+
+// Drop hidden keys for categories the current month does not contain, so the
+// menu never reports a filter against something the viewer cannot see. The
+// original set is returned unchanged when nothing needs dropping — the caller
+// assigns the result back into its filter state, and an equal-but-new Set
+// would restart that reactive assignment on every render.
+export function pruneCategoryFilter(hiddenKeys, allKeys) {
+  const present = new Set(allKeys);
+  const kept = [...hiddenKeys].filter((key) => present.has(key));
+  if (kept.length === hiddenKeys.size) return hiddenKeys;
+  return new Set(kept);
+}

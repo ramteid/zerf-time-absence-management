@@ -19,6 +19,8 @@
     Plus: '<path d="M12 5v14M5 12h14"/>',
     ChevLeft: '<path d="M15 18l-6-6 6-6"/>',
     ChevRight: '<path d="M9 18l6-6-6-6"/>',
+    ChevDown: '<path d="M6 9l6 6 6-6"/>',
+    Filter: '<path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/>',
     Check: '<path d="M20 6L9 17l-5-5"/>',
     X: '<path d="M18 6L6 18M6 6l12 12"/>',
     Send: '<path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/>',

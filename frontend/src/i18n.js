@@ -130,6 +130,8 @@ const TRANSLATIONS = {
     Filter: "Filter",
     Show: "Show",
     Hide: "Hide",
+    "Show all": "Show all",
+    "Hide all": "Hide all",
     Entries: "Entries",
     Days: "Days",
     audit_table_users: "User",
@@ -1229,6 +1231,8 @@ const TRANSLATIONS = {
     "Flextime Reduction": "Gleitzeitabbau",
     Filter: "Filter",
     Hide: "Ausblenden",
+    "Show all": "Alle anzeigen",
+    "Hide all": "Alle ausblenden",
     // Reports help (English defaults)
     // (English keys fall through)
     // Audit log

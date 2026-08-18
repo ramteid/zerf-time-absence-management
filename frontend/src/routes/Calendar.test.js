@@ -122,6 +122,46 @@ function closePopup() {
   closeButton.click();
 }
 
+// Open the category filter menu and return its options as
+// `{ label, visible }` pairs, in the order the menu lists them.
+async function openFilterMenu(target) {
+  const trigger = target.querySelector(".cal-filter-trigger");
+  if (!trigger) throw new Error("No category filter button rendered");
+  if (trigger.getAttribute("aria-expanded") !== "true") {
+    trigger.click();
+    await settle();
+  }
+  return filterOptions(target);
+}
+
+function filterOptions(target) {
+  return Array.from(target.querySelectorAll(".cal-filter-option")).map(
+    (option) => ({
+      label: option.querySelector(".cal-filter-label").textContent,
+      visible: option.getAttribute("aria-checked") === "true",
+    }),
+  );
+}
+
+// Click one category in the open filter menu, by its label.
+async function clickFilterOption(target, label) {
+  const option = Array.from(target.querySelectorAll(".cal-filter-option")).find(
+    (el) => el.querySelector(".cal-filter-label").textContent === label,
+  );
+  if (!option) throw new Error(`No filter option labelled ${label}`);
+  option.click();
+  await settle();
+}
+
+async function clickFilterAction(target, label) {
+  const button = Array.from(
+    target.querySelectorAll(".cal-filter-actions .zf-btn"),
+  ).find((el) => el.textContent.trim() === label);
+  if (!button) throw new Error(`No filter action labelled ${label}`);
+  button.click();
+  await settle();
+}
+
 // The chips rendered inside one day cell, as `{ title, count }` pairs.
 function dayChips(target, dateString) {
   const dayButton = target.querySelector(`.cal-day[data-date="${dateString}"]`);
@@ -330,90 +370,7 @@ describe("Calendar", () => {
     ]);
   });
 
-  it("filters time and absence categories independently by clicking legend items", async () => {
-    mockState.absences = [
-      {
-        id: 101,
-        user_id: 2,
-        name: "Tina Team",
-        kind: "vacation",
-        category_name: "Vacation",
-        start_date: "2026-05-04",
-        end_date: "2026-05-05",
-        comment: null,
-        status: "approved",
-      },
-    ];
-
-    component = mount(Calendar, { target });
-    await settle();
-
-    // Both the time entry and absence should be visible initially
-    await waitForText(target, "Project");
-    await waitForText(target, "Vacation");
-
-    // The legend should have both items
-    const legendButtons = target.querySelectorAll(".cal-legend-item");
-    const projectButton = Array.from(legendButtons).find((btn) =>
-      btn.textContent.includes("Project"),
-    );
-    const vacationButton = Array.from(legendButtons).find((btn) =>
-      btn.textContent.includes("Vacation"),
-    );
-
-    if (!projectButton || !vacationButton) {
-      throw new Error("Could not find Project or Vacation filter buttons");
-    }
-
-    if (projectButton.classList.contains("inactive")) {
-      throw new Error("Project filter should be active initially");
-    }
-
-    // Check accessibility: legend buttons should have aria-labels
-    if (!projectButton.getAttribute("aria-label")) {
-      throw new Error(
-        "Project filter button should have aria-label for accessibility",
-      );
-    }
-
-    // Click the Project filter to hide it
-    projectButton.click();
-    await settle();
-
-    // Check that the Project button is now inactive
-    const updatedProjectButton = Array.from(
-      target.querySelectorAll(".cal-legend-item"),
-    ).find((btn) => btn.textContent.includes("Project"));
-
-    if (!updatedProjectButton.classList.contains("inactive")) {
-      throw new Error("Project filter should be inactive after clicking");
-    }
-
-    // Vacation should still be visible (active)
-    const updatedVacationButton = Array.from(
-      target.querySelectorAll(".cal-legend-item"),
-    ).find((btn) => btn.textContent.includes("Vacation"));
-
-    if (updatedVacationButton.classList.contains("inactive")) {
-      throw new Error("Vacation filter should remain active");
-    }
-
-    // Re-enable the Project filter
-    updatedProjectButton.click();
-    await settle();
-
-    const finalProjectButton = Array.from(
-      target.querySelectorAll(".cal-legend-item"),
-    ).find((btn) => btn.textContent.includes("Project"));
-
-    if (finalProjectButton.classList.contains("inactive")) {
-      throw new Error(
-        "Project filter should be active again after re-clicking",
-      );
-    }
-  });
-
-  it("displays legend items in consistent sort order", async () => {
+  it("shows only the picked category on the first click, then toggles category by category", async () => {
     mockState.holidays = [
       {
         id: 1,
@@ -436,29 +393,145 @@ describe("Calendar", () => {
         status: "approved",
       },
     ];
-    // timeEntries already has a Project entry from the mock
 
     component = mount(Calendar, { target });
     await settle();
+    await waitForText(target, "Project");
 
-    const legendButtons = Array.from(
-      target.querySelectorAll(".cal-legend-item"),
-    );
-    const labels = legendButtons.map((btn) => btn.textContent.trim());
+    // The menu lists every category of the month, in the same holiday →
+    // absence → work order the day cells and the popup use, all visible.
+    expect(await openFilterMenu(target)).toEqual([
+      { label: "Holiday", visible: true },
+      { label: "Vacation", visible: true },
+      { label: "Project", visible: true },
+    ]);
 
-    // Expected order: Holiday first, then Vacation (absence), then Project (work)
-    // Holiday is translated to "Holiday", not the holiday name ("May Day")
-    if (labels[0] !== "Holiday") {
-      throw new Error(`Holiday should be first, got: ${labels[0]}`);
-    }
-    if (labels[1] !== "Vacation") {
-      throw new Error(
-        `Absence categories should come before work categories, got: ${labels[1]}`,
-      );
-    }
-    if (labels[2] !== "Project") {
-      throw new Error(`Work categories should be last, got: ${labels[2]}`);
-    }
+    // First click out of the unfiltered state focuses that one category
+    // instead of hiding it — one click, not one click per other category.
+    await clickFilterOption(target, "Vacation");
+    expect(filterOptions(target)).toEqual([
+      { label: "Holiday", visible: false },
+      { label: "Vacation", visible: true },
+      { label: "Project", visible: false },
+    ]);
+    expect(dayChips(target, "2026-05-04").map((chip) => chip.title)).toEqual([
+      "Vacation",
+    ]);
+
+    // With a filter active, further clicks plainly toggle one category.
+    await clickFilterOption(target, "Project");
+    expect(filterOptions(target)).toEqual([
+      { label: "Holiday", visible: false },
+      { label: "Vacation", visible: true },
+      { label: "Project", visible: true },
+    ]);
+    expect(dayChips(target, "2026-05-04").map((chip) => chip.title)).toEqual([
+      "Vacation",
+      "Project",
+    ]);
+
+    await clickFilterOption(target, "Vacation");
+    expect(dayChips(target, "2026-05-04").map((chip) => chip.title)).toEqual([
+      "Project",
+    ]);
+  });
+
+  it("hides every category at once and brings them all back", async () => {
+    mockState.absences = [
+      {
+        id: 101,
+        user_id: 2,
+        name: "Tina Team",
+        kind: "vacation",
+        category_name: "Vacation",
+        start_date: "2026-05-04",
+        end_date: "2026-05-05",
+        comment: null,
+        status: "approved",
+      },
+    ];
+
+    component = mount(Calendar, { target });
+    await settle();
+    await waitForText(target, "Project");
+    await openFilterMenu(target);
+
+    await clickFilterAction(target, "Hide all");
+    expect(filterOptions(target).every((option) => !option.visible)).toBe(true);
+    expect(target.querySelectorAll(".cal-event")).toHaveLength(0);
+    // Nothing is left to click through to, so no day cell stays clickable.
+    expect(target.querySelectorAll(".cal-day.has-events")).toHaveLength(0);
+
+    await clickFilterAction(target, "Show all");
+    expect(filterOptions(target).every((option) => option.visible)).toBe(true);
+    expect(dayChips(target, "2026-05-04").map((chip) => chip.title)).toEqual([
+      "Vacation",
+      "Project",
+    ]);
+  });
+
+  it("drops the filter for a category the next month does not contain", async () => {
+    // A filter is only meaningful against categories that are on screen: after
+    // navigating away from the month that had the absence, the menu must not
+    // still claim something is filtered out.
+    mockState.absences = [
+      {
+        id: 101,
+        user_id: 2,
+        name: "Tina Team",
+        kind: "vacation",
+        category_name: "Vacation",
+        start_date: "2026-05-04",
+        end_date: "2026-05-05",
+        comment: null,
+        status: "approved",
+      },
+    ];
+
+    component = mount(Calendar, { target });
+    await settle();
+    await waitForText(target, "Vacation");
+    await openFilterMenu(target);
+
+    // Focus the absence, so the work category is the hidden one.
+    await clickFilterOption(target, "Vacation");
+    expect(target.querySelector(".cal-filter-count").textContent).toBe("1/2");
+
+    // June has neither the absence nor the time entry.
+    mockState.absences = [];
+    mockState.timeEntries = [];
+    target.querySelector('[aria-label="Next month"]').click();
+    await waitForPath("/calendar?year=2026&month=6");
+    await settle();
+
+    // No categories at all — the filter button has nothing to offer and goes.
+    expect(target.querySelector(".cal-filter-trigger")).toBe(null);
+
+    // Back in May everything is shown again rather than still filtered.
+    mockState.absences = [
+      {
+        id: 101,
+        user_id: 2,
+        name: "Tina Team",
+        kind: "vacation",
+        category_name: "Vacation",
+        start_date: "2026-05-04",
+        end_date: "2026-05-05",
+        comment: null,
+        status: "approved",
+      },
+    ];
+    mockState.timeEntries = DEFAULT_TIME_ENTRIES;
+    target.querySelector('[aria-label="Previous month"]').click();
+    await waitForPath("/calendar?year=2026&month=5");
+    await settle();
+    await waitForText(target, "Vacation");
+
+    expect(target.querySelector(".cal-filter-count")).toBe(null);
+    expect(dayChips(target, "2026-05-04").map((chip) => chip.title)).toEqual([
+      "Vacation",
+      "Project",
+    ]);
   });
 
   it("shows one chip per time category, titled by the category and not by the employee", async () => {
@@ -642,11 +715,9 @@ describe("Calendar", () => {
       "Project",
     ]);
 
-    const vacationFilter = Array.from(
-      target.querySelectorAll(".cal-legend-item"),
-    ).find((button) => button.textContent.includes("Vacation"));
-    vacationFilter.click();
-    await settle();
+    await openFilterMenu(target);
+    // Focusing "Project" leaves the absence hidden.
+    await clickFilterOption(target, "Project");
 
     expect(dayChips(target, "2026-05-04").map((chip) => chip.title)).toEqual([
       "Project",
