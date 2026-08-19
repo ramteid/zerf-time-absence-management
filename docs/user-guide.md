@@ -442,8 +442,8 @@ Review and privacy behavior:
 	owner, or it is not visible at all.
 - Comments carry no separate restriction: whoever's scope covers the
 	absence owner (the owner themselves, their assigned leads, and any
-	admin) sees the comment along with the rest of the entry. There is no
-	redacted or masked view — see [Information disclosure
+	admin) sees the comment in the employee report that the calendar links
+	to. There is no redacted or masked view — see [Information disclosure
 	prevention](#information-disclosure-prevention).
 
 How a day looks in the calendar:
@@ -452,8 +452,12 @@ How a day looks in the calendar:
 	people are on vacation, you see a single "Vacation" label with the number
 	of people beside it.
 - Click any day to see everything on it in one list, grouped by category and
-	sorted by person, with the booked times or the request's note next to each
-	name. Public holidays come first, then absences, then working time.
+	sorted by person, with the booked times next to each name. Public holidays
+	come first, then absences, then working time.
+- Each absence and each working-time line in that list is a link. It opens the
+	employee report for that person and those dates, where the request's note and
+	the rest of the detail are shown in full. Keeping notes out of the day list
+	leaves room for the names and times.
 - The **Categories** button above the calendar filters what you see. It lists
 	only the categories the shown month actually contains. Picking one while
 	everything is visible shows just that category; from then on each click

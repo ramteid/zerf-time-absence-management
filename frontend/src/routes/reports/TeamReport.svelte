@@ -1,4 +1,5 @@
 <script>
+  import { onDestroy } from "svelte";
   // The "Team" tab of the Reports page: three related views over the same
   // shared toolbar period — per-person month totals, a category matrix, and
   // team absences — instead of three separately-filtered cards.
@@ -36,13 +37,24 @@
   } from "../../lib/domain/reports.js";
   import { countWorkdays, holidayDateSet } from "../../apiMappers.js";
   import { tracksOwnTime } from "../../rolePolicy.js";
-  import { userWorkdaysPerWeekById } from "../../lib/domain/users.js";
+  import { findUserById, userWorkdaysPerWeek } from "../../lib/domain/users.js";
 
   export let users = [];
   export let periodMode = "month";
   export let month = "";
   export let from = "";
   export let to = "";
+
+  let mounted = true;
+
+  onDestroy(() => {
+    // All three loaders use these generations as cancellation tokens. A late
+    // completion must not update detached component state or surface a toast.
+    mounted = false;
+    latestTeamRequestId += 1;
+    latestCategoryRequestId += 1;
+    latestAbsenceRequestId += 1;
+  });
 
   let activeHelp = null;
   function toggleHelp(id) {
@@ -58,6 +70,7 @@
   let teamLeaveAccountColumns = [];
   let teamLoading = false;
   let lastTeamKey = "";
+  let latestTeamRequestId = 0;
 
   // Group rank for the team report: employees and team leads share rank 0 (one
   // combined group at the top), assistants rank 1, admins rank 2. Unknown roles
@@ -80,38 +93,51 @@
       })
     : null;
 
-  async function loadTeam(key) {
-    teamLoading = true;
+  function isCurrentTeamRequest(key, requestId) {
+    return mounted && key === lastTeamKey && requestId === latestTeamRequestId;
+  }
+
+  async function loadTeam(key, requestId, requestedMonth) {
     try {
-      const loaded = await getTeamReport({ month });
-      if (key === lastTeamKey) {
-        // eslint-disable-next-line svelte/infinite-reactive-loop -- teamReport isn't read by the triggering $: block, so there's no cycle.
+      const loaded = await getTeamReport({ month: requestedMonth });
+      if (isCurrentTeamRequest(key, requestId)) {
         teamReport = loaded?.rows || [];
         teamLeaveAccountColumns = loaded?.leave_account_categories || [];
       }
     } catch (e) {
-      if (key === lastTeamKey) {
-        // eslint-disable-next-line svelte/infinite-reactive-loop -- see above.
+      if (isCurrentTeamRequest(key, requestId)) {
         teamReport = null;
         teamLeaveAccountColumns = [];
         toast($t(e?.message || "Error"), "error");
       }
     } finally {
-      if (key === lastTeamKey) teamLoading = false;
+      if (isCurrentTeamRequest(key, requestId)) teamLoading = false;
     }
   }
+
+  function startTeamLoad(key, requestedMonth) {
+    lastTeamKey = key;
+    latestTeamRequestId += 1;
+    teamReport = null;
+    teamLeaveAccountColumns = [];
+    teamLoading = true;
+    loadTeam(key, latestTeamRequestId, requestedMonth);
+  }
+
+  function clearTeamLoad() {
+    lastTeamKey = "";
+    latestTeamRequestId += 1;
+    teamReport = null;
+    teamLeaveAccountColumns = [];
+    teamLoading = false;
+  }
+
   $: {
-    if (periodMode === "month" && month) {
-      const key = `month:${month}`;
-      if (key !== lastTeamKey) {
-        lastTeamKey = key;
-        // eslint-disable-next-line svelte/infinite-reactive-loop -- loadTeam only writes teamReport, which this block never reads.
-        loadTeam(key);
-      }
-    } else {
-      lastTeamKey = "";
-      // eslint-disable-next-line no-useless-assignment -- teamReport is read by $: sortedTeamReport; ESLint cannot see cross-reactive-statement usage.
-      teamReport = null;
+    const key = periodMode === "month" && month ? `month:${month}` : "";
+    if (key && key !== lastTeamKey) {
+      startTeamLoad(key, month);
+    } else if (!key && lastTeamKey) {
+      clearTeamLoad();
     }
   }
 
@@ -121,11 +147,18 @@
   let catShowFilter = false;
   let catLoading = false;
   let lastCatKey = "";
-  async function loadCategories(key, catFrom, catTo) {
-    catLoading = true;
+  let latestCategoryRequestId = 0;
+
+  function isCurrentCategoryRequest(key, requestId) {
+    return (
+      mounted && key === lastCatKey && requestId === latestCategoryRequestId
+    );
+  }
+
+  async function loadCategories(key, requestId, catFrom, catTo) {
     try {
       const loaded = await getTeamCategoryReport({ from: catFrom, to: catTo });
-      if (key === lastCatKey) {
+      if (isCurrentCategoryRequest(key, requestId)) {
         teamCatReport = (loaded || []).sort((a, b) =>
           a.name.localeCompare(b.name),
         );
@@ -135,20 +168,41 @@
         catShowFilter = false;
       }
     } catch (e) {
-      if (key === lastCatKey) {
+      if (isCurrentCategoryRequest(key, requestId)) {
         teamCatReport = null;
         toast($t(e?.message || "Error"), "error");
       }
     } finally {
-      if (key === lastCatKey) catLoading = false;
+      if (isCurrentCategoryRequest(key, requestId)) catLoading = false;
     }
   }
+
+  function startCategoryLoad(key, catFrom, catTo) {
+    lastCatKey = key;
+    latestCategoryRequestId += 1;
+    teamCatReport = null;
+    catFilteredCategories = [];
+    catShowFilter = false;
+    catLoading = true;
+    loadCategories(key, latestCategoryRequestId, catFrom, catTo);
+  }
+
+  function clearCategoryLoad() {
+    lastCatKey = "";
+    latestCategoryRequestId += 1;
+    teamCatReport = null;
+    catFilteredCategories = [];
+    catShowFilter = false;
+    catLoading = false;
+  }
+
   $: catBounds = periodBounds({ mode: periodMode, month, from, to });
   $: {
     const key = `${catBounds.from}:${catBounds.to}`;
     if (catBounds.from && catBounds.to && key !== lastCatKey) {
-      lastCatKey = key;
-      loadCategories(key, catBounds.from, catBounds.to);
+      startCategoryLoad(key, catBounds.from, catBounds.to);
+    } else if ((!catBounds.from || !catBounds.to) && lastCatKey) {
+      clearCategoryLoad();
     }
   }
 
@@ -166,20 +220,70 @@
   );
 
   // --- Section 3: team absences (full period — planned absences look forward) ---
-  let teamAbsences = null;
+  // Derived from the raw response plus the roster (see absenceRowsForRoster).
+  let teamAbsences;
+  let teamAbsenceData = null;
   let absencesLoading = false;
   let lastAbsenceKey = "";
-  async function loadAbsences(key, absenceFrom, absenceTo) {
+  let latestAbsenceRequestId = 0;
+
+  function isCurrentAbsenceRequest(key, requestId) {
+    return (
+      mounted && key === lastAbsenceKey && requestId === latestAbsenceRequestId
+    );
+  }
+
+  function absenceRowsForRoster(data, roster) {
+    if (!data) return null;
+    if (data.raw.length === 0) return [];
+
+    const matchedUsers = data.raw.map((absence) =>
+      findUserById(roster, absence.user_id),
+    );
+    // The API response and roster are loaded independently. Rendering with a
+    // five-day fallback before the roster arrives produces incorrect leave
+    // totals for part-time staff, so wait until every row has its metadata.
+    if (matchedUsers.some((user) => !user)) return null;
+
+    return data.raw.map((absence, index) => {
+      const clampedFrom =
+        absence.start_date > data.from ? absence.start_date : data.from;
+      const clampedTo = absence.end_date < data.to ? absence.end_date : data.to;
+      const days =
+        clampedTo < clampedFrom
+          ? 0
+          : countWorkdays(
+              clampedFrom,
+              clampedTo,
+              data.holidayDates,
+              userWorkdaysPerWeek(matchedUsers[index]),
+            );
+      return { ...absence, days };
+    });
+  }
+
+  $: teamAbsences = absenceRowsForRoster(teamAbsenceData, users);
+  $: waitingForAbsenceRoster =
+    !!teamAbsenceData &&
+    teamAbsenceData.raw.length > 0 &&
+    teamAbsences === null;
+
+  async function loadAbsences(key, requestId, absenceFrom, absenceTo) {
     // See PersonReport's identical guard: an unbounded custom range would
     // otherwise expand into one API call per calendar year further down.
     if (isReportRangeTooLong(absenceFrom, absenceTo)) {
-      if (key === lastAbsenceKey) {
-        teamAbsences = [];
+      if (isCurrentAbsenceRequest(key, requestId)) {
+        teamAbsenceData = {
+          raw: [],
+          holidayDates: new Set(),
+          from: absenceFrom,
+          to: absenceTo,
+        };
         toast($t("report_range_too_long"), "error");
+        absencesLoading = false;
       }
       return;
     }
-    absencesLoading = true;
     try {
       const [teamRaw, ownRaw] = await Promise.all([
         getAbsenceReport({ from: absenceFrom, to: absenceTo }),
@@ -201,7 +305,14 @@
         (a) => a.status !== "rejected" && a.status !== "cancelled",
       );
       if (raw.length === 0) {
-        if (key === lastAbsenceKey) teamAbsences = [];
+        if (isCurrentAbsenceRequest(key, requestId)) {
+          teamAbsenceData = {
+            raw: [],
+            holidayDates: new Set(),
+            from: absenceFrom,
+            to: absenceTo,
+          };
+        }
         return;
       }
       const years = [
@@ -216,37 +327,45 @@
         years.map((y) => getHolidaysByYear(y)),
       );
       const holidayDates = holidayDateSet(holidayLists.flat());
-      const withDays = raw.map((a) => {
-        const clampedFrom =
-          a.start_date > absenceFrom ? a.start_date : absenceFrom;
-        const clampedTo = a.end_date < absenceTo ? a.end_date : absenceTo;
-        const workdaysPerWeek = userWorkdaysPerWeekById(users, a.user_id, 5);
-        const days =
-          clampedTo < clampedFrom
-            ? 0
-            : countWorkdays(
-                clampedFrom,
-                clampedTo,
-                holidayDates,
-                workdaysPerWeek,
-              );
-        return { ...a, days };
-      });
-      if (key === lastAbsenceKey) teamAbsences = withDays;
+      if (isCurrentAbsenceRequest(key, requestId)) {
+        teamAbsenceData = {
+          raw,
+          holidayDates,
+          from: absenceFrom,
+          to: absenceTo,
+        };
+      }
     } catch (e) {
-      if (key === lastAbsenceKey) {
-        teamAbsences = null;
+      if (isCurrentAbsenceRequest(key, requestId)) {
+        teamAbsenceData = null;
         toast($t(e?.message || "Error"), "error");
       }
     } finally {
-      if (key === lastAbsenceKey) absencesLoading = false;
+      if (isCurrentAbsenceRequest(key, requestId)) absencesLoading = false;
     }
   }
+
+  function startAbsenceLoad(key, absenceFrom, absenceTo) {
+    lastAbsenceKey = key;
+    latestAbsenceRequestId += 1;
+    teamAbsenceData = null;
+    absencesLoading = true;
+    loadAbsences(key, latestAbsenceRequestId, absenceFrom, absenceTo);
+  }
+
+  function clearAbsenceLoad() {
+    lastAbsenceKey = "";
+    latestAbsenceRequestId += 1;
+    teamAbsenceData = null;
+    absencesLoading = false;
+  }
+
   $: {
     const key = `${catBounds.from}:${catBounds.to}`;
     if (catBounds.from && catBounds.to && key !== lastAbsenceKey) {
-      lastAbsenceKey = key;
-      loadAbsences(key, catBounds.from, catBounds.to);
+      startAbsenceLoad(key, catBounds.from, catBounds.to);
+    } else if ((!catBounds.from || !catBounds.to) && lastAbsenceKey) {
+      clearAbsenceLoad();
     }
   }
 
@@ -453,7 +572,7 @@
   helpOpen={activeHelp === "absence"}
   onHelpToggle={() => toggleHelp("absence")}
 >
-  {#if absencesLoading && !teamAbsences}
+  {#if (absencesLoading || waitingForAbsenceRoster) && !teamAbsences}
     <LoadingState />
   {:else if teamAbsences}
     {#if teamAbsences.length === 0}

@@ -356,5 +356,26 @@ async fn time_entries_full_workflow() {
         );
     }
 
+    // -- Team entries carry the owner name for calendar rendering --
+    {
+        let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
+            bootstrap_team_with_suffix(&app, &admin, false, "calendarname").await;
+        let lead = login_change_pw(&app, "lead-calendarname@example.com", &lead_pw).await;
+        let emp = login_change_pw(&app, "emp-calendarname@example.com", &emp_pw).await;
+        let entry_id = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+
+        let (st, entries) = lead
+            .get(&format!(
+                "/api/v1/time-entries/all?from={monday_iso}&to={monday_iso}"
+            ))
+            .await;
+        assert_eq!(st, StatusCode::OK, "lead loads team entries");
+        let entry = find_by_id(&entries, entry_id).expect("team entry exists");
+        assert_eq!(
+            entry["user_name"], "Emilcalendarname Empcalendarname",
+            "team entry includes its owner's full display name"
+        );
+    }
+
     app.cleanup().await;
 }

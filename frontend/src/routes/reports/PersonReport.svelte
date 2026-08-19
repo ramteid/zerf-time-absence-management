@@ -1,5 +1,5 @@
 <script>
-  import { onMount, tick } from "svelte";
+  import { onDestroy, onMount, tick } from "svelte";
   // The "Employee" tab of the Reports page: one person's balance, category
   // breakdown, entries, absences and flextime chart for the shared toolbar
   // period (month or custom range). Absorbs what used to be three separate
@@ -57,10 +57,7 @@
     absenceKindTotals,
     dedupeAbsences,
   } from "../../lib/domain/reports.js";
-  import {
-    findUserById,
-    userWorkdaysPerWeekById,
-  } from "../../lib/domain/users.js";
+  import { findUserById, userWorkdaysPerWeek } from "../../lib/domain/users.js";
 
   export let userId = null;
   export let users = [];
@@ -86,6 +83,7 @@
   let reportHash = typeof window === "undefined" ? "" : window.location.hash;
   let hashVersion = 0;
   let lastFocusedSectionKey = "";
+  let focusRequestId = 0;
 
   function toggleHelp(id) {
     activeHelp = activeHelp === id ? null : id;
@@ -93,7 +91,12 @@
 
   // --- Absences (always the full selected period — unlike hours/flextime,
   // planned absences are shown even when they fall in the future). ---
-  async function loadAbsencesFor(targetUserId, absenceFrom, absenceTo) {
+  async function loadAbsencesFor(
+    targetUserId,
+    absenceFrom,
+    absenceTo,
+    workdaysPerWeek,
+  ) {
     // A custom range with no sane upper bound (picked via the calendar, or
     // supplied unvalidated through a "View in report" deep link) would
     // otherwise expand into one API call per calendar year below — capping
@@ -137,8 +140,6 @@
       years.map((year) => getHolidaysByYear(year)),
     );
     const holidayDates = holidayDateSet(holidayLists.flat());
-    const workdaysPerWeek = userWorkdaysPerWeekById(users, targetUserId, 5);
-
     return raw.map((a) => {
       const clampedFrom =
         a.start_date > absenceFrom ? a.start_date : absenceFrom;
@@ -168,11 +169,10 @@
   }
 
   // --- Time-based data (month report or range report + flextime). ---
-  async function loadReportData(id, mode, m, f, t2) {
-    const user = findUserById(users, id, $currentUser);
+  async function loadReportData(id, user, mode, m, f, t2) {
     const isAssist = isAssistantUser(user);
     const flexAccount = hasFlextimeAccount(user);
-    const workdaysPerWeek = userWorkdaysPerWeekById(users, id);
+    const workdaysPerWeek = userWorkdaysPerWeek(user);
     const period = { mode, month: m, from: f, to: t2 };
 
     if (mode === "month") {
@@ -196,7 +196,7 @@
               to: chartTo,
             }).catch(() => emptyFlextime())
           : Promise.resolve(emptyFlextime()),
-        loadAbsencesFor(id, absenceFrom, absenceTo),
+        loadAbsencesFor(id, absenceFrom, absenceTo, workdaysPerWeek),
       ]);
 
       const monthReport = normalizeMonthReport(monthRaw, workdaysPerWeek);
@@ -239,7 +239,7 @@
             to: cappedTo,
           }).catch(() => emptyFlextime())
         : Promise.resolve(emptyFlextime()),
-      loadAbsencesFor(id, f, t2),
+      loadAbsencesFor(id, f, t2, workdaysPerWeek),
     ]);
 
     const monthReport = rangeRaw
@@ -261,52 +261,94 @@
     };
   }
 
-  // --- Auto-load with a race guard: only the most recent (userId, period)
+  // --- Auto-load with a race guard: only the most recent (user, period)
   // combination's response is ever committed to `reportData`. ---
   // An empty key means "not ready" and suppresses the fetch entirely. The
   // period arrives one reactive pass after the component mounts, so without
   // these guards the first pass would fire a load for a blank month/range and
   // query nonsense bounds.
-  function loadKey(id, mode, m, f, t2) {
-    if (id == null) return "";
-    if (mode === "month") return m ? `${id}:month:${m}` : "";
-    return f && t2 ? `${id}:range:${f}:${t2}` : "";
+  function reportUserKey(id, user) {
+    if (id == null || Number(user?.id) !== Number(id)) return "";
+    // The report derives workday counts, assistant status and flextime access
+    // locally, while the backend derives targets and balances from the same
+    // metadata. Keep the complete report-relevant snapshot in the key so an
+    // updated roster cannot leave a report backed by old assumptions.
+    return [
+      id,
+      user.role || "",
+      user.workdays_per_week ?? "",
+      user.weekly_hours ?? "",
+      user.start_date ?? "",
+      user.hire_date ?? "",
+      user.overtime_start_balance_min ?? "",
+      user.tracks_time !== false,
+      user.active !== false,
+    ].join(":");
+  }
+
+  function loadKey(id, user, mode, m, f, t2) {
+    const userKey = reportUserKey(id, user);
+    if (!userKey) return "";
+    if (mode === "month") return m ? `${userKey}:month:${m}` : "";
+    return f && t2 ? `${userKey}:range:${f}:${t2}` : "";
   }
 
   let lastLoadKey = "";
+  let loadedReportKey = "";
   let latestRequestId = 0;
 
-  async function runLoad(key, requestId, id, mode, m, f, t2) {
+  async function runLoad(key, requestId, id, user, mode, m, f, t2) {
     loading = true;
     try {
-      const data = await loadReportData(id, mode, m, f, t2);
+      const data = await loadReportData(id, user, mode, m, f, t2);
       if (key === lastLoadKey && requestId === latestRequestId) {
         // eslint-disable-next-line svelte/infinite-reactive-loop -- reportData isn't read by the triggering $: block, so there's no cycle.
         reportData = data;
+        // eslint-disable-next-line svelte/infinite-reactive-loop -- this key is read only by the focus effect, not the loader.
+        loadedReportKey = key;
       }
     } catch (e) {
       if (key === lastLoadKey && requestId === latestRequestId) {
         // eslint-disable-next-line svelte/infinite-reactive-loop -- see above.
         reportData = null;
+        // eslint-disable-next-line svelte/infinite-reactive-loop -- see the successful-load assignment above.
+        loadedReportKey = "";
         toast($t(e?.message || "Error"), "error");
       }
     } finally {
       if (key === lastLoadKey && requestId === latestRequestId) {
+        // eslint-disable-next-line svelte/infinite-reactive-loop -- loading isn't read by the triggering $: block.
         loading = false;
       }
     }
   }
 
   $: {
-    const key = loadKey(userId, periodMode, month, from, to);
+    const key = loadKey(userId, selectedUser, periodMode, month, from, to);
     if (key && key !== lastLoadKey) {
       lastLoadKey = key;
       latestRequestId += 1;
+      // Never render data for a previous person or period while its successor
+      // is loading. Besides avoiding stale numbers, this prevents a deep-link
+      // fragment from focusing a section belonging to the prior report.
+      reportData = null;
+      loadedReportKey = "";
       // eslint-disable-next-line svelte/infinite-reactive-loop -- runLoad only writes reportData, which this block never reads.
-      runLoad(key, latestRequestId, userId, periodMode, month, from, to);
+      runLoad(
+        key,
+        latestRequestId,
+        userId,
+        selectedUser,
+        periodMode,
+        month,
+        from,
+        to,
+      );
     } else if (!key && lastLoadKey) {
       lastLoadKey = "";
       reportData = null;
+      loadedReportKey = "";
+      loading = false;
     }
   }
 
@@ -318,6 +360,7 @@
   let chartDays = [];
   let chartBalanceAsOf = null;
   let chartLoading = false;
+  let chartRequestId = 0;
   let lastSyncedReport = null;
 
   // Re-seed whenever a new report object arrives (new user or new period), so
@@ -326,6 +369,11 @@
   function syncChartWithReport(data) {
     if (data === lastSyncedReport) return;
     lastSyncedReport = data;
+    // A manually requested chart may still be in flight while the selected
+    // report changes. Its response belongs to the old person or period and
+    // must not overwrite the chart reseeded from the new report.
+    chartRequestId += 1;
+    chartLoading = false;
     chartFrom = data?.chartRange?.from ?? "";
     chartTo = data?.chartRange?.to ?? "";
     chartDays = data?.flextimeChartData ?? [];
@@ -335,7 +383,9 @@
   $: syncChartWithReport(reportData);
 
   function syncReportHash() {
-    reportHash = typeof window === "undefined" ? "" : window.location.hash;
+    const nextHash = typeof window === "undefined" ? "" : window.location.hash;
+    if (nextHash === reportHash) return;
+    reportHash = nextHash;
     hashVersion += 1;
   }
 
@@ -345,19 +395,33 @@
     return null;
   }
 
-  function focusLinkedSection(data, hash, version, key) {
+  function focusLinkedSection(data, dataKey, hash, version, navigation) {
+    // Invalidate every queued focus before inspecting the next state. This is
+    // important even when the new hash is unknown or data is loading: a prior
+    // tick callback must not focus an obsolete report section afterwards.
+    const requestId = ++focusRequestId;
     const currentHash =
       typeof window === "undefined" ? hash : window.location.hash;
     if (
       !data ||
+      !dataKey ||
+      dataKey !== lastLoadKey ||
       (currentHash !== "#report-entries" && currentHash !== "#report-absences")
     )
       return;
-    const focusKey = `${key}:${currentHash}:${version}`;
+    const focusKey = `${navigation}:${dataKey}:${currentHash}:${version}`;
     if (focusKey === lastFocusedSectionKey) return;
     lastFocusedSectionKey = focusKey;
     tick().then(() => {
-      if (focusKey !== lastFocusedSectionKey) return;
+      if (
+        requestId !== focusRequestId ||
+        focusKey !== lastFocusedSectionKey ||
+        dataKey !== loadedReportKey ||
+        dataKey !== lastLoadKey ||
+        navigation !== navigationKey ||
+        (typeof window !== "undefined" && window.location.hash !== currentHash)
+      )
+        return;
       const target = sectionForHash(currentHash);
       if (!target) return;
       target.scrollIntoView?.({ block: "start" });
@@ -368,27 +432,97 @@
   onMount(() => {
     syncReportHash();
     window.addEventListener("hashchange", syncReportHash);
-    return () => window.removeEventListener("hashchange", syncReportHash);
+    window.addEventListener("popstate", syncReportHash);
+    return () => {
+      window.removeEventListener("hashchange", syncReportHash);
+      window.removeEventListener("popstate", syncReportHash);
+    };
   });
 
-  $: focusLinkedSection(reportData, reportHash, hashVersion, navigationKey);
+  onDestroy(() => {
+    // Detached reports must not receive delayed focus or async updates.
+    latestRequestId += 1;
+    focusRequestId += 1;
+    chartRequestId += 1;
+  });
+
+  $: focusLinkedSection(
+    reportData,
+    loadedReportKey,
+    reportHash,
+    hashVersion,
+    navigationKey,
+  );
 
   async function loadChart() {
-    if (userId == null || !chartFrom || !chartTo || chartFrom > chartTo) return;
+    if (
+      userId == null ||
+      !chartFrom ||
+      !chartTo ||
+      chartFrom > chartTo ||
+      !loadedReportKey
+    )
+      return;
+    const requestId = ++chartRequestId;
+    const requestedUserId = userId;
+    const requestedFrom = chartFrom;
+    const requestedTo = chartTo;
+    const requestedReportKey = loadedReportKey;
     chartLoading = true;
     try {
       const flextime = await getFlextimeReport({
-        userId,
-        from: chartFrom,
-        to: chartTo,
+        userId: requestedUserId,
+        from: requestedFrom,
+        to: requestedTo,
       });
+      if (
+        !isCurrentChartRequest(
+          requestId,
+          requestedUserId,
+          requestedFrom,
+          requestedTo,
+          requestedReportKey,
+        )
+      )
+        return;
       chartDays = flextime.days;
       chartBalanceAsOf = flextime.balanceAsOf;
     } catch (e) {
+      if (
+        !isCurrentChartRequest(
+          requestId,
+          requestedUserId,
+          requestedFrom,
+          requestedTo,
+          requestedReportKey,
+        )
+      )
+        return;
       toast($t(e?.message || "Error"), "error");
     } finally {
-      chartLoading = false;
+      // Keep the spinner tied to request identity rather than the mutable
+      // chart inputs. Editing dates invalidates a response but does not start
+      // a successor, so the same request must still clear its own spinner.
+      // A newer request or report reset increments chartRequestId first.
+      if (requestId === chartRequestId) chartLoading = false;
     }
+  }
+
+  function isCurrentChartRequest(
+    requestId,
+    requestedUserId,
+    requestedFrom,
+    requestedTo,
+    requestedReportKey,
+  ) {
+    return (
+      requestId === chartRequestId &&
+      requestedUserId === userId &&
+      requestedFrom === chartFrom &&
+      requestedTo === chartTo &&
+      requestedReportKey === loadedReportKey &&
+      requestedReportKey === lastLoadKey
+    );
   }
 
   // Quick range: the last `days` days ending today, clamped to the selected
@@ -694,7 +828,7 @@
                   <td class="tab-num text-right">{formatDayCount(a.days)}</td>
                   <td>
                     {#if a.comment}
-                      <span class="text-truncate-tooltip" title={a.comment}>
+                      <span class="report-absence-comment">
                         {a.comment}
                       </span>
                     {:else}
@@ -767,6 +901,16 @@
 
   .report-focus-target {
     scroll-margin-top: 16px;
+  }
+
+  /* The report is the canonical destination for absence remarks. Unlike the
+     compact time-entry list, a remark must stay readable without relying on a
+     hover-only native tooltip. */
+  .report-absence-comment {
+    display: block;
+    color: var(--text-tertiary);
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
   }
 
   .leave-account-cards {

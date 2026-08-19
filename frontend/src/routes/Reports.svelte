@@ -1,4 +1,5 @@
 <script>
+  import { onDestroy, onMount } from "svelte";
   // Reports page: an Employee/Team scope switch sharing one filter toolbar
   // (person, period) instead of five independently-filtered cards. Exports
   // act on whatever is currently shown ("export what you see").
@@ -14,6 +15,7 @@
   import { isoDate, appTodayDate, addDays } from "../format.js";
   import Icon from "../Icons.svelte";
   import PeriodPicker from "../lib/ui/PeriodPicker.svelte";
+  import LoadingState from "../lib/ui/LoadingState.svelte";
   import PersonReport from "./reports/PersonReport.svelte";
   import TeamReport from "./reports/TeamReport.svelte";
   import {
@@ -24,7 +26,10 @@
   } from "../lib/api/reportsApi.js";
   import { findUserById, hasUserId } from "../lib/domain/users.js";
   import { timeQueryRange } from "../lib/domain/reportPeriod.js";
-  import { isReportRangeTooLong } from "../lib/domain/dates.js";
+  import {
+    isReportRangeTooLong,
+    REPORT_RANGE_MAX_DAY_DIFFERENCE,
+  } from "../lib/domain/dates.js";
   import {
     buildTimesheetCsv,
     timesheetCsvBlob,
@@ -36,6 +41,9 @@
   // their own data.
   let users = [];
   let lastUsersLoadKey = "";
+  let completedUsersLoadKey = "";
+  let failedUsersLoadKey = "";
+  let usersLoadError = "";
   let latestUsersLoadRequest = 0;
 
   function usersLoadKey(user) {
@@ -51,8 +59,12 @@
         if (
           loadKey === lastUsersLoadKey &&
           requestId === latestUsersLoadRequest
-        )
+        ) {
           users = [];
+          completedUsersLoadKey = loadKey;
+          failedUsersLoadKey = "";
+          usersLoadError = "";
+        }
         return;
       }
       const loadedUsers = await getUsersForReports(canTeam, user);
@@ -60,13 +72,28 @@
         loadKey === lastUsersLoadKey &&
         requestId === latestUsersLoadRequest
       ) {
+        // eslint-disable-next-line svelte/infinite-reactive-loop -- the guarded async response belongs to this load key and cannot retrigger it.
         users = loadedUsers;
+        // eslint-disable-next-line svelte/infinite-reactive-loop -- completion is read only after this guarded request resolves.
+        completedUsersLoadKey = loadKey;
+        // eslint-disable-next-line svelte/infinite-reactive-loop -- the guarded async response belongs to this load key and cannot retrigger it.
+        failedUsersLoadKey = "";
+        // eslint-disable-next-line svelte/infinite-reactive-loop -- the guarded async response belongs to this load key and cannot retrigger it.
+        usersLoadError = "";
       }
     } catch (e) {
       if (
         loadKey === lastUsersLoadKey &&
         requestId === latestUsersLoadRequest
       ) {
+        // eslint-disable-next-line svelte/infinite-reactive-loop -- the guarded async response belongs to this load key and cannot retrigger it.
+        users = [];
+        // eslint-disable-next-line svelte/infinite-reactive-loop -- the guarded async response belongs to this load key and cannot retrigger it.
+        completedUsersLoadKey = "";
+        // eslint-disable-next-line svelte/infinite-reactive-loop -- the guarded async response belongs to this load key and cannot retrigger it.
+        failedUsersLoadKey = loadKey;
+        // eslint-disable-next-line svelte/infinite-reactive-loop -- the guarded async response belongs to this load key and cannot retrigger it.
+        usersLoadError = e?.message || "Error";
         toast($t(e?.message || "Error"), "error");
       }
     }
@@ -78,7 +105,12 @@
     const loadKey = usersLoadKey(user);
     if (loadKey !== lastUsersLoadKey) {
       lastUsersLoadKey = loadKey;
+      completedUsersLoadKey = "";
+      failedUsersLoadKey = "";
+      usersLoadError = "";
+      users = [];
       latestUsersLoadRequest += 1;
+      // eslint-disable-next-line svelte/infinite-reactive-loop -- initUsers only commits a response guarded by this load key and request id.
       initUsers(loadKey, latestUsersLoadRequest, user);
     }
   }
@@ -128,6 +160,27 @@
       : defaultMaxDate;
   }
 
+  function reportMinDate(currentPath, defaultMinDate, selectedUserId) {
+    const deepLink = reportDeepLink(currentPath);
+    // An absence can remain in the calendar after an administrator corrects
+    // the employee's start date to a later day. Preserve this one valid
+    // calendar target so its linked report can still reveal the comment.
+    // Selecting another employee restores that employee's normal lower bound.
+    if (
+      !deepLink ||
+      deepLink.userId !== Number(selectedUserId) ||
+      !defaultMinDate ||
+      deepLink.from >= defaultMinDate
+    )
+      return defaultMinDate;
+    return deepLink.from;
+  }
+
+  function maxReportRangeEnd(value) {
+    if (!value || isoDate(value) !== value) return "";
+    return isoDate(addDays(value, REPORT_RANGE_MAX_DAY_DIFFERENCE));
+  }
+
   let today = appTodayDate();
   let todayIso = isoDate(today);
   $: today = appTodayDate($settings?.timezone);
@@ -147,16 +200,18 @@
   let from = "";
   let to = "";
   let selectedUserId = tracksOwnTime($currentUser) ? $currentUser.id : null;
+  let dismissedUnavailableDeepLinkPath = "";
 
-  // Deep-link support: when navigated here from a pending approval's
-  // WeekReviewDialog ("View in report"), the URL carries user/from/to query
-  // params. Apply them once per navigation to preselect the person, force a
-  // custom date range covering that week, and switch to the Employee tab.
+  // Deep-link support: Calendar rows and a pending approval's WeekReviewDialog
+  // ("View in report") carry user/from/to query params. Apply them once per
+  // navigation to preselect the person, force the linked custom date range,
+  // and switch to the Employee tab.
   // Reports never calls go() for its own filter changes, so $path stays put
   // afterwards and this won't fight manual filter edits made later.
   function applyDeepLink(currentPath) {
     const deepLink = reportDeepLink(currentPath);
     if (!deepLink) return;
+    dismissedUnavailableDeepLinkPath = "";
     selectedUserId = deepLink.userId;
     periodMode = "range";
     from = deepLink.from;
@@ -164,11 +219,63 @@
     activeTab = "employee";
   }
 
+  function reapplyDeepLinkAfterFragmentNavigation() {
+    if ($path.startsWith("/reports?")) applyDeepLink($path);
+  }
+
+  onMount(() => {
+    // The route store deliberately excludes fragments. A calendar navigation
+    // with the same query but a new anchor must still restore its deep-link
+    // target after someone manually selected a different employee.
+    window.addEventListener(
+      "hashchange",
+      reapplyDeepLinkAfterFragmentNavigation,
+    );
+    window.addEventListener("popstate", reapplyDeepLinkAfterFragmentNavigation);
+    return () => {
+      window.removeEventListener(
+        "hashchange",
+        reapplyDeepLinkAfterFragmentNavigation,
+      );
+      window.removeEventListener(
+        "popstate",
+        reapplyDeepLinkAfterFragmentNavigation,
+      );
+    };
+  });
+
+  onDestroy(() => {
+    // A delayed roster response must not update or toast after this route has
+    // been removed. Every response is already guarded by this request id.
+    latestUsersLoadRequest += 1;
+  });
+
   $: if ($path.startsWith("/reports?")) applyDeepLink($path);
 
   $: if (isSelfOnlyReportsView) selectedUserId = $currentUser.id;
+  $: activeReportDeepLink = reportDeepLink($path);
+  $: userListLoadCompleted =
+    !!lastUsersLoadKey && completedUsersLoadKey === lastUsersLoadKey;
+  $: userListLoadFailed =
+    !!lastUsersLoadKey && failedUsersLoadKey === lastUsersLoadKey;
+  $: userListLoading =
+    !!lastUsersLoadKey && !userListLoadCompleted && !userListLoadFailed;
+  // A calendar row can outlive a team reassignment or account deactivation.
+  // A self-only user must also never see their own report for a foreign URL.
+  // Do not silently replace either inaccessible target with another employee:
+  // that would show a different person's report under the linked URL.
+  $: linkedUserUnavailable =
+    !!activeReportDeepLink &&
+    ((isSelfOnlyReportsView &&
+      activeReportDeepLink.userId !== Number($currentUser?.id)) ||
+      (!isSelfOnlyReportsView &&
+        userListLoadCompleted &&
+        dismissedUnavailableDeepLinkPath !== $path &&
+        !hasUserId(users, activeReportDeepLink.userId)));
   $: if (
     !isSelfOnlyReportsView &&
+    userListLoadCompleted &&
+    !linkedUserUnavailable &&
     (selectedUserId == null || !hasUserId(users, selectedUserId)) &&
     users.length > 0
   ) {
@@ -177,6 +284,14 @@
   $: if (!canViewTeamReports) activeTab = "employee";
 
   $: selectedReportUser = findUserById(users, selectedUserId, $currentUser);
+  $: userListFailureBlocksSelectedReport =
+    userListLoadFailed && !selectedReportUser;
+  $: userListLoadingBlocksSelectedReport =
+    userListLoading && !selectedReportUser;
+  $: userListFailureBlocksActiveReport =
+    userListLoadFailed && (activeTab === "team" || !selectedReportUser);
+  $: userListLoadingBlocksActiveReport =
+    userListLoading && (activeTab === "team" || !selectedReportUser);
 
   // Month/date lower bound depends on the active tab: an individual's own
   // start date on the Employee tab, the earliest start date across everyone
@@ -190,7 +305,11 @@
   $: minDate =
     activeTab === "team"
       ? $earliestStartDate
-      : (selectedReportUser?.start_date ?? $earliestStartDate);
+      : reportMinDate(
+          $path,
+          selectedReportUser?.start_date ?? $earliestStartDate,
+          selectedUserId,
+        );
 
   $: if (minMonth && month < minMonth) month = minMonth;
   $: if (minDate && from && from < minDate) from = minDate;
@@ -198,32 +317,77 @@
   // than the currently-selected `to` would otherwise clamp `from` past `to`,
   // producing an invalid range that fails validation on every fetch.
   $: if (from && to && from > to) to = from;
+  // The picker prevents normal UI selection past this point. Keep the report
+  // state safe as well, because navigation and programmatic updates can set
+  // the bound values without going through a date picker.
+  $: maxRangeEnd = maxReportRangeEnd(from);
+  $: if (maxRangeEnd && to > maxRangeEnd) to = maxRangeEnd;
 
   $: period = { mode: periodMode, month, from, to };
+
+  function selectReportUser() {
+    dismissedUnavailableDeepLinkPath = $path;
+  }
+
+  function retryUsers() {
+    const user = $currentUser;
+    const loadKey = usersLoadKey(user);
+    if (!loadKey || loadKey !== lastUsersLoadKey) return;
+    failedUsersLoadKey = "";
+    usersLoadError = "";
+    completedUsersLoadKey = "";
+    users = [];
+    latestUsersLoadRequest += 1;
+    initUsers(loadKey, latestUsersLoadRequest, user);
+  }
 
   // --- Export: acts on whatever the Employee tab currently shows ---
   let exportInProgress = false;
   let exportError = "";
 
-  function exportFileNamePart() {
-    if (!selectedReportUser) return String(selectedUserId ?? "report");
-    return `${selectedReportUser.first_name} ${selectedReportUser.last_name}`;
+  function exportFileNamePart(user, userId) {
+    if (!user) return String(userId ?? "report");
+    return `${user.first_name} ${user.last_name}`;
+  }
+
+  function exportSnapshot(teamWide = false) {
+    const userId = teamWide ? undefined : selectedUserId;
+    return {
+      userId,
+      namePart: teamWide
+        ? $t("All")
+        : exportFileNamePart(selectedReportUser, userId),
+      period: { ...period },
+      todayIso,
+    };
   }
 
   async function exportCsv() {
-    if (exportInProgress || selectedUserId == null) return;
+    if (
+      exportInProgress ||
+      selectedUserId == null ||
+      linkedUserUnavailable ||
+      userListFailureBlocksSelectedReport ||
+      userListLoadingBlocksSelectedReport
+    )
+      return;
+    const snapshot = exportSnapshot();
     exportInProgress = true;
     exportError = "";
     try {
-      const { from: qFrom, to: qTo, active } = timeQueryRange(period, todayIso);
+      const {
+        from: qFrom,
+        to: qTo,
+        active,
+      } = timeQueryRange(snapshot.period, snapshot.todayIso);
       if (!active) {
         exportError = $t("future_period_no_time_data");
         return;
       }
       const [report, flextime] = await Promise.all([
-        getRangeReport({ userId: selectedUserId, from: qFrom, to: qTo }),
+        getRangeReport({ userId: snapshot.userId, from: qFrom, to: qTo }),
         getFlextimeReport({
-          userId: selectedUserId,
+          userId: snapshot.userId,
           from: qFrom,
           to: qTo,
         }).catch(() => ({ days: [], balanceAsOf: null })),
@@ -236,7 +400,7 @@
       });
       downloadBlob(
         timesheetCsvBlob(csvText),
-        `stundennachweis-${safeFileNamePart(exportFileNamePart())}-${qFrom}_${qTo}.csv`,
+        `stundennachweis-${safeFileNamePart(snapshot.namePart)}-${qFrom}_${qTo}.csv`,
       );
       toast($t("CSV download started."), "ok");
     } catch (e) {
@@ -248,7 +412,16 @@
 
   async function exportPdf(teamWide = false) {
     if (exportInProgress) return;
-    if (!teamWide && selectedUserId == null) return;
+    if (teamWide && (userListLoadFailed || userListLoading)) return;
+    if (
+      !teamWide &&
+      (selectedUserId == null ||
+        linkedUserUnavailable ||
+        userListFailureBlocksSelectedReport ||
+        userListLoadingBlocksSelectedReport)
+    )
+      return;
+    const snapshot = exportSnapshot(teamWide);
     exportInProgress = true;
     exportError = "";
     try {
@@ -256,21 +429,24 @@
       // leaving `from` in the future, sending from > to to the backend (which
       // rejects it with a raw, untranslated validation error). Bail out with
       // the same friendly message exportCsv() already shows for this case.
-      const { from: qFrom, to: qTo, active } = timeQueryRange(period, todayIso);
+      const {
+        from: qFrom,
+        to: qTo,
+        active,
+      } = timeQueryRange(snapshot.period, snapshot.todayIso);
       if (!active) {
         exportError = $t("future_period_no_time_data");
         return;
       }
       const response = await getTimesheetPdf({
-        userId: teamWide ? undefined : selectedUserId,
+        userId: snapshot.userId,
         from: qFrom,
         to: qTo,
       });
       const blob = await response.blob();
-      const namePart = teamWide ? $t("All") : exportFileNamePart();
       downloadBlob(
         blob,
-        `stundennachweis-${safeFileNamePart(namePart)}-${qFrom}_${qTo}.pdf`,
+        `stundennachweis-${safeFileNamePart(snapshot.namePart)}-${qFrom}_${qTo}.pdf`,
       );
       toast($t("PDF download started."), "ok");
     } catch (e) {
@@ -334,7 +510,19 @@
               id="reports-user-select"
               class="zf-select"
               bind:value={selectedUserId}
+              on:change={selectReportUser}
+              disabled={userListLoadFailed}
             >
+              {#if userListLoadFailed && selectedReportUser}
+                <option value={selectedUserId}
+                  >{selectedReportUser.first_name}
+                  {selectedReportUser.last_name}</option
+                >
+              {:else if linkedUserUnavailable}
+                <option value={selectedUserId} disabled
+                  >{$t("User not found or inactive.")}</option
+                >
+              {/if}
               {#each users as u (u.id)}
                 <option value={u.id}>{u.first_name} {u.last_name}</option>
               {/each}
@@ -352,6 +540,7 @@
           maxMonth={currentMonthStr}
           {minDate}
           {maxDate}
+          maxRangeDays={REPORT_RANGE_MAX_DAY_DIFFERENCE}
         />
       </div>
 
@@ -360,14 +549,22 @@
           <button
             class="zf-btn zf-btn-primary"
             on:click={exportCsv}
-            disabled={exportInProgress || selectedUserId == null}
+            disabled={exportInProgress ||
+              selectedUserId == null ||
+              linkedUserUnavailable ||
+              userListFailureBlocksSelectedReport ||
+              userListLoadingBlocksSelectedReport}
           >
             <Icon name="Download" size={14} />{$t("Export CSV")}
           </button>
           <button
             class="zf-btn zf-btn-primary"
             on:click={() => exportPdf(false)}
-            disabled={exportInProgress || selectedUserId == null}
+            disabled={exportInProgress ||
+              selectedUserId == null ||
+              linkedUserUnavailable ||
+              userListFailureBlocksSelectedReport ||
+              userListLoadingBlocksSelectedReport}
           >
             <Icon name="FileText" size={14} />{$t("Export PDF")}
           </button>
@@ -375,7 +572,7 @@
           <button
             class="zf-btn zf-btn-primary"
             on:click={() => exportPdf(true)}
-            disabled={exportInProgress}
+            disabled={exportInProgress || userListLoadFailed || userListLoading}
           >
             <Icon name="FileText" size={14} />{$t("Export team PDF")}
           </button>
@@ -385,10 +582,39 @@
     {#if exportError}
       <div class="error-text">{exportError}</div>
     {/if}
+    {#if activeTab === "employee" && userListLoadFailed && selectedReportUser}
+      <div class="zf-row mt-8" role="alert">
+        <span class="error-text">{$t(usersLoadError || "Error")}</span>
+        <button
+          type="button"
+          class="zf-btn zf-btn-ghost zf-btn-sm"
+          on:click={retryUsers}>{$t("Retry")}</button
+        >
+      </div>
+    {/if}
   </div>
 
-  {#if activeTab === "team" && canViewTeamReports}
+  {#if activeTab === "team" && canViewTeamReports && !userListFailureBlocksActiveReport && !userListLoadingBlocksActiveReport}
     <TeamReport {users} {periodMode} {month} {from} {to} />
+  {:else if userListLoadingBlocksActiveReport}
+    <div class="zf-card">
+      <LoadingState />
+    </div>
+  {:else if userListFailureBlocksActiveReport}
+    <div class="zf-card">
+      <div class="zf-card-empty zf-col" role="alert">
+        <span>{$t(usersLoadError || "Error")}</span>
+        <button class="zf-btn zf-btn-primary" on:click={retryUsers}
+          >{$t("Retry")}</button
+        >
+      </div>
+    </div>
+  {:else if linkedUserUnavailable}
+    <div class="zf-card">
+      <div class="zf-card-empty" role="status">
+        {$t("User not found or inactive.")}
+      </div>
+    </div>
   {:else}
     <PersonReport
       userId={selectedUserId}

@@ -186,8 +186,10 @@ pub async fn calendar(
     //   - lead → self + direct reports,
     //   - employee/assistant → self only.
     // Every entry we receive here is already an entry the requester is
-    // allowed to see in full (real kind, real comment, real category
-    // name). There is no per-category masking layer.
+    // allowed to see in full (real kind and category name). There is no
+    // per-category masking layer. Comments are intentionally omitted: the
+    // calendar only needs the date and person, while the employee report is
+    // the dedicated view for the full absence detail.
     Ok(Json(
         calendar_entries
             .into_iter()
@@ -201,7 +203,6 @@ pub async fn calendar(
                     "start_date": entry.start_date,
                     "end_date": entry.end_date,
                     "status": entry.status,
-                    "comment": entry.comment,
                 })
             })
             .collect(),

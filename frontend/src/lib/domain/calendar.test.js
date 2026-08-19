@@ -315,6 +315,7 @@ describe("rawCellEvents", () => {
           {
             id: 1,
             user_id: 5,
+            user_name: "Eve Emp",
             category_id: 4,
             start_time: "09:00:00",
             end_time: "10:00:00",
@@ -323,13 +324,11 @@ describe("rawCellEvents", () => {
       ],
     ]);
     const categoryMap = new Map([[4, { name: "Project" }]]);
-    const userMap = new Map([[5, { first_name: "Eve", last_name: "Emp" }]]);
     const cell = { ds, hol: null, absences: [] };
     const [workEvent] = rawCellEvents(cell, {
       translate,
       entryMap,
       categoryMap,
-      userMap,
       currentUserId: 1,
     });
     expect(workEvent.title).toBe("Project");
@@ -343,9 +342,8 @@ describe("rawCellEvents", () => {
     expect(workEvent.reportSection).toBe("entries");
   });
 
-  it("names the viewer's own entries from the session when the user lookup is empty", () => {
-    // Employees never load /users, so their own name is only available from
-    // the session — without it their popup rows would have no name at all.
+  it("names the viewer's own entries from the session", () => {
+    // The personal endpoint does not need to repeat the current user's name.
     const ds = "2026-03-10";
     const entryMap = new Map([
       [
@@ -371,7 +369,7 @@ describe("rawCellEvents", () => {
     expect(workEvent.personName).toBe("Own Name");
   });
 
-  it("leaves the person unnamed when the entry belongs to someone not in the lookup", () => {
+  it("leaves a malformed team entry without a display name unnamed", () => {
     const ds = "2026-03-10";
     const entryMap = new Map([
       [

@@ -32,6 +32,14 @@ pub struct TimeEntry {
     pub updated_at: DateTime<Utc>,
 }
 
+/// A team time entry includes the owner's display name for list views.
+#[derive(Serialize)]
+pub struct TeamTimeEntry {
+    #[serde(flatten)]
+    pub time_entry: TimeEntry,
+    pub user_name: String,
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

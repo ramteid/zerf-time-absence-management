@@ -62,7 +62,6 @@ pub struct CalendarEntry {
     pub category_name: String,
     pub start_date: NaiveDate,
     pub end_date: NaiveDate,
-    pub comment: Option<String>,
     pub status: String,
 }
 
@@ -462,7 +461,7 @@ impl AbsenceDb {
         let mut builder = QueryBuilder::<Postgres>::new(
             "SELECT a.id, a.user_id, u.first_name, u.last_name, c.slug AS kind, a.category_id, \
              c.name AS category_name, \
-             a.start_date, a.end_date, a.comment, a.status \
+             a.start_date, a.end_date, a.status \
              FROM absences a \
              JOIN users u ON u.id=a.user_id AND u.tracks_time=TRUE AND u.active=TRUE \
              JOIN absence_categories c ON c.id = a.category_id \

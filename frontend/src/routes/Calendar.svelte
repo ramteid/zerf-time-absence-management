@@ -33,12 +33,10 @@
     toggleCategoryFilter,
   } from "../lib/domain/calendar.js";
   import CategoryFilter from "./calendar/CategoryFilter.svelte";
-  import { tracksOwnTime } from "../rolePolicy.js";
 
   let entries = [];
   let holidays = [];
   let timeEntries = [];
-  let users = [];
   let year, month;
   // eslint-disable-next-line no-useless-assignment
   let popupCell = null;
@@ -80,12 +78,51 @@
     return years;
   }
 
+  // Calendar URLs are user-editable, while the grid and API both need one
+  // canonical month. Reject JavaScript's permissive number/date coercions
+  // (for example `13`, `Infinity`, or `2026.5`) before they can make those
+  // two views disagree.
+  function calendarMonthFromParams(searchParams, fallbackDate) {
+    const yearParam = searchParams.get("year") || "";
+    const monthParam = searchParams.get("month") || "";
+    const fallback = {
+      year: fallbackDate.getFullYear(),
+      month: fallbackDate.getMonth() + 1,
+    };
+    if (!/^\d{4}$/.test(yearParam) || !/^(?:0?[1-9]|1[0-2])$/.test(monthParam))
+      return fallback;
+
+    const parsedYear = Number(yearParam);
+    const parsedMonth = Number(monthParam);
+    // Keep years in the four-digit range that the rest of the date helpers
+    // serialise canonically. The Date round-trip also rejects impossible or
+    // non-finite values before a request is assembled.
+    if (parsedYear < 1000 || parsedYear > 9999) return fallback;
+    const firstDay = new Date(parsedYear, parsedMonth - 1, 1);
+    if (
+      !Number.isFinite(firstDay.getTime()) ||
+      firstDay.getFullYear() !== parsedYear ||
+      firstDay.getMonth() !== parsedMonth - 1
+    )
+      return fallback;
+    return { year: parsedYear, month: parsedMonth };
+  }
+
+  function calendarMonthFromPath(currentPath, fallbackDate) {
+    const queryString = currentPath.includes("?")
+      ? currentPath.split("?")[1]
+      : "";
+    return calendarMonthFromParams(
+      new URLSearchParams(queryString),
+      fallbackDate,
+    );
+  }
+
   $: {
-    const queryString = $path.includes("?") ? $path.split("?")[1] : "";
-    const searchParams = new URLSearchParams(queryString);
     const today = appTodayDate($settings?.timezone);
-    year = Number(searchParams.get("year")) || today.getFullYear();
-    month = Number(searchParams.get("month")) || today.getMonth() + 1;
+    const selectedMonth = calendarMonthFromPath($path, today);
+    year = selectedMonth.year;
+    month = selectedMonth.month;
     // Close any open day-detail popup when navigating to a different month.
     popupCell = null;
   }
@@ -115,7 +152,6 @@
         teamEntries,
         selfEntries,
         nextCategories,
-        nextUsers,
       ] = await Promise.all([
         fallbackToEmpty(api(`/absences/calendar?month=${monthString}`)),
         Promise.all(
@@ -130,26 +166,18 @@
           ? fallbackToEmpty(api(`/time-entries?from=${from}&to=${to}`))
           : Promise.resolve([]),
         api("/categories").catch(() => $categories),
-        isLead ? fallbackToEmpty(api("/users")) : Promise.resolve([]),
       ]);
       if (seq !== loadSeq) return;
       entries = nextEntries;
       holidays = nextHolidays;
       timeEntries = [...teamEntries, ...selfEntries];
       categories.set(nextCategories);
-      // Pure-admin users (tracks_time=false) never have calendar entries; drop
-      // them from the lookup so they can't appear in calendar event labels.
-      // Inactive users are also excluded.
-      users = (nextUsers || []).filter(
-        (u) => tracksOwnTime(u) && u.active !== false,
-      );
       loadedKey = requestedKey;
     } catch {
       if (seq !== loadSeq) return;
       entries = [];
       holidays = [];
       timeEntries = [];
-      users = [];
       loadedKey = requestedKey;
     }
   }
@@ -172,8 +200,6 @@
 
   // Rejected entries are excluded from the calendar view in all cases.
   $: calTimeEntries = timeEntries.filter((e) => e.status !== "rejected");
-
-  $: userById = new Map(users.map((u) => [u.id, u]));
 
   $: teMap = (() => {
     const timeEntriesByDate = new Map();
@@ -223,8 +249,8 @@
   })();
 
   $: absCatBySlug = new Map($absenceCategories.map((c) => [c.slug, c]));
-  // Own time entries carry only a user id; the /users lookup is empty for
-  // employees, so the viewer's own name comes from the session instead.
+  // Personal time-entry responses do not carry a display name; the viewer's
+  // own name is available from the authenticated session instead.
   $: currentUserName =
     `${$currentUser?.first_name ?? ""} ${$currentUser?.last_name ?? ""}`.trim() ||
     null;
@@ -233,7 +259,6 @@
     categoryMap: categoryById,
     absenceCategoryMap: absCatBySlug,
     translate: $t,
-    userMap: userById,
     currentUserId: $currentUser?.id ?? null,
     currentUserName,
   };
@@ -368,13 +393,7 @@
   }
 
   function monthFromPath() {
-    const queryString = $path.includes("?") ? $path.split("?")[1] : "";
-    const searchParams = new URLSearchParams(queryString);
-    const today = appTodayDate($settings?.timezone);
-    return {
-      year: Number(searchParams.get("year")) || year || today.getFullYear(),
-      month: Number(searchParams.get("month")) || month || today.getMonth() + 1,
-    };
+    return calendarMonthFromPath($path, appTodayDate($settings?.timezone));
   }
 
   function navigateMonth(delta) {

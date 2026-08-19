@@ -53,6 +53,14 @@ pub struct TimeEntry {
     pub updated_at: DateTime<Utc>,
 }
 
+/// Team-list projection that includes the entry owner's display name.
+#[derive(sqlx::FromRow, Clone)]
+pub struct TeamTimeEntry {
+    #[sqlx(flatten)]
+    pub time_entry: TimeEntry,
+    pub user_name: String,
+}
+
 /// Input for creating or updating a time entry.
 #[derive(Deserialize, Clone)]
 pub struct NewEntryData {
@@ -81,6 +89,13 @@ const TE_SELECT: &str =
      submitted_at, reviewed_by, reviewed_at, rejection_reason, \
      rejection_resolved_at, rejection_resolved_by, created_at, updated_at \
      FROM time_entries";
+
+const TEAM_TE_SELECT: &str =
+    "SELECT te.id, te.user_id, te.entry_date, te.start_time, te.end_time, te.category_id, \
+     te.comment, te.status, te.submitted_at, te.reviewed_by, te.reviewed_at, \
+     te.rejection_reason, te.rejection_resolved_at, te.rejection_resolved_by, te.created_at, \
+     te.updated_at, CONCAT_WS(' ', u.first_name, u.last_name) AS user_name \
+     FROM time_entries te JOIN users u ON u.id = te.user_id";
 
 // Rejected entries are explicit workflow items. They stay active until an
 // approved overlapping correction closes them by setting rejection_resolved_at.
@@ -456,7 +471,7 @@ impl TimeEntryDb {
         to: Option<NaiveDate>,
         user_id_filter: Option<i64>,
         status_filter: Option<String>,
-    ) -> AppResult<Vec<TimeEntry>> {
+    ) -> AppResult<Vec<TeamTimeEntry>> {
         // Always exclude entries from users who have time tracking disabled or
         // are archived. Their historical rows are kept immutably but must not
         // surface in any team or approval view (the handler already rejects
@@ -464,7 +479,7 @@ impl TimeEntryDb {
         // unfiltered listing consistent with that rule).
         // Also hide entries before the owner's start_date (same as list_for_user) so re-enabled tracking doesn't leak history.
         let mut builder = QueryBuilder::<Postgres>::new(format!(
-            "{TE_SELECT} WHERE user_id IN (SELECT id FROM users WHERE tracks_time=TRUE AND active=TRUE) AND entry_date >= (SELECT start_date FROM users WHERE id = time_entries.user_id)"
+            "{TEAM_TE_SELECT} WHERE te.user_id IN (SELECT id FROM users WHERE tracks_time=TRUE AND active=TRUE) AND te.entry_date >= (SELECT start_date FROM users WHERE id = te.user_id)"
         ));
         if !is_admin {
             // Non-admin leads: team members only (active, non-admin direct reports).
@@ -472,28 +487,28 @@ impl TimeEntryDb {
             // submissions and the endpoint is a team-management view, not self+team.
             // Callers that need the lead's own entries should use /time-entries instead.
             builder
-                .push(" AND user_id IN (SELECT ua.user_id FROM user_approvers ua JOIN users u ON u.id=ua.user_id WHERE ua.approver_id = ")
+                .push(" AND te.user_id IN (SELECT ua.user_id FROM user_approvers ua JOIN users u ON u.id=ua.user_id WHERE ua.approver_id = ")
                 .push_bind(requester_id)
                 .push(" AND u.active=TRUE AND u.role != 'admin')");
         }
         if let Some(f) = from {
-            builder.push(" AND entry_date >= ").push_bind(f);
+            builder.push(" AND te.entry_date >= ").push_bind(f);
         }
         if let Some(t) = to {
-            builder.push(" AND entry_date <= ").push_bind(t);
+            builder.push(" AND te.entry_date <= ").push_bind(t);
         }
         if let Some(uid) = user_id_filter {
-            builder.push(" AND user_id = ").push_bind(uid);
+            builder.push(" AND te.user_id = ").push_bind(uid);
         }
         if let Some(s) = status_filter {
             // Non-crediting entries fully participate in the approval workflow, so no
             // counts_as_work filter here — the approval queue must show all submitted
             // entries regardless of category.
-            builder.push(" AND status = ").push_bind(s);
+            builder.push(" AND te.status = ").push_bind(s);
         }
-        builder.push(" ORDER BY entry_date DESC, start_time");
+        builder.push(" ORDER BY te.entry_date DESC, te.start_time");
         Ok(builder
-            .build_query_as::<TimeEntry>()
+            .build_query_as::<TeamTimeEntry>()
             .fetch_all(&self.pool)
             .await?)
     }

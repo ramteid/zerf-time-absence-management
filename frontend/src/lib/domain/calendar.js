@@ -50,7 +50,6 @@ function readContext(context) {
     categoryMap = new Map(),
     absenceCategoryMap = new Map(),
     translate = (key) => key,
-    userMap = new Map(),
     currentUserId = null,
     currentUserName = null,
   } = context || {};
@@ -59,23 +58,17 @@ function readContext(context) {
     categoryMap,
     absenceCategoryMap,
     translate,
-    userMap,
     currentUserId,
     currentUserName,
   };
 }
 
-// Full name of the person a time entry belongs to. Team leads and admins get
-// the name from the users lookup; for the viewer's own entries the lookup may
-// be empty (employees never load /users), so their own name is used instead.
-function personNameForEntry(
-  entry,
-  { userMap, currentUserId, currentUserName },
-) {
-  const entryUser = userMap.get(entry.user_id);
-  if (entryUser) {
-    return `${entryUser.first_name} ${entryUser.last_name}`.trim() || null;
-  }
+// Team entries carry their owner's current display name with the entry. Own
+// entries use the authenticated session because the personal endpoint does
+// not need to repeat it.
+function personNameForEntry(entry, { currentUserId, currentUserName }) {
+  const entryName = String(entry.user_name || "").trim();
+  if (entryName) return entryName;
   if (entry.user_id === currentUserId) return currentUserName || null;
   return null;
 }

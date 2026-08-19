@@ -1,5 +1,9 @@
 import { addDays, dateKey, isoDate, parseDate } from "../../format.js";
 
+// The backend permits at most 366 dates in one report request. The range
+// endpoints use an inclusive bound, so its two ISO dates may differ by 365.
+export const REPORT_RANGE_MAX_DAY_DIFFERENCE = 365;
+
 export function monthKey(dateValue) {
   const date = parseDate(dateValue);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
@@ -76,7 +80,11 @@ export function daysBetweenIsoDates(from, to) {
 // The default matches the backend's `validate_range`, which caps an inclusive
 // range at 366 days — a difference of 365. Allowing one day more here made the
 // frontend wave through a period the API then rejected.
-export function isReportRangeTooLong(from, to, maxDays = 365) {
+export function isReportRangeTooLong(
+  from,
+  to,
+  maxDays = REPORT_RANGE_MAX_DAY_DIFFERENCE,
+) {
   const days = daysBetweenIsoDates(from, to);
   return days == null || days > maxDays;
 }

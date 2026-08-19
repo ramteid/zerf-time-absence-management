@@ -6,7 +6,7 @@ use crate::services::reopen_requests::cancel_zombie_reopen_requests;
 use crate::services::time_entries::{
     attach_counts_as_work, clear_submission_pending_for_weeks, log_week_status_audit,
     notification_language, notify_week_status_change, repo_entry_to_service, require_tracks_time,
-    timesheet_submission_reference_type, week_start, TimeEntry,
+    timesheet_submission_reference_type, week_start, TeamTimeEntry, TimeEntry,
 };
 use crate::AppState;
 use axum::{
@@ -72,7 +72,7 @@ pub async fn list_all(
     State(app_state): State<AppState>,
     requester: User,
     Query(query): Query<RangeQuery>,
-) -> AppResult<Json<Vec<TimeEntry>>> {
+) -> AppResult<Json<Vec<TeamTimeEntry>>> {
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
@@ -119,9 +119,23 @@ pub async fn list_all(
             query.status,
         )
         .await?;
-    let mut mapped: Vec<TimeEntry> = entries.into_iter().map(repo_entry_to_service).collect();
+    let mut mapped = Vec::with_capacity(entries.len());
+    let mut user_names = Vec::with_capacity(entries.len());
+    for entry in entries {
+        user_names.push(entry.user_name);
+        mapped.push(repo_entry_to_service(entry.time_entry));
+    }
     attach_counts_as_work(&app_state, &mut mapped).await?;
-    Ok(Json(mapped))
+    Ok(Json(
+        mapped
+            .into_iter()
+            .zip(user_names)
+            .map(|(time_entry, user_name)| TeamTimeEntry {
+                time_entry,
+                user_name,
+            })
+            .collect(),
+    ))
 }
 
 /// Create a new draft time entry for the requesting user.

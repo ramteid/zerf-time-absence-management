@@ -118,7 +118,3 @@ export function userWorkdaysPerWeek(user, fallback = 5) {
   const value = Number(user?.workdays_per_week);
   return Number.isFinite(value) && value >= 1 && value <= 7 ? value : fallback;
 }
-
-export function userWorkdaysPerWeekById(users, userId, fallback = 5) {
-  return userWorkdaysPerWeek(findUserById(users, userId), fallback);
-}

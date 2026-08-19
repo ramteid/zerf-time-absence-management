@@ -12,7 +12,6 @@ import {
   userInitials,
   userNameFromRows,
   userWorkdaysPerWeek,
-  userWorkdaysPerWeekById,
 } from "./users.js";
 
 describe("users domain helpers", () => {
@@ -190,13 +189,5 @@ describe("users domain helpers", () => {
     expect(userWorkdaysPerWeek({ workdays_per_week: 0 })).toBe(5);
     expect(userWorkdaysPerWeek({ workdays_per_week: 8 })).toBe(5);
     expect(userWorkdaysPerWeek(null)).toBe(5);
-  });
-
-  it("userWorkdaysPerWeekById looks up by id and returns the workdays value", () => {
-    expect(userWorkdaysPerWeekById(users, 2)).toBe(4);
-  });
-
-  it("userWorkdaysPerWeekById returns the fallback for an unknown id", () => {
-    expect(userWorkdaysPerWeekById(users, 99)).toBe(5);
   });
 });

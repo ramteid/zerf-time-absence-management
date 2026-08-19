@@ -4,20 +4,13 @@ import Calendar from "./Calendar.svelte";
 import { api } from "../api.js";
 import { categories, currentUser, path, settings } from "../stores.js";
 import { setLanguage } from "../i18n.js";
-
-const DEFAULT_USER = {
-  id: 2,
-  first_name: "Tina",
-  last_name: "Team",
-  role: "employee",
-  active: true,
-  tracks_time: true,
-};
+import { appTodayDate, isoDate } from "../format.js";
 
 const DEFAULT_TIME_ENTRIES = [
   {
     id: 11,
     user_id: 2,
+    user_name: "Tina Team",
     entry_date: "2026-05-04",
     start_time: "09:00:00",
     end_time: "11:00:00",
@@ -27,14 +20,12 @@ const DEFAULT_TIME_ENTRIES = [
 ];
 
 const mockState = vi.hoisted(() => ({
-  failUsers: false,
   holidays: [],
   absences: [],
   timeEntries: [],
   // Returned by /time-entries (the viewer's own entries). Employees only ever
   // hit this endpoint; leads hit it in addition to /time-entries/all.
   ownTimeEntries: [],
-  users: [],
 }));
 
 vi.mock("svelte", async () => {
@@ -49,10 +40,6 @@ vi.mock("../api.js", () => ({
     if (urlPath.startsWith("/time-entries?")) return mockState.ownTimeEntries;
     if (urlPath === "/categories") {
       return [{ id: 7, name: "Project", color: "#2f7d32" }];
-    }
-    if (urlPath === "/users") {
-      if (mockState.failUsers) throw new Error("users failed");
-      return mockState.users;
     }
     throw new Error(`Unhandled API path: ${urlPath}`);
   }),
@@ -190,12 +177,10 @@ describe("Calendar", () => {
     settings.set({ timezone: "UTC" });
     categories.set([]);
     setLanguage("en");
-    mockState.failUsers = false;
     mockState.holidays = [];
     mockState.absences = [];
     mockState.timeEntries = DEFAULT_TIME_ENTRIES;
     mockState.ownTimeEntries = [];
-    mockState.users = [DEFAULT_USER];
     api.mockClear();
   });
 
@@ -207,9 +192,7 @@ describe("Calendar", () => {
     target.remove();
   });
 
-  it("keeps admin team time entries visible when loading users fails", async () => {
-    mockState.failUsers = true;
-
+  it("renders team employee names without requesting the user roster", async () => {
     component = mount(Calendar, { target });
     await settle();
 
@@ -220,9 +203,10 @@ describe("Calendar", () => {
     expect(groups).toEqual([
       {
         label: "Project",
-        rows: [{ primary: "09:00 - 11:00 (2:00)", secondary: null }],
+        rows: [{ primary: "Tina Team", secondary: "09:00 - 11:00 (2:00)" }],
       },
     ]);
+    expect(api).not.toHaveBeenCalledWith("/users");
   });
 
   it("renders all loaded holidays in the visible month", async () => {
@@ -290,6 +274,76 @@ describe("Calendar", () => {
     await waitForPath("/calendar?year=2027&month=1");
     await waitForText(target, "January 2027");
   });
+
+  it("falls back from month=13 to a safe month and navigates from that month", async () => {
+    const today = appTodayDate("UTC");
+    const fallbackMonth = `${today.getFullYear()}-${String(
+      today.getMonth() + 1,
+    ).padStart(2, "0")}`;
+    const fallbackFrom = `${fallbackMonth}-01`;
+    const fallbackTo = isoDate(
+      new Date(today.getFullYear(), today.getMonth() + 1, 0),
+    );
+    const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+
+    history.replaceState({}, "", "/calendar?year=2026&month=13");
+    path.set("/calendar?year=2026&month=13");
+    component = mount(Calendar, { target });
+    await settle();
+
+    expect(api).toHaveBeenCalledWith(
+      `/absences/calendar?month=${fallbackMonth}`,
+    );
+    expect(api).toHaveBeenCalledWith(
+      `/time-entries/all?from=${fallbackFrom}&to=${fallbackTo}`,
+    );
+    const dateRequestPaths = api.mock.calls
+      .map(([requestPath]) => requestPath)
+      .filter(
+        (requestPath) =>
+          requestPath.startsWith("/absences/calendar?") ||
+          requestPath.startsWith("/time-entries") ||
+          requestPath.startsWith("/holidays?"),
+      );
+    expect(dateRequestPaths).not.toContain("/absences/calendar?month=2026-13");
+    expect(
+      dateRequestPaths.some((requestPath) => requestPath.includes("2026-13")),
+    ).toBe(false);
+    expect(
+      dateRequestPaths.some((requestPath) =>
+        /(?:Infinity|NaN|undefined)/.test(requestPath),
+      ),
+    ).toBe(false);
+
+    target.querySelector('[aria-label="Next month"]').click();
+    await waitForPath(
+      `/calendar?year=${nextMonth.getFullYear()}&month=${nextMonth.getMonth() + 1}`,
+    );
+  });
+
+  it.each(["2026.5", "Infinity"])(
+    "falls back from the invalid year %s without sending it to the API",
+    async (invalidYear) => {
+      const today = appTodayDate("UTC");
+      const fallbackMonth = `${today.getFullYear()}-${String(
+        today.getMonth() + 1,
+      ).padStart(2, "0")}`;
+
+      history.replaceState({}, "", `/calendar?year=${invalidYear}&month=5`);
+      path.set(`/calendar?year=${invalidYear}&month=5`);
+      component = mount(Calendar, { target });
+      await settle();
+
+      expect(api).toHaveBeenCalledWith(
+        `/absences/calendar?month=${fallbackMonth}`,
+      );
+      expect(
+        api.mock.calls.some(([requestPath]) =>
+          requestPath.includes(invalidYear),
+        ),
+      ).toBe(false);
+    },
+  );
 
   it("renders two different people's overlapping same-category absences on one day without crashing", async () => {
     // Regression test for a Svelte `each_key_duplicate` crash: the calendar's
@@ -589,21 +643,11 @@ describe("Calendar", () => {
     // chips, each starting with the employee's name. The day cell is about
     // what was worked on, so it shows the category once, with how many
     // records it covers.
-    mockState.users = [
-      DEFAULT_USER,
-      {
-        id: 3,
-        first_name: "Ben",
-        last_name: "Busy",
-        role: "employee",
-        active: true,
-        tracks_time: true,
-      },
-    ];
     mockState.timeEntries = [
       {
         id: 11,
         user_id: 2,
+        user_name: "Tina Team",
         entry_date: "2026-05-04",
         start_time: "09:00:00",
         end_time: "11:00:00",
@@ -613,6 +657,7 @@ describe("Calendar", () => {
       {
         id: 12,
         user_id: 3,
+        user_name: "Ben Busy",
         entry_date: "2026-05-04",
         start_time: "13:00:00",
         end_time: "17:00:00",
@@ -622,6 +667,7 @@ describe("Calendar", () => {
       {
         id: 13,
         user_id: 3,
+        user_name: "Ben Busy",
         entry_date: "2026-05-04",
         start_time: "08:00:00",
         end_time: "09:00:00",
@@ -762,9 +808,17 @@ describe("Calendar", () => {
     });
     // Employees see only their own entries, and get no /users lookup at all.
     mockState.timeEntries = [];
-    mockState.ownTimeEntries = DEFAULT_TIME_ENTRIES;
-    mockState.users = [];
-
+    mockState.ownTimeEntries = [
+      {
+        id: 11,
+        user_id: 2,
+        entry_date: "2026-05-04",
+        start_time: "09:00:00",
+        end_time: "11:00:00",
+        category_id: 7,
+        status: "approved",
+      },
+    ];
     component = mount(Calendar, { target });
     await settle();
     await waitForText(target, "Project");

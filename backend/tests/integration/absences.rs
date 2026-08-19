@@ -428,9 +428,7 @@ async fn absences_full_workflow() {
             .await;
         assert_eq!(st, StatusCode::OK, "create peer absence");
 
-        // Outsider's absence has a comment so we can also verify that even
-        // the comment privacy doesn't have a backdoor: an employee must not
-        // see ANY data from a non-scope user, full stop.
+        // An outsider must not appear in an employee's calendar at all.
         let (st, _) = outsider
             .post(
                 "/api/v1/absences",
@@ -444,7 +442,7 @@ async fn absences_full_workflow() {
         let (st, _) = emp
             .post(
                 "/api/v1/absences",
-                &json!({"kind":"vacation","start_date": calendar_day,"end_date": calendar_day}),
+                &json!({"kind":"vacation","start_date": calendar_day,"end_date": calendar_day,"comment":"Visible only in the employee report"}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create emp absence");
@@ -466,6 +464,18 @@ async fn absences_full_workflow() {
         assert!(
             visible_ids.contains(&emp_id),
             "employee must see their own absence"
+        );
+        let own_calendar_row = rows
+            .iter()
+            .find(|row| {
+                row["user_id"].as_i64() == Some(emp_id)
+                    && row["start_date"].as_str() == Some(calendar_day.as_str())
+                    && row["end_date"].as_str() == Some(calendar_day.as_str())
+            })
+            .expect("commented employee calendar absence should be present");
+        assert!(
+            own_calendar_row.get("comment").is_none(),
+            "calendar responses must omit absence comments: {own_calendar_row}"
         );
         assert!(
             !visible_ids.contains(&lead_id),

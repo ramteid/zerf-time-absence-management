@@ -7,7 +7,12 @@
   import Icon from "../../Icons.svelte";
   import DatePicker from "../../DatePicker.svelte";
   import DateRangeFields from "./DateRangeFields.svelte";
-  import { monthEnd, monthStart } from "../domain/dates.js";
+  import { addDays, isoDate } from "../../format.js";
+  import {
+    monthEnd,
+    monthStart,
+    REPORT_RANGE_MAX_DAY_DIFFERENCE,
+  } from "../domain/dates.js";
 
   export let mode = "month"; // "month" | "range"
   export let month = ""; // "YYYY-MM"
@@ -17,6 +22,9 @@
   export let maxMonth = null;
   export let minDate = null;
   export let maxDate = null;
+  // The report backend accepts 366 dates inclusive, which means its ISO
+  // endpoints can be at most 365 calendar days apart.
+  export let maxRangeDays = REPORT_RANGE_MAX_DAY_DIFFERENCE;
   export let id = "period"; // base id, suffixed per rendered input
 
   function shiftMonth(value, delta) {
@@ -48,6 +56,30 @@
   function switchToMonth() {
     mode = "month";
   }
+
+  function shiftIsoDate(value, days) {
+    if (!value || isoDate(value) !== value) return "";
+    return isoDate(addDays(value, days));
+  }
+
+  function earlierIsoDate(first, second) {
+    if (!first) return second || "";
+    if (!second) return first;
+    return first < second ? first : second;
+  }
+
+  function laterIsoDate(first, second) {
+    if (!first) return second || "";
+    if (!second) return first;
+    return first > second ? first : second;
+  }
+
+  // Keep both date pickers inside the backend's inclusive 366-day window.
+  // `from` constrains the latest possible `to`, and `to` constrains the
+  // earliest possible `from`; DateRangeFields also preserves chronological
+  // and page-level min/max bounds.
+  $: rangeMinFrom = laterIsoDate(minDate, shiftIsoDate(to, -maxRangeDays));
+  $: rangeMaxTo = earlierIsoDate(maxDate, shiftIsoDate(from, maxRangeDays));
 </script>
 
 {#if mode === "month"}
@@ -98,9 +130,10 @@
       toId="{id}-to"
       fromLabel={$t("From")}
       toLabel={$t("To")}
-      minFrom={minDate}
+      minFrom={rangeMinFrom}
       maxFrom={maxDate}
-      maxTo={maxDate}
+      minTo={minDate}
+      maxTo={rangeMaxTo}
     />
     <button
       type="button"

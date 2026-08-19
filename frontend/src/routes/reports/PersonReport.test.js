@@ -6,8 +6,15 @@
 // only exist here now.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount, unmount } from "svelte";
+import { get } from "svelte/store";
 import PersonReport from "./PersonReport.svelte";
-import { currentUser, settings, absenceCategories } from "../../stores.js";
+import {
+  currentUser,
+  settings,
+  absenceCategories,
+  go,
+  toasts,
+} from "../../stores.js";
 import { setLanguage, setAbsenceCategoryCache } from "../../i18n.js";
 
 vi.mock("svelte", async () => {
@@ -46,6 +53,14 @@ async function settle() {
   await Promise.resolve();
 }
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 async function waitForText(target, text, timeout = 5000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
@@ -53,6 +68,15 @@ async function waitForText(target, text, timeout = 5000) {
     await new Promise((r) => setTimeout(r, 25));
   }
   throw new Error(`Text not found: "${text}"`);
+}
+
+async function waitFor(check, timeout = 5000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (check()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("Condition not met within timeout");
 }
 
 function monthReportFixture(overrides = {}) {
@@ -445,7 +469,7 @@ describe("PersonReport", () => {
     expect(getAbsenceReport).not.toHaveBeenCalled();
   });
 
-  it("renders an absence comment with its full value available as a tooltip", async () => {
+  it("renders an absence comment as readable report text", async () => {
     getUserAbsencesByYear.mockResolvedValue([
       {
         id: 5,
@@ -466,16 +490,12 @@ describe("PersonReport", () => {
       "Medical certificate was submitted electronically.",
     );
 
-    const comment = [...target.querySelectorAll(".text-truncate-tooltip")].find(
-      (element) =>
-        element.textContent.includes(
-          "Medical certificate was submitted electronically.",
-        ),
-    );
-    expect(comment).not.toBeUndefined();
-    expect(comment.getAttribute("title")).toBe(
+    const comment = target.querySelector(".report-absence-comment");
+    expect(comment).not.toBeNull();
+    expect(comment.textContent.trim()).toBe(
       "Medical certificate was submitted electronically.",
     );
+    expect(comment.classList).not.toContain("text-truncate-tooltip");
   });
 
   it("scrolls and focuses the linked absences section after loading it", async () => {
@@ -531,6 +551,71 @@ describe("PersonReport", () => {
 
     history.replaceState({}, "", "/reports#report-absences");
     window.dispatchEvent(new Event("hashchange"));
+    await settle();
+
+    const section = target.querySelector("#report-absences");
+    expect(document.activeElement).toBe(section);
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" });
+  });
+
+  it("does not focus a queued section after the fragment becomes invalid", async () => {
+    getUserAbsencesByYear.mockResolvedValue([
+      {
+        id: 6,
+        user_id: 1,
+        kind: "sick",
+        start_date: "2026-06-10",
+        end_date: "2026-06-10",
+        status: "approved",
+        comment: "A real target for the queued focus.",
+      },
+    ]);
+    component = mount(PersonReport, {
+      target,
+      props: { userId: 1, users, periodMode: "month", month: "2026-06" },
+    });
+    await waitForText(target, "A real target for the queued focus.");
+
+    history.replaceState({}, "", "/reports#report-absences");
+    window.dispatchEvent(new Event("hashchange"));
+    // Let the reactive focus effect queue its tick callback, then replace the
+    // fragment before that callback is allowed to act.
+    await Promise.resolve();
+    history.replaceState({}, "", "/reports#unknown-section");
+    window.dispatchEvent(new Event("hashchange"));
+    await settle();
+
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    expect(document.activeElement).not.toBe(
+      target.querySelector("#report-absences"),
+    );
+  });
+
+  it("follows a fragment set through SPA navigation with unchanged path and query", async () => {
+    getUserAbsencesByYear.mockResolvedValue([
+      {
+        id: 5,
+        user_id: 1,
+        kind: "sick",
+        start_date: "2026-06-10",
+        end_date: "2026-06-10",
+        status: "approved",
+        comment: "Medical certificate was submitted electronically.",
+      },
+    ]);
+    component = mount(PersonReport, {
+      target,
+      props: { userId: 1, users, periodMode: "month", month: "2026-06" },
+    });
+    await waitForText(
+      target,
+      "Medical certificate was submitted electronically.",
+    );
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    // `pushState` does not fire `hashchange` natively. The SPA helper must
+    // still notify the already-mounted report that its target fragment moved.
+    go("/reports#report-absences");
     await settle();
 
     const section = target.querySelector("#report-absences");
@@ -679,6 +764,95 @@ describe("PersonReport", () => {
     expect(getMonthReport).not.toHaveBeenCalled();
   });
 
+  it("discards a stale chart response after the report context changes", async () => {
+    // Supplying no `users` forces the component to use currentUser as its
+    // metadata source. Updating the same user's workdays therefore creates a
+    // new report key without needing a test-only wrapper component.
+    component = mount(PersonReport, {
+      target,
+      props: { userId: 1, users: [], periodMode: "month", month: "2026-06" },
+    });
+    await waitForText(target, "Flextime balance");
+    getFlextimeReport.mockClear();
+
+    const staleChart = deferred();
+    const freshChart = {
+      days: [
+        {
+          date: "2026-06-14",
+          actual_min: 480,
+          target_min: 480,
+          diff_min: 0,
+          cumulative_min: 120,
+          absence: null,
+          holiday: null,
+        },
+      ],
+      balanceAsOf: "2026-06-14",
+    };
+    getFlextimeReport.mockImplementation(() => {
+      if (getFlextimeReport.mock.calls.length === 1) return staleChart.promise;
+      return Promise.resolve(freshChart);
+    });
+
+    const rangeButton = [...target.querySelectorAll("button")].find((button) =>
+      button.textContent.includes("Last 90 days"),
+    );
+    rangeButton.click();
+    await Promise.resolve();
+
+    // The changed workday metadata starts a new report and invalidates the
+    // outstanding manual chart request for the old report context.
+    currentUser.set({
+      id: 1,
+      role: "employee",
+      start_date: "2020-01-01",
+      workdays_per_week: 4,
+    });
+    await waitFor(() => getFlextimeReport.mock.calls.length >= 2);
+    await waitFor(() => target.querySelector(".chart-as-of")?.textContent);
+
+    staleChart.resolve({ days: [], balanceAsOf: "2025-01-01" });
+    await settle();
+
+    const chartAsOf = target.querySelector(".chart-as-of").textContent;
+    expect(chartAsOf).toContain("2026");
+    expect(chartAsOf).not.toContain("2025");
+  });
+
+  it("reloads the report when weekly-hours metadata changes", async () => {
+    // Supplying no `users` makes currentUser the metadata source, so this
+    // isolates a weekly-hours change from every other report-key field.
+    const originalUser = {
+      id: 1,
+      role: "employee",
+      start_date: "2020-01-01",
+      workdays_per_week: 5,
+      weekly_hours: 40,
+      overtime_start_balance_min: 0,
+      tracks_time: true,
+      active: true,
+    };
+    currentUser.set(originalUser);
+    getMonthReport.mockResolvedValueOnce(
+      monthReportFixture({ category_totals: { OriginalTargetMarker: 480 } }),
+    );
+    getMonthReport.mockResolvedValueOnce(
+      monthReportFixture({ category_totals: { UpdatedTargetMarker: 384 } }),
+    );
+    component = mount(PersonReport, {
+      target,
+      props: { userId: 1, users: [], periodMode: "month", month: "2026-06" },
+    });
+    await waitForText(target, "OriginalTargetMarker");
+
+    currentUser.set({ ...originalUser, weekly_hours: 32 });
+    await waitFor(() => getMonthReport.mock.calls.length === 2);
+    await waitForText(target, "UpdatedTargetMarker");
+
+    expect(target.textContent).not.toContain("OriginalTargetMarker");
+  });
+
   it("shows a future-period note and skips time-based fetches for a fully-future custom range", async () => {
     component = mount(PersonReport, {
       target,
@@ -756,6 +930,30 @@ describe("PersonReport", () => {
 
     resolveMonth(monthReportFixture());
     await waitForText(target, "My Balance");
+  });
+
+  it("does not surface a stale report failure after the component unmounts", async () => {
+    let rejectMonth;
+    getMonthReport.mockImplementation(
+      () =>
+        new Promise((_, reject) => {
+          rejectMonth = reject;
+        }),
+    );
+    component = mount(PersonReport, {
+      target,
+      props: { userId: 1, users, periodMode: "month", month: "2026-06" },
+    });
+    await waitFor(() => typeof rejectMonth === "function");
+
+    toasts.set([]);
+    unmount(component);
+    component = null;
+
+    rejectMonth(new Error("Late report failure"));
+    await settle();
+
+    expect(get(toasts)).toEqual([]);
   });
 
   // The multi-user version of this race guard (switching the employee picker
