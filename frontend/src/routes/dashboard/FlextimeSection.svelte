@@ -57,7 +57,7 @@
     </div>
   {:else}
     <div class:flextime-chart-busy={chartLoading} class="flextime-chart-wrap">
-      <FlextimeChart data={chartData} />
+      <FlextimeChart data={chartData} asOf={balanceAsOf} />
       {#if chartLoading}
         <div class="flextime-loading-inline">
           {$t("Loading...")}

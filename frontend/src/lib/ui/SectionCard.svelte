@@ -6,6 +6,11 @@
   export let helpOpen = false;
   export let onHelpToggle = null;
   export let padded = true;
+  /// Give the actions their own full-width row underneath the title instead of
+  /// placing them next to it. For wide control rows (e.g. the flextime range
+  /// picker) that would otherwise be squeezed into a narrow column beside the
+  /// title.
+  export let actionsOwnRow = false;
 </script>
 
 <section class="zf-card section-card" class:section-card--padded={padded}>
@@ -22,7 +27,12 @@
         {/if}
       </div>
       {#if $$slots.actions}
-        <div class="section-card-actions"><slot name="actions" /></div>
+        <div
+          class="section-card-actions"
+          class:section-card-actions--own-row={actionsOwnRow}
+        >
+          <slot name="actions" />
+        </div>
       {/if}
     </div>
   {/if}
@@ -49,7 +59,10 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    /* The row gap only applies once the actions no longer fit beside the
+       title and wrap onto their own line below it. */
+    gap: 10px 12px;
+    flex-wrap: wrap;
     margin-bottom: 14px;
   }
 
@@ -67,6 +80,10 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    /* Absorb the free space so the actions sit at the far right, and give way
+       first when the header gets tight. */
+    flex: 1 1 auto;
+    min-width: 0;
     font-size: 0.9375rem;
     font-weight: 400;
   }
@@ -75,6 +92,14 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  /* Own row: a full-width basis forces the actions onto a line of their own,
+     where they get the whole card width to lay themselves out in. */
+  .section-card-actions--own-row {
+    flex: 1 1 100%;
   }
 
   .section-card-help {

@@ -74,7 +74,10 @@
   .flextime-controls {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
+    /* Left-aligned: the surrounding header pushes the whole block to the right
+       when it shares the title's row, so this only decides how the button and
+       date rows line up once they wrap onto two lines. */
+    justify-content: flex-start;
     gap: 8px;
     flex: 0 1 auto;
     flex-wrap: wrap;
@@ -109,7 +112,6 @@
   @media (max-width: 1024px) {
     .flextime-controls {
       width: 100%;
-      justify-content: flex-start;
     }
 
     .flextime-ranges,

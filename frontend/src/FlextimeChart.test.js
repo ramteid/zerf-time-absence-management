@@ -11,6 +11,7 @@ import {
   WEEKEND_COLOR,
   MASKED_ABSENCE_COLOR,
 } from "./colors.js";
+import { fmtDateShort } from "./format.js";
 
 vi.mock("svelte", async () => {
   return await import("../node_modules/svelte/src/index-client.js");
@@ -206,6 +207,49 @@ describe("FlextimeChart", () => {
     expect(legend).toContain("Vacation");
     expect(legend).toContain("Sick");
     expect(legend).toContain("Weekends");
+  });
+
+  // `asOf` is the same cutoff shown above the chart as "As of {date}" (end of
+  // the last fully approved week). `data` can extend past it — the range
+  // controls fetch through today — but days after the cutoff carry no ledger
+  // contribution, so the x-axis must stop labelling them instead of implying
+  // the balance is current through today.
+  it("stops the x-axis at asOf even when data extends further", async () => {
+    component = mount(FlextimeChart, {
+      target,
+      props: {
+        data: [
+          day("2030-01-07"),
+          day("2030-01-08"),
+          day("2030-01-09"),
+          day("2030-01-10"),
+          day("2030-01-11"),
+        ],
+        asOf: "2030-01-09",
+      },
+    });
+    await settle();
+
+    const labels = target.textContent;
+    expect(labels).toContain(fmtDateShort("2030-01-09"));
+    expect(labels).not.toContain(fmtDateShort("2030-01-10"));
+    expect(labels).not.toContain(fmtDateShort("2030-01-11"));
+  });
+
+  it("does not band a weekend day that falls after asOf", async () => {
+    component = mount(FlextimeChart, {
+      target,
+      props: {
+        data: [
+          day("2030-01-04"), // Friday, at the cutoff
+          day("2030-01-05"), // Saturday, past the cutoff
+        ],
+        asOf: "2030-01-04",
+      },
+    });
+    await settle();
+
+    expect(bandColors(target)).toHaveLength(0);
   });
 
   it("renders an empty state instead of a chart without data", async () => {

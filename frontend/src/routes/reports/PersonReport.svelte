@@ -566,11 +566,6 @@
     {:else if reportData.monthReport}
       <div class="report-subheading report-subheading-help">
         <span>{isOwnReport ? $t("My Balance") : $t("Balance")}</span>
-        {#if selectedUser?.weekly_hours && selectedUser.weekly_hours > 0}
-          <span class="weekly-hours-tag">
-            {$t("Weekly hours")}: {formatHours(selectedUser.weekly_hours)}
-          </span>
-        {/if}
         <button
           class="zf-btn-icon-sm zf-btn-ghost help-icon"
           title={$t("help_employee_details")}
@@ -579,6 +574,13 @@
           <Icon name="Info" size={12} />
         </button>
       </div>
+      <!-- The contracted weekly hours put the numbers below into context, so
+           they get their own line under the heading rather than trailing it. -->
+      {#if selectedUser?.weekly_hours && selectedUser.weekly_hours > 0}
+        <div class="weekly-hours-tag">
+          {$t("Weekly hours")}: {formatHours(selectedUser.weekly_hours)}
+        </div>
+      {/if}
       {#if activeHelp === "report"}
         <div class="report-note">{$t("help_employee_details")}</div>
       {/if}
@@ -852,6 +854,7 @@
       <SectionCard
         title={$t("Flextime balance")}
         helpText={$t("help_flextime_chart")}
+        actionsOwnRow
       >
         <!-- The chart has its own range, seeded from the report period: the
              balance curve is usually worth looking at over a longer window
@@ -873,7 +876,7 @@
         {#if chartLoading && chartDays.length === 0}
           <div class="zf-card-empty">{$t("Loading...")}</div>
         {:else if chartDays.length}
-          <FlextimeChart data={chartDays} />
+          <FlextimeChart data={chartDays} asOf={chartBalanceAsOf} />
         {:else}
           <div class="zf-card-empty">{$t("No data.")}</div>
         {/if}
@@ -927,9 +930,10 @@
   }
 
   .weekly-hours-tag {
-    font-size: 12px;
+    font-size: 0.75rem;
     color: var(--text-secondary);
     font-weight: 400;
+    margin-bottom: 10px;
   }
 
   .help-icon {
