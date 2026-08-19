@@ -126,6 +126,51 @@ export async function bookableDateOffset(request, minOffsetDays) {
   );
 }
 
+// Returns a *past* ISO date (YYYY-MM-DD) on which an absence can be booked:
+// a weekday that isn't a public holiday, searched backwards from
+// `startOffsetDays` (negative) and no further back than `minOffsetDays`.
+//
+// The forward-walking bookableDateOffset above can't serve this: absences that
+// have to be *already approved* must lie in the past, because only a past
+// absence in an auto-approve category (e.g. Sick) skips the approval step. As
+// with every other date in this suite, walking to a real workday instead of
+// trusting a fixed offset keeps the suite deterministic no matter which day it
+// runs on. The default floor stays inside the 21-day contract backdate
+// createUserViaAdminUi applies, so the date is never before the user's start.
+export async function pastBookableDateOffset(
+  request,
+  startOffsetDays = -1,
+  minOffsetDays = -14,
+) {
+  const holidays = await holidayDates(request);
+  for (let offset = startOffsetDays; offset >= minOffsetDays; offset--) {
+    const iso = isoOffset(offset);
+    const weekday = new Date(`${iso}T00:00:00Z`).getUTCDay();
+    if (weekday !== 6 && weekday !== 0 && !holidays.has(iso)) return iso;
+  }
+  throw new Error(
+    `no past bookable date found between offsets ${startOffsetDays} and ${minOffsetDays}`,
+  );
+}
+
+// Records every uncaught exception and console error the page raises, and
+// returns the collected list.
+//
+// Most of this suite asserts on what is rendered, which silently tolerates a
+// component that throws as long as some other element still matches. An
+// uncaught render error in Svelte aborts the surrounding subtree, so the
+// symptom is a section that just never appears — exactly how the employee
+// report's flextime chart failed in production. Asserting this list is empty
+// turns that class of failure into a direct, readable error.
+export function collectPageErrors(page) {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(String(error)));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  return errors;
+}
+
 // Returns a future ISO date (YYYY-MM-DD), at least `minOffsetDays` out, that is
 // NOT already occupied by a holiday — so creating a manual holiday on it can
 // never hit the holidays.holiday_date UNIQUE constraint.

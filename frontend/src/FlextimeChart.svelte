@@ -160,17 +160,27 @@
   // Group consecutive days with the same band color into runs.
   // Each run is rendered as a single rect spanning from the first to the last point,
   // so multi-day spans (e.g. Sat+Sun) align exactly with their data points.
+  //
+  // `absCatBySlug` is passed down explicitly rather than read inside
+  // `dayBandColor`. Svelte orders reactive statements by the reactive values
+  // they name directly, and it cannot look inside a plain function call — so a
+  // lookup read only in there would neither be ready on the first run nor
+  // retrigger these runs when the category list arrives.
   $: bandRuns = (() => {
     const runs = [];
     let i = 0;
     while (i <= lastActualIdx) {
-      const color = dayBandColor(data[i]);
+      const color = dayBandColor(data[i], absCatBySlug);
       if (!color) {
         i++;
         continue;
       }
       let j = i;
-      while (j + 1 <= lastActualIdx && dayBandColor(data[j + 1]) === color) j++;
+      while (
+        j + 1 <= lastActualIdx &&
+        dayBandColor(data[j + 1], absCatBySlug) === color
+      )
+        j++;
       runs.push({ firstIdx: i, lastIdx: j, color });
       i = j + 1;
     }
@@ -261,15 +271,19 @@
   $: absCatBySlug = new Map($absenceCategories.map((c) => [c.slug, c]));
 
   // Use DB-stored category colors so chart bands match the calendar exactly.
-  $: absColor = (kind) => absCatBySlug.get(kind)?.color || MASKED_ABSENCE_COLOR;
+  // A category the client doesn't know (e.g. deleted since the absence was
+  // booked) falls back to the neutral masked colour.
+  function absColor(kind, catBySlug) {
+    return catBySlug.get(kind)?.color || MASKED_ABSENCE_COLOR;
+  }
 
   function isWeekend(dateString) {
     const dayOfWeek = new Date(`${dateString}T00:00:00Z`).getUTCDay();
     return dayOfWeek === 0 || dayOfWeek === 6;
   }
 
-  function dayBandColor(day) {
-    if (day.absence) return absColor(day.absence);
+  function dayBandColor(day, catBySlug) {
+    if (day.absence) return absColor(day.absence, catBySlug);
     if (day.holiday) return HOLIDAY_COLOR;
     if (isWeekend(day.date)) return WEEKEND_COLOR;
     return null;
@@ -289,7 +303,10 @@
     for (const day of data) {
       if (day.absence && !seen.has(day.absence)) {
         seen.add(day.absence);
-        items.push({ key: day.absence, color: absColor(day.absence) });
+        items.push({
+          key: day.absence,
+          color: absColor(day.absence, absCatBySlug),
+        });
       }
       if (day.holiday && !seen.has("__holiday__")) {
         seen.add("__holiday__");
@@ -366,6 +383,7 @@
               ? pts[run.lastIdx + 1].x
               : pts[run.lastIdx].x + barWidth}
           <rect
+            data-testid="flextime-band"
             x={startX}
             y={marginTop}
             width={endX - startX}

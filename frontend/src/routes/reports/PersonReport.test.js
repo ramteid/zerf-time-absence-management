@@ -697,6 +697,81 @@ describe("PersonReport", () => {
     expect(target.querySelector("svg")).not.toBeNull();
   });
 
+  // Regression: an employee who was absent during the reported period made the
+  // flextime chart throw while colouring the absence band, which aborted the
+  // whole report render — the person could be picked from the dropdown but
+  // their report stayed blank. Colleagues without absences were unaffected,
+  // which is what made it look like only certain employees were broken.
+  it("renders the report for an employee who was absent during the period", async () => {
+    getFlextimeReport.mockResolvedValue({
+      days: [
+        {
+          date: "2026-06-01",
+          actual_min: 480,
+          target_min: 480,
+          diff_min: 0,
+          cumulative_min: 60,
+          absence: null,
+          holiday: null,
+        },
+        {
+          date: "2026-06-02",
+          actual_min: 0,
+          target_min: 480,
+          diff_min: 0,
+          cumulative_min: 60,
+          absence: "vacation",
+          holiday: null,
+        },
+        {
+          date: "2026-06-03",
+          actual_min: 0,
+          target_min: 480,
+          diff_min: 0,
+          cumulative_min: 60,
+          absence: "sick",
+          holiday: null,
+        },
+      ],
+      balanceAsOf: "2026-06-07",
+    });
+    component = mount(PersonReport, {
+      target,
+      props: { userId: 1, users, periodMode: "month", month: "2026-06" },
+    });
+
+    await waitForText(target, "Flextime balance");
+    expect(target.querySelector("svg")).not.toBeNull();
+    // The chart fell over before drawing any band, so assert the bands exist.
+    expect(target.querySelectorAll("svg rect").length).toBeGreaterThan(0);
+  });
+
+  it("renders the report when the chart covers an absence category the client does not know", async () => {
+    // A category deleted after the absence was booked still reaches the chart
+    // as a slug with no matching colour. It must fall back, not throw.
+    getFlextimeReport.mockResolvedValue({
+      days: [
+        {
+          date: "2026-06-01",
+          actual_min: 0,
+          target_min: 480,
+          diff_min: 0,
+          cumulative_min: 0,
+          absence: "category_removed_since",
+          holiday: null,
+        },
+      ],
+      balanceAsOf: "2026-06-07",
+    });
+    component = mount(PersonReport, {
+      target,
+      props: { userId: 1, users, periodMode: "month", month: "2026-06" },
+    });
+
+    await waitForText(target, "Flextime balance");
+    expect(target.querySelector("svg")).not.toBeNull();
+  });
+
   it("labels the flextime balance with the date it is stated as of", async () => {
     // The balance stops at the last fully approved week, so the stat card and
     // the chart both name that date instead of implying "as of the period end".
