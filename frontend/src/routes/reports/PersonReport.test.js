@@ -16,6 +16,7 @@ import {
   toasts,
 } from "../../stores.js";
 import { setLanguage, setAbsenceCategoryCache } from "../../i18n.js";
+import { MASKED_ABSENCE_COLOR } from "../../colors.js";
 
 vi.mock("svelte", async () => {
   return await import("../../../node_modules/svelte/src/index-client.js");
@@ -44,7 +45,16 @@ import {
 // Freeze "today" so month/range future-vs-past branching is deterministic.
 vi.mock("../../format.js", async () => {
   const actual = await vi.importActual("../../format.js");
-  return { ...actual, appTodayDate: vi.fn(() => new Date(2026, 5, 15)) }; // 2026-06-15
+  // Both spellings of "today" must be frozen to the same day: the report reads
+  // appTodayDate, while the flextime chart reads appTodayIsoDate to decide
+  // which days are already in the past (only those get an absence band).
+  // Leaving the latter on the wall clock would make the chart's behaviour
+  // depend on when the suite runs.
+  return {
+    ...actual,
+    appTodayDate: vi.fn(() => new Date(2026, 5, 15)), // 2026-06-15
+    appTodayIsoDate: vi.fn(() => "2026-06-15"),
+  };
 });
 
 async function settle() {
@@ -180,14 +190,31 @@ describe("PersonReport", () => {
     setLanguage("en");
     settings.set({ ui_language: "en", time_format: "24h", timezone: "UTC" });
     currentUser.set({ id: 1, role: "employee", start_date: "2020-01-01" });
+    // `color` mirrors what GET /absence-categories actually returns — the
+    // flextime chart colours its absence bands from exactly this field, so a
+    // fixture without it would silently exercise the unknown-category fallback
+    // instead of the real path.
     const cats = [
-      { id: 1, slug: "vacation", name: "Vacation", cost_type: "vacation" },
-      { id: 2, slug: "sick", name: "Sick", cost_type: "none" },
+      {
+        id: 1,
+        slug: "vacation",
+        name: "Vacation",
+        cost_type: "vacation",
+        color: "#0017c7",
+      },
+      {
+        id: 2,
+        slug: "sick",
+        name: "Sick",
+        cost_type: "none",
+        color: "#ef4444",
+      },
       {
         id: 7,
         slug: "flextime_reduction",
         name: "Flextime Reduction",
         cost_type: "flextime",
+        color: "#008f8c",
       },
     ];
     absenceCategories.set(cats);
@@ -742,8 +769,14 @@ describe("PersonReport", () => {
 
     await waitForText(target, "Flextime balance");
     expect(target.querySelector("svg")).not.toBeNull();
-    // The chart fell over before drawing any band, so assert the bands exist.
-    expect(target.querySelectorAll("svg rect").length).toBeGreaterThan(0);
+    // Assert the absence bands specifically. A plain `svg rect` count would
+    // always pass — the chart's three clip-path rects exist regardless of
+    // whether a single band was ever drawn.
+    const bands = [
+      ...target.querySelectorAll('rect[data-testid="flextime-band"]'),
+    ].map((rect) => rect.getAttribute("fill"));
+    expect(bands).toContain("#0017c7"); // vacation
+    expect(bands).toContain("#ef4444"); // sick
   });
 
   it("renders the report when the chart covers an absence category the client does not know", async () => {
@@ -769,7 +802,10 @@ describe("PersonReport", () => {
     });
 
     await waitForText(target, "Flextime balance");
-    expect(target.querySelector("svg")).not.toBeNull();
+    const bands = [
+      ...target.querySelectorAll('rect[data-testid="flextime-band"]'),
+    ].map((rect) => rect.getAttribute("fill"));
+    expect(bands).toContain(MASKED_ABSENCE_COLOR);
   });
 
   it("labels the flextime balance with the date it is stated as of", async () => {

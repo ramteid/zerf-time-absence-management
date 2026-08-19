@@ -73,6 +73,8 @@ test.describe("team lead reads another person's employee report", () => {
     await userSelect.selectOption({
       label: `${EMPLOYEE.firstName} ${EMPLOYEE.lastName}`,
     });
+    const employeeId = await userSelect.inputValue();
+    expect(employeeId).toMatch(/^\d+$/);
 
     // Cover the sick day with an explicit custom range rather than relying on
     // the default month: near the start of a month the current month may hold
@@ -80,7 +82,22 @@ test.describe("team lead reads another person's employee report", () => {
     // chart and make this test pass for the wrong reason.
     await page.getByRole("button", { name: "Custom range" }).click();
     await setDate(page, "reports-period-from", sickDate);
+
+    // Arm the wait before the edit that completes the range, so the response
+    // can't land before we start listening. Without pinning the assertion to
+    // this exact request, the previously selected person's chart is still on
+    // screen and its weekend bands would satisfy the band check below.
+    const flextimeLoaded = page.waitForResponse((r) => {
+      const url = new URL(r.url());
+      return (
+        url.pathname === "/api/v1/reports/flextime" &&
+        url.searchParams.get("user_id") === employeeId &&
+        url.searchParams.get("from") === sickDate &&
+        url.searchParams.get("to") === sickDate
+      );
+    });
     await setDate(page, "reports-period-to", sickDate);
+    expect((await flextimeLoaded).ok()).toBe(true);
 
     // The chart aborted before drawing anything, so assert the absence band
     // itself is there — "the flextime section is visible" would still have
@@ -104,22 +121,60 @@ test.describe("team lead reads another person's employee report", () => {
     // The dropdown lists exactly the people this lead may report on. Walking
     // all of them catches a report that only breaks for someone with a
     // particular data shape, instead of trusting that one sample is
-    // representative.
-    const labels = await userSelect.locator("option").allInnerTexts();
-    expect(labels.length).toBeGreaterThan(1);
+    // representative. Each option's value is that person's user id, which is
+    // what the report request is keyed on below.
+    const people = await userSelect.locator("option").evaluateAll((options) =>
+      options.map((option) => ({ id: option.value, label: option.label })),
+    );
+    expect(people.length).toBeGreaterThan(1);
+    // Each option's value carries the user id the report request is keyed on.
+    // Assert that up front — if it were ever anything else, the response match
+    // below would silently wait forever instead of failing with a clear reason.
+    for (const person of people) expect(person.id).toMatch(/^\d+$/);
 
-    for (const label of labels) {
-      await userSelect.selectOption({ label });
+    // The page opens with one person already selected, whose report has
+    // therefore already loaded. Re-selecting that same option fires no change
+    // event and would issue no request, so track the selection and only wait
+    // for a response when it actually changes.
+    let selectedId = await userSelect.inputValue();
+
+    for (const person of people) {
+      if (person.id !== selectedId) {
+        // Wait for *this* person's report request rather than for a stat card
+        // to be visible: the previously selected person's cards stay on screen
+        // for a moment after the selection changes, so a bare visibility check
+        // can pass against the old report without the new one ever loading.
+        const [response] = await Promise.all([
+          page.waitForResponse(
+            (r) =>
+              new URL(r.url()).pathname === "/api/v1/reports/month" &&
+              new URL(r.url()).searchParams.get("user_id") === person.id,
+          ),
+          userSelect.selectOption({ label: person.label }),
+        ]);
+        expect(response.ok(), `report request failed for ${person.label}`).toBe(
+          true,
+        );
+        selectedId = person.id;
+      }
+
       // Every report opens with a row of stat cards, whatever the person's
       // role — their absence is the symptom the production bug produced.
       await expect(page.locator(".stat-card").first()).toBeVisible();
-      expect(pageErrors, `report failed for ${label}`).toEqual([]);
+      expect(pageErrors, `report failed for ${person.label}`).toEqual([]);
     }
 
     // The lead's own team is what the roster is scoped to, so both the
     // employee and the assistant they approve for must be selectable here.
-    expect(labels.join(" ")).toContain(EMPLOYEE.lastName);
-    expect(labels.join(" ")).toContain(ASSISTANT.lastName);
-    expect(labels.join(" ")).toContain(TEAM_LEAD.lastName);
+    const allLabels = people.map((person) => person.label).join(" ");
+    expect(allLabels).toContain(EMPLOYEE.lastName);
+    expect(allLabels).toContain(ASSISTANT.lastName);
+    expect(allLabels).toContain(TEAM_LEAD.lastName);
+
+    // One more browser round-trip before the final check: console/pageerror
+    // events are delivered asynchronously, so an error raised while the last
+    // person's report rendered may still be in flight.
+    await expect(userSelect).toBeVisible();
+    expect(pageErrors).toEqual([]);
   });
 });
