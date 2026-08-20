@@ -63,3 +63,25 @@ export const PAYROLL_EMPLOYEE = {
 // month is 31 days (on the 31st of a month), so any offset beyond that always
 // starts the contract on or before the end of the previous month.
 export const PAYROLL_START_OFFSET_DAYS = -70;
+
+// Two more people, created by 11b-dashboard-absence-slider.spec.js to test
+// the dashboard's "Who is absent" tile in isolation from every other spec's
+// absence data. Kept separate from EMPLOYEE/ASSISTANT so that tile's
+// week-by-week navigation can assert exactly who is (and isn't) shown in a
+// given week without depending on dates other spec files happened to pick.
+export const ABSENCE_SLIDER_EMPLOYEE_ONE = {
+  firstName: "Sina",
+  lastName: "SliderOne",
+  email: "slider.one@e2e.test",
+};
+
+export const ABSENCE_SLIDER_EMPLOYEE_TWO = {
+  firstName: "Theo",
+  lastName: "SliderTwo",
+  email: "slider.two@e2e.test",
+};
+
+// Backdated far enough (matches PAYROLL_START_OFFSET_DAYS) that every past
+// week used by 11b — up to 4 weeks back — is safely after the contract
+// start, regardless of which weekday the suite happens to run on.
+export const ABSENCE_SLIDER_START_OFFSET_DAYS = -70;

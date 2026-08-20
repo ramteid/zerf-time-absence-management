@@ -111,4 +111,91 @@ describe("AbsenceSlider", () => {
     await settle();
     expect(target.textContent).toContain("Dave Dev");
   });
+
+  it("updates the displayed week range when navigating next/previous, and Today returns to it", async () => {
+    // Reported symptom: "the displayed date doesn't change even when
+    // switched correctly". The header text is bound directly to `week`, so
+    // this pins down that clicking really does move it, in both directions.
+    currentUser.set({
+      id: 1,
+      role: "team_lead",
+      permissions: { can_approve: true },
+    });
+    component = mount(AbsenceSlider, { target, props: { users: [] } });
+    await settle();
+
+    const rangeButton = target.querySelector(".absence-week-range");
+    const initialText = rangeButton.textContent.trim();
+    expect(initialText.length).toBeGreaterThan(0);
+
+    target.querySelector('[aria-label="Next week"]').click();
+    await settle();
+    const afterNext = rangeButton.textContent.trim();
+    expect(afterNext).not.toBe(initialText);
+
+    target.querySelector('[aria-label="Previous week"]').click();
+    await settle();
+    expect(rangeButton.textContent.trim()).toBe(initialText);
+
+    // Move away, then use the range button itself (title="Today") to jump
+    // straight back to the current week.
+    target.querySelector('[aria-label="Next week"]').click();
+    await settle();
+    expect(rangeButton.textContent.trim()).not.toBe(initialText);
+    rangeButton.click();
+    await settle();
+    expect(rangeButton.textContent.trim()).toBe(initialText);
+  });
+
+  it("keeps the most recently requested week's data even if an earlier request resolves later (race-condition regression)", async () => {
+    // Reproduces the reported bug: clicking prev/next fires a new fetch
+    // without waiting for the previous one to finish. If a slow response
+    // for an *earlier* click arrives after a fast response for a *later*
+    // click, it must not be allowed to overwrite the newer, correct data —
+    // otherwise the tile can silently revert to the wrong week's absences
+    // (or an empty list) even though the header already moved on.
+    currentUser.set({
+      id: 1,
+      role: "team_lead",
+      permissions: { can_approve: true },
+    });
+
+    let resolveInitialLoad;
+    const initialLoadPromise = new Promise((resolve) => {
+      resolveInitialLoad = resolve;
+    });
+    const nextWeekResult = [
+      {
+        id: 9,
+        user_id: 3,
+        kind: "sick",
+        start_date: "2026-08-10",
+        end_date: "2026-08-10",
+        status: "approved",
+      },
+    ];
+
+    let callCount = 0;
+    getTeamAbsences.mockImplementation(() => {
+      callCount += 1;
+      // First call = the initial mount load. Deliberately left pending so
+      // it can be resolved *after* the second call, out of order.
+      if (callCount === 1) return initialLoadPromise;
+      return Promise.resolve(nextWeekResult);
+    });
+
+    const users = [{ id: 3, first_name: "Sam", last_name: "Sick" }];
+    component = mount(AbsenceSlider, { target, props: { users } });
+    await settle(); // initial load still pending
+
+    target.querySelector('[aria-label="Next week"]').click();
+    await settle(); // second (faster) request already resolved and rendered
+    expect(target.textContent).toContain("Sam Sick");
+
+    // The slow, now-superseded first response finally resolves with a
+    // different (empty) result. A correct implementation ignores it.
+    resolveInitialLoad([]);
+    await settle();
+    expect(target.textContent).toContain("Sam Sick");
+  });
 });

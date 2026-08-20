@@ -28,6 +28,7 @@ database — each builds on state left by the previous ones:
 | `10-team-lead-final-reviews.spec.js` | Team lead rejects a reopen request, approves a cancellation |
 | `11-final-ui-state.spec.js` | Employee and assistant confirm, through their own UI, that every approve/reject/cancel decision landed as the right persistent status chip |
 | `11a-employee-report-absence-chart.spec.js` | Team lead opens the Employee report for each of their people, including one with an approved absence inside the reported period (the case that broke the flextime chart) |
+| `11b-dashboard-absence-slider.spec.js` | The dashboard's "Who is absent" tile: week-by-week navigation lands on the right week and shows exactly the right people's sick leave, including a reproduction of an out-of-order-response race between two rapid clicks |
 | `12-admin-user-lifecycle.spec.js` | Admin archives, restores, and resets a user's password |
 | `13-payroll-report.spec.js` | Payroll report: who is included (exclusion list), and the dashboard card leads and admins use to see how far the month is |
 

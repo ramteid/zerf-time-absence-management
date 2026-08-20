@@ -27,9 +27,19 @@
   let direction = 1;
   let isLeadView = false;
 
+  // Guards against out-of-order responses: clicking prev/next fires a new
+  // fetch without waiting for the previous one, so two requests can be in
+  // flight at once. Without this, a slower response for an *earlier* click
+  // can resolve after a faster response for a *later* click and overwrite
+  // `data` with the wrong week's absences — the header (bound to `week`)
+  // already shows the new range, but the list underneath silently reverts
+  // to stale data. Same pattern as `loadSeq` in Calendar.svelte.
+  let loadSeq = 0;
+
   async function loadWeek(weekStartDate) {
     isLeadView = $currentUser?.permissions?.can_approve || false;
     if (!isLeadView) return;
+    const seq = ++loadSeq;
     try {
       const weekEnd = isoDate(addDays(parseDate(weekStartDate), 6));
       const params = new URLSearchParams({
@@ -37,8 +47,11 @@
         to: weekEnd,
         status: "approved",
       });
-      data = await getTeamAbsences(params);
+      const result = await getTeamAbsences(params);
+      if (seq !== loadSeq) return; // a newer request has since superseded this one
+      data = result;
     } catch {
+      if (seq !== loadSeq) return;
       data = [];
     }
   }

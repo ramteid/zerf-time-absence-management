@@ -153,6 +153,43 @@ export async function pastBookableDateOffset(
   );
 }
 
+// Returns a past ISO date (YYYY-MM-DD) that falls inside one *specific*
+// Monday-Sunday week, expressed relative to the current week — weeksAgo=1
+// always lands somewhere in last week, weeksAgo=2 always lands somewhere in
+// the week before that, and so on. Never drifts into an adjacent week the
+// way a plain day-count walk (pastBookableDateOffset) can once "today" gets
+// close to a week boundary.
+//
+// Needed by specs that assert on the dashboard's week-by-week absence
+// navigation (11b): those need several absences pinned to distinct,
+// predictable weeks — not merely "sometime in the past" — so that clicking
+// "previous week" N times can be asserted to reveal exactly the Nth week's
+// data and nothing else.
+//
+// `preferredWeekday` is 0=Monday..4=Friday. If that day is a public holiday,
+// the nearest other weekday within the same Monday-Friday window is used
+// instead (order: +1, -1, +2, -2, ...) so the result never leaves the
+// requested week.
+export async function pastWeekWorkday(
+  request,
+  weeksAgo,
+  preferredWeekday = 2,
+) {
+  const today = new Date();
+  const todayMondayIndex = (today.getDay() + 6) % 7; // 0=Mon..6=Sun
+  const baseDelta = preferredWeekday - todayMondayIndex - 7 * weeksAgo;
+  const holidays = await holidayDates(request);
+  for (const step of [0, 1, -1, 2, -2, 3, -3, 4, -4]) {
+    const dayIndex = preferredWeekday + step;
+    if (dayIndex < 0 || dayIndex > 4) continue;
+    const iso = isoOffset(baseDelta + step);
+    if (!holidays.has(iso)) return iso;
+  }
+  throw new Error(
+    `no bookable workday found ${weeksAgo} week(s) ago (holidays block every weekday)`,
+  );
+}
+
 // Records every uncaught exception and console error the page raises, and
 // returns the collected list.
 //
