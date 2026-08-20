@@ -129,6 +129,45 @@ describe("AbsenceSlider", () => {
     expect(target.textContent).toContain("Dave Dev");
   });
 
+  it("renders both rows when one person has two separate approved absences in the same week", async () => {
+    // Regression test: the app only blocks *overlapping* absences for the
+    // same person (see assert_no_overlap_tx), so a non-overlapping pair —
+    // e.g. sick Mon-Tue, then vacation Thu-Fri — can both land in the same
+    // displayed week. The each-block used to be keyed on `absence.user_id`,
+    // which collided for this exact case: Svelte's keyed each requires
+    // unique keys, so the duplicate key silently dropped the whole block,
+    // hiding both absences instead of just the second one.
+    currentUser.set({
+      id: 1,
+      role: "team_lead",
+      permissions: { can_approve: true },
+    });
+    getTeamAbsences.mockResolvedValue([
+      {
+        id: 5,
+        user_id: 3,
+        kind: "sick",
+        start_date: "2026-07-06",
+        end_date: "2026-07-07",
+        status: "approved",
+      },
+      {
+        id: 6,
+        user_id: 3,
+        kind: "vacation",
+        start_date: "2026-07-09",
+        end_date: "2026-07-10",
+        status: "approved",
+      },
+    ]);
+    const users = [{ id: 3, first_name: "Dave", last_name: "Dev" }];
+    component = mount(AbsenceSlider, { target, props: { users } });
+    await settle();
+    await settle();
+    const items = target.querySelectorAll(".dropdown-slider-item");
+    expect(items.length).toBe(2);
+  });
+
   it("updates the displayed week range when navigating next/previous, and Today returns to it", async () => {
     // Reported symptom: "the displayed date doesn't change even when
     // switched correctly". The header text is bound directly to `week`, so

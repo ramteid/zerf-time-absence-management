@@ -125,7 +125,7 @@
           {$t("No absences this week.")}
         </div>
       {:else}
-        {#each sortedData as absence (absence.user_id)}
+        {#each sortedData as absence (absence.id)}
           {@const absentUser = users.find((u) => u.id === absence.user_id)}
           <div class="dropdown-slider-item">
             <div>
