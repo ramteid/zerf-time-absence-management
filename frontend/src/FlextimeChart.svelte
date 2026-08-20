@@ -18,26 +18,35 @@
   export let data = [];
 
   // Closing-balance cutoff (end of the user's last fully approved week), the
-  // same date shown above the chart as "As of {date}". `data` can extend
-  // past it — the range controls fetch through today — but every day after
-  // this one contributes nothing to the ledger (see build_flextime_for_user),
-  // so plotting them would only tease a flat tail past the stated balance.
-  // Trimming here keeps the x-axis in sync with what "As of" actually claims.
+  // same date shown above the chart as "As of {date}". Only the balance line
+  // stops here — a day after it still gets its absence/holiday/weekend band
+  // and x-axis label, because a band reflects a real approved fact (e.g. a
+  // sick day that was auto-approved before its week's ledger closed), not a
+  // ledger contribution. Hiding those days entirely broke any report whose
+  // queried range reaches past the cutoff (e.g. a team lead picking a custom
+  // range around a colleague's still-open week) — see FlextimeChart.test.js
+  // and the "team lead reads another person's report" e2e spec.
   export let asOf = null;
 
-  $: visibleData = asOf ? data.filter((day) => day.date <= asOf) : data;
-
   // Index of the last data point up to and including today (local date).
-  // The line and area fill stop here; x-axis labels cover the full range.
+  // Bounds bands, the x-axis, and hover — every day actually in view,
+  // regardless of whether its ledger contribution has settled yet.
   $: todayStr = appTodayIsoDate($settings?.timezone);
-  $: lastActualIdx = (() => {
-    let lastVisibleIndex = visibleData.length - 1;
-    while (
-      lastVisibleIndex >= 0 &&
-      visibleData[lastVisibleIndex].date > todayStr
-    )
+  $: lastVisibleIdx = (() => {
+    let lastVisibleIndex = data.length - 1;
+    while (lastVisibleIndex >= 0 && data[lastVisibleIndex].date > todayStr)
       lastVisibleIndex--;
     return lastVisibleIndex;
+  })();
+
+  // Last index whose balance is meaningful: additionally capped at `asOf`
+  // (see build_flextime_for_user — every day after it contributes nothing to
+  // the ledger). Only the line and area fill use this; plotting them further
+  // would tease a flat tail past the stated balance.
+  $: lastActualIdx = (() => {
+    let i = lastVisibleIdx;
+    while (i >= 0 && asOf && data[i].date > asOf) i--;
+    return i;
   })();
 
   // SVG layout constants
@@ -56,11 +65,11 @@
   const chartInstanceId = Math.random().toString(36).slice(2, 8);
 
   // Value extents (always include 0)
-  $: dataMin = visibleData.reduce(
+  $: dataMin = data.reduce(
     (minimumMinutes, day) => Math.min(minimumMinutes, day.cumulative_min),
     0,
   );
-  $: dataMax = visibleData.reduce(
+  $: dataMax = data.reduce(
     (maximumMinutes, day) => Math.max(maximumMinutes, day.cumulative_min),
     0,
   );
@@ -76,15 +85,15 @@
   // Coordinate transforms
   $: xOf = (pointIndex) =>
     marginLeft +
-    (visibleData.length > 1
-      ? (pointIndex / (visibleData.length - 1)) * plotWidth
+    (data.length > 1
+      ? (pointIndex / (data.length - 1)) * plotWidth
       : plotWidth / 2);
   $: yOf = (minuteValue) =>
     marginTop + plotHeight - ((minuteValue - dispMin) / dispRange) * plotHeight;
   $: zeroY = yOf(0);
 
   // Pre-compute point coordinates
-  $: pts = visibleData.map((day, pointIndex) => ({
+  $: pts = data.map((day, pointIndex) => ({
     x: xOf(pointIndex),
     y: yOf(day.cumulative_min),
   }));
@@ -161,15 +170,14 @@
   })();
 
   // X-axis tick indices (~8 labels)
-  $: xTickStep = Math.max(1, Math.ceil(visibleData.length / 8));
-  $: xTicks = visibleData.reduce((tickIndexes, _day, pointIndex) => {
+  $: xTickStep = Math.max(1, Math.ceil(data.length / 8));
+  $: xTicks = data.reduce((tickIndexes, _day, pointIndex) => {
     if (pointIndex % xTickStep === 0) tickIndexes.push(pointIndex);
     return tickIndexes;
   }, /** @type {number[]} */ ([]));
 
   // Bar pixel width (for absence/holiday/weekend bands)
-  $: barWidth =
-    visibleData.length > 1 ? plotWidth / (visibleData.length - 1) : plotWidth;
+  $: barWidth = data.length > 1 ? plotWidth / (data.length - 1) : plotWidth;
 
   // Group consecutive days with the same band color into runs.
   // Each run is rendered as a single rect spanning from the first to the last point,
@@ -183,16 +191,16 @@
   $: bandRuns = (() => {
     const runs = [];
     let i = 0;
-    while (i <= lastActualIdx) {
-      const color = dayBandColor(visibleData[i], absCatBySlug);
+    while (i <= lastVisibleIdx) {
+      const color = dayBandColor(data[i], absCatBySlug);
       if (!color) {
         i++;
         continue;
       }
       let j = i;
       while (
-        j + 1 <= lastActualIdx &&
-        dayBandColor(visibleData[j + 1], absCatBySlug) === color
+        j + 1 <= lastVisibleIdx &&
+        dayBandColor(data[j + 1], absCatBySlug) === color
       )
         j++;
       runs.push({ firstIdx: i, lastIdx: j, color });
@@ -205,7 +213,7 @@
   let hoverIdx = /** @type {number|null} */ (null);
 
   function onMouseMove(e) {
-    if (!visibleData.length) return;
+    if (!data.length) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const svgX = e.clientX - rect.left;
     const plotX = svgX - marginLeft;
@@ -214,13 +222,11 @@
       return;
     }
     const rawIndex =
-      visibleData.length > 1
-        ? (plotX / plotWidth) * (visibleData.length - 1)
-        : 0;
+      data.length > 1 ? (plotX / plotWidth) * (data.length - 1) : 0;
     const hoverIndex = Math.round(
-      Math.max(0, Math.min(visibleData.length - 1, rawIndex)),
+      Math.max(0, Math.min(data.length - 1, rawIndex)),
     );
-    hoverIdx = hoverIndex <= lastActualIdx ? hoverIndex : null;
+    hoverIdx = hoverIndex <= lastVisibleIdx ? hoverIndex : null;
   }
 
   function onMouseLeave() {
@@ -228,7 +234,7 @@
   }
 
   function onTouchMove(e) {
-    if (!visibleData.length) return;
+    if (!data.length) return;
     e.preventDefault();
     const touch = e.touches[0];
     const rect = e.currentTarget.getBoundingClientRect();
@@ -239,20 +245,18 @@
       return;
     }
     const rawIndex =
-      visibleData.length > 1
-        ? (plotX / plotWidth) * (visibleData.length - 1)
-        : 0;
+      data.length > 1 ? (plotX / plotWidth) * (data.length - 1) : 0;
     const hoverIndex = Math.round(
-      Math.max(0, Math.min(visibleData.length - 1, rawIndex)),
+      Math.max(0, Math.min(data.length - 1, rawIndex)),
     );
-    hoverIdx = hoverIndex <= lastActualIdx ? hoverIndex : null;
+    hoverIdx = hoverIndex <= lastVisibleIdx ? hoverIndex : null;
   }
 
   function onTouchEnd() {
     hoverIdx = null;
   }
 
-  $: hoverD = hoverIdx !== null ? visibleData[hoverIdx] : null;
+  $: hoverD = hoverIdx !== null ? data[hoverIdx] : null;
   $: hoverPt = hoverIdx !== null ? pts[hoverIdx] : null;
 
   // ── Tooltip ──────────────────────────────────────────────────────────────
@@ -318,7 +322,7 @@
   $: legendItems = (() => {
     const seen = new Set();
     const items = [];
-    for (const day of visibleData) {
+    for (const day of data) {
       if (day.absence && !seen.has(day.absence)) {
         seen.add(day.absence);
         items.push({
@@ -341,7 +345,7 @@
 
 <!-- bind:clientWidth keeps PW in sync when the card resizes -->
 <div bind:clientWidth={containerW} class="chart-root">
-  {#if visibleData.length === 0}
+  {#if data.length === 0}
     <div class="zf-empty fs-14">
       {$t("No data.")}
     </div>
@@ -397,7 +401,7 @@
         {#each bandRuns as run (run.firstIdx)}
           {@const startX = pts[run.firstIdx].x}
           {@const endX =
-            run.lastIdx + 1 < visibleData.length
+            run.lastIdx + 1 < data.length
               ? pts[run.lastIdx + 1].x
               : pts[run.lastIdx].x + barWidth}
           <rect
@@ -493,7 +497,7 @@
           font-size="10"
           fill="var(--text-tertiary)"
         >
-          {fmtDateShort(visibleData[i].date)}
+          {fmtDateShort(data[i].date)}
         </text>
       {/each}
 

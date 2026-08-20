@@ -210,11 +210,37 @@ describe("FlextimeChart", () => {
   });
 
   // `asOf` is the same cutoff shown above the chart as "As of {date}" (end of
-  // the last fully approved week). `data` can extend past it — the range
-  // controls fetch through today — but days after the cutoff carry no ledger
-  // contribution, so the x-axis must stop labelling them instead of implying
-  // the balance is current through today.
-  it("stops the x-axis at asOf even when data extends further", async () => {
+  // the last fully approved week). Regression: an earlier version filtered
+  // the *entire* dataset down to `asOf`, which also erased bands and x-axis
+  // labels for any day past the cutoff — breaking a team lead's report for a
+  // colleague whose absence fell in a week that hadn't closed the ledger yet
+  // (see the "team lead reads another person's report" e2e spec). Only the
+  // balance line/area may stop at the cutoff; everything else must still
+  // cover the full data range, since it reflects real approved facts rather
+  // than a ledger contribution.
+  it("keeps x-axis labels and bands for days after asOf", async () => {
+    component = mount(FlextimeChart, {
+      target,
+      props: {
+        data: [
+          day("2030-01-07"),
+          day("2030-01-08"),
+          day("2030-01-09"),
+          day("2030-01-10", { absence: "sick" }),
+          day("2030-01-11"),
+        ],
+        asOf: "2030-01-09",
+      },
+    });
+    await settle();
+
+    const labels = target.textContent;
+    expect(labels).toContain(fmtDateShort("2030-01-10"));
+    expect(labels).toContain(fmtDateShort("2030-01-11"));
+    expect(bandColors(target)).toContain("#ef4444"); // the sick day past the cutoff
+  });
+
+  it("stops the balance line at asOf even though bands continue", async () => {
     component = mount(FlextimeChart, {
       target,
       props: {
@@ -230,26 +256,13 @@ describe("FlextimeChart", () => {
     });
     await settle();
 
-    const labels = target.textContent;
-    expect(labels).toContain(fmtDateShort("2030-01-09"));
-    expect(labels).not.toContain(fmtDateShort("2030-01-10"));
-    expect(labels).not.toContain(fmtDateShort("2030-01-11"));
-  });
-
-  it("does not band a weekend day that falls after asOf", async () => {
-    component = mount(FlextimeChart, {
-      target,
-      props: {
-        data: [
-          day("2030-01-04"), // Friday, at the cutoff
-          day("2030-01-05"), // Saturday, past the cutoff
-        ],
-        asOf: "2030-01-04",
-      },
-    });
-    await settle();
-
-    expect(bandColors(target)).toHaveLength(0);
+    // The line/area path is built from 3 in-range points (through asOf), so
+    // it emits 2 "L" segments per point after the first — 4 total. Left
+    // uncapped, 5 points would emit 8.
+    const linePathD = target
+      .querySelector('path[fill="none"]')
+      .getAttribute("d");
+    expect((linePathD.match(/L/g) || []).length).toBe(4);
   });
 
   it("renders an empty state instead of a chart without data", async () => {
