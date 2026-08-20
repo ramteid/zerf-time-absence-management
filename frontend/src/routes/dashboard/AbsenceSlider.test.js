@@ -20,6 +20,23 @@ vi.mock("../../lib/api/dashboardApi.js", () => ({
 
 import { getTeamAbsences } from "../../lib/api/dashboardApi.js";
 
+// jsdom does not implement the Web Animations API, but the component's
+// week-change block uses Svelte's `fly` transition, which calls
+// element.animate() on every re-render. Without this stub, clicking
+// prev/next/today below throws "element.animate is not a function" as an
+// unhandled exception during the test run. The returned object only needs
+// to satisfy what Svelte's transition runtime touches (a settable
+// `onfinish` and a callable `cancel()`) — none of the assertions here
+// depend on the animation actually completing, since the underlying
+// `{#key}` block's content is already mounted/unmounted independently of
+// the CSS animation layered on top of it.
+if (!Element.prototype.animate) {
+  Element.prototype.animate = () => ({
+    onfinish: null,
+    cancel() {},
+  });
+}
+
 async function settle() {
   await Promise.resolve();
   await new Promise((resolve) => setTimeout(resolve, 0));
