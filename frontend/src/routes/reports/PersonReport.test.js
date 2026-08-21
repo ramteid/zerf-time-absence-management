@@ -496,7 +496,7 @@ describe("PersonReport", () => {
     expect(getAbsenceReport).not.toHaveBeenCalled();
   });
 
-  it("renders an absence comment as readable report text", async () => {
+  it("renders an absence comment collapsed with a title tooltip until clicked", async () => {
     getUserAbsencesByYear.mockResolvedValue([
       {
         id: 5,
@@ -519,10 +519,51 @@ describe("PersonReport", () => {
 
     const comment = target.querySelector(".report-absence-comment");
     expect(comment).not.toBeNull();
+    expect(comment.tagName).toBe("BUTTON");
     expect(comment.textContent.trim()).toBe(
       "Medical certificate was submitted electronically.",
     );
+    expect(comment.getAttribute("title")).toBe(
+      "Medical certificate was submitted electronically.",
+    );
     expect(comment.classList).not.toContain("text-truncate-tooltip");
+    // Collapsed by default: the row must not blow up before the user asks
+    // for the full comment.
+    expect(comment.classList).not.toContain("report-absence-comment-expanded");
+    expect(comment.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("expands an absence comment on click and collapses it again on a second click", async () => {
+    getUserAbsencesByYear.mockResolvedValue([
+      {
+        id: 5,
+        user_id: 1,
+        kind: "sick",
+        start_date: "2026-06-10",
+        end_date: "2026-06-10",
+        status: "approved",
+        comment: "Medical certificate was submitted electronically.",
+      },
+    ]);
+    component = mount(PersonReport, {
+      target,
+      props: { userId: 1, users, periodMode: "month", month: "2026-06" },
+    });
+    await waitForText(
+      target,
+      "Medical certificate was submitted electronically.",
+    );
+
+    const comment = target.querySelector(".report-absence-comment");
+    comment.click();
+    await settle();
+    expect(comment.classList).toContain("report-absence-comment-expanded");
+    expect(comment.getAttribute("aria-expanded")).toBe("true");
+
+    comment.click();
+    await settle();
+    expect(comment.classList).not.toContain("report-absence-comment-expanded");
+    expect(comment.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("scrolls and focuses the linked absences section after loading it", async () => {

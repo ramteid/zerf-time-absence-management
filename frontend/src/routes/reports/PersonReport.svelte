@@ -80,6 +80,21 @@
   let activeHelp = null;
   let entriesSection;
   let absencesSection;
+  // Absence comments are long-form free text; showing them in full inline
+  // would blow up the row height, so each one starts truncated and expands
+  // on click. Keyed by absence id, not index, so re-sorting/reloading can't
+  // leave a stale row expanded.
+  let expandedAbsenceComments = new Set();
+
+  function toggleAbsenceComment(id) {
+    const next = new Set(expandedAbsenceComments);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    expandedAbsenceComments = next;
+  }
   let reportHash = typeof window === "undefined" ? "" : window.location.hash;
   let hashVersion = 0;
   let lastFocusedSectionKey = "";
@@ -830,9 +845,18 @@
                   <td class="tab-num text-right">{formatDayCount(a.days)}</td>
                   <td>
                     {#if a.comment}
-                      <span class="report-absence-comment">
+                      <button
+                        type="button"
+                        class="report-absence-comment"
+                        class:report-absence-comment-expanded={expandedAbsenceComments.has(
+                          a.id,
+                        )}
+                        aria-expanded={expandedAbsenceComments.has(a.id)}
+                        title={a.comment}
+                        on:click={() => toggleAbsenceComment(a.id)}
+                      >
                         {a.comment}
-                      </span>
+                      </button>
                     {:else}
                       -
                     {/if}
@@ -906,14 +930,33 @@
     scroll-margin-top: 16px;
   }
 
-  /* The report is the canonical destination for absence remarks. Unlike the
-     compact time-entry list, a remark must stay readable without relying on a
-     hover-only native tooltip. */
+  /* Absence remarks are free text and can run long, so a row starts
+     collapsed to one ellipsized line (a native title tooltip covers hover)
+     and expands to the full, wrapped comment on click/tap so mobile users
+     without hover can still read it without the row blowing up by default. */
   .report-absence-comment {
     display: block;
+    width: 100%;
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    text-align: left;
     color: var(--text-tertiary);
+    cursor: pointer;
+  }
+
+  .report-absence-comment-expanded {
+    max-width: none;
+    overflow: visible;
     overflow-wrap: anywhere;
     white-space: pre-wrap;
+    cursor: default;
   }
 
   .leave-account-cards {

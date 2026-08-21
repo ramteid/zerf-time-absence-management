@@ -216,12 +216,22 @@
     align-items: flex-end;
   }
 
-  /* Tables: allow horizontal scroll */
+  /* Tables: allow horizontal scroll. The negative-margin bleed lets a
+     `.zf-card.zf-table-wrap` list (AdminHolidays/TeamUsers/AdminUsers) reach
+     all the way to the screen edge, matching .content-area's own 14px
+     padding. Inside a SectionCard (Reports), the wrap already sits flush
+     against the tile's own boundary — bleeding the same 14px there pushed
+     the table and its scrollbar past the tile's edge instead. */
   .zf-table-wrap {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     margin: 0 -14px;
     padding: 0 14px;
+  }
+
+  .section-card .zf-table-wrap {
+    margin: 0;
+    padding: 0;
   }
 
   .zf-table {
