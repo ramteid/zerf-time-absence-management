@@ -145,6 +145,18 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                     get(handlers::users::get_user_leave_accounts),
                 )
                 .route(
+                    "/users/{id}/flextime-account",
+                    get(handlers::flextime_adjustments::get_account),
+                )
+                .route(
+                    "/users/{id}/flextime-adjustments",
+                    post(handlers::flextime_adjustments::create),
+                )
+                .route(
+                    "/flextime-adjustments/{id}/reverse",
+                    post(handlers::flextime_adjustments::reverse),
+                )
+                .route(
                     "/team-users",
                     get(handlers::team_users::list).post(handlers::team_users::create),
                 )

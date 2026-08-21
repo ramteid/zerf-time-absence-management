@@ -981,7 +981,6 @@ describe("PersonReport", () => {
       start_date: "2020-01-01",
       workdays_per_week: 5,
       weekly_hours: 40,
-      overtime_start_balance_min: 0,
       tracks_time: true,
       active: true,
     };

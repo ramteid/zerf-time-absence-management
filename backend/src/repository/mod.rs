@@ -6,6 +6,7 @@ pub mod categories;
 pub mod email_queue;
 pub mod error_notification_queue;
 pub mod facade;
+pub mod flextime_adjustments;
 pub mod holidays;
 pub mod notifications;
 pub mod payroll_report_queue;
@@ -29,6 +30,10 @@ pub use categories::{Category, CategoryDb};
 pub use email_queue::{EmailQueueDb, EmailQueueEntry};
 pub use error_notification_queue::{ErrorNotificationEntry, ErrorNotificationQueueDb};
 pub use facade::Db;
+pub use flextime_adjustments::{
+    FlextimeAdjustment, FlextimeAdjustmentDb, KIND_CORRECTION, KIND_OPENING_BALANCE,
+    MAX_ADJUSTMENT_MIN,
+};
 pub use holidays::{Holiday, HolidayDb, PreparedHoliday};
 pub use notifications::{
     new_broadcaster, NotificationBroadcaster, NotificationDb, NotificationSignal,

@@ -131,7 +131,8 @@ pub async fn create(
             .map(|accounts| accounts.into_iter().map(Into::into).collect()),
         start_date: body.start_date,
         hire_date: body.hire_date,
-        overtime_start_balance_min: None,
+        // Assistants have no flextime account, so no carry-in balance exists.
+        flextime_opening_balance_min: None,
         password: body.password,
         approver_ids: vec![requester.id],
         tracks_time: true,
@@ -218,7 +219,6 @@ pub async fn update(
         body.hire_date.map(Some),
         None,
         None,
-        None, // overtime_start_balance_min: locked to 0 for assistants
         None, // tracks_time: locked to true for assistants
     )
     .await

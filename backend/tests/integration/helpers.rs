@@ -249,3 +249,51 @@ pub async fn admin_login(app: &TestApp) -> TestClient {
     assert_eq!(st, StatusCode::OK, "admin change password");
     admin
 }
+
+/// Give a user a flextime carry-in balance of `minutes`, dated on their
+/// start date.
+///
+/// Tests used to seed this by writing `users.overtime_start_balance_min`
+/// directly. Migration 043 dropped that column entirely; the
+/// carry-in balance is now the account's first ledger booking, so tests seed
+/// it the same way the create-user endpoint does. Any existing bookings dated
+/// on the start date are replaced, so a test can call this repeatedly to move
+/// the balance around.
+///
+/// A single booking is capped at one year of minutes by a CHECK constraint,
+/// but some tests deliberately want an implausibly large balance to swamp
+/// years of accumulated deficit. Those are spread across several bookings on
+/// the same date rather than by relaxing the production constraint.
+pub async fn set_flextime_opening_balance(
+    pool: &zerf::db::DatabasePool,
+    user_id: i64,
+    minutes: i64,
+) -> anyhow::Result<()> {
+    const MAX_PER_BOOKING: i64 = 525_600;
+    sqlx::query(
+        "DELETE FROM flextime_adjustments \
+         WHERE user_id=$1 AND effective_date = (SELECT start_date FROM users WHERE id=$1)",
+    )
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+    let mut remaining = minutes;
+    let mut kind = "opening_balance";
+    while remaining != 0 {
+        let chunk = remaining.clamp(-MAX_PER_BOOKING, MAX_PER_BOOKING);
+        sqlx::query(
+            "INSERT INTO flextime_adjustments (user_id, effective_date, minutes, kind) \
+             SELECT id, start_date, $2, $3 FROM users WHERE id=$1",
+        )
+        .bind(user_id)
+        .bind(chunk)
+        .bind(kind)
+        .execute(pool)
+        .await?;
+        remaining -= chunk;
+        // Only one opening_balance row per user is allowed; the overflow rows
+        // are ordinary corrections on the same date.
+        kind = "correction";
+    }
+    Ok(())
+}

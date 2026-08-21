@@ -233,6 +233,22 @@ fn render_section(
             DURATION_COLUMN,
         );
     }
+    // Admin bookings that landed in this period. Without this line the closing
+    // balance would not reconcile against the opening balance plus the hours in
+    // the table above, and a reader would have no way to see why.
+    let adjustment_total: i64 = section
+        .flextime_data
+        .iter()
+        .map(|day| day.adjustment_min)
+        .sum();
+    if adjustment_total != 0 {
+        let label = i18n::translate(renderer.language, "pdf_flextime_adjustments", &[]);
+        renderer.draw_summary_row(
+            &label,
+            &format_signed_minutes(adjustment_total),
+            DURATION_COLUMN,
+        );
+    }
     if let Some(closing_balance) = closing {
         let label = i18n::translate(renderer.language, "pdf_flextime_closing_balance", &[]);
         renderer.draw_summary_row(
@@ -339,6 +355,7 @@ mod tests {
                 date: NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
                 actual_min: 480,
                 target_min: 480,
+                adjustment_min: 0,
                 diff_min: 30,
                 cumulative_min: 130,
                 absence: None,
@@ -348,6 +365,7 @@ mod tests {
                 date: NaiveDate::from_ymd_opt(2026, 6, 2).unwrap(),
                 actual_min: 480,
                 target_min: 480,
+                adjustment_min: 0,
                 diff_min: 0,
                 cumulative_min: 130,
                 absence: None,

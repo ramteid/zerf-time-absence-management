@@ -7,6 +7,7 @@
   import TempPasswordDialog from "../dialogs/TempPasswordDialog.svelte";
   import ArchiveUserDialog from "../dialogs/ArchiveUserDialog.svelte";
   import RestoreUserDialog from "../dialogs/RestoreUserDialog.svelte";
+  import FlextimeAccountDialog from "../dialogs/FlextimeAccountDialog.svelte";
   import { getArchivedUsers } from "../lib/api/usersApi.js";
   import {
     sortUsersByRoleThenName,
@@ -14,6 +15,7 @@
     userInitials,
   } from "../lib/domain/users.js";
   import { confirmDialog } from "../confirm.js";
+  import { hasFlextimeAccount, tracksOwnTime } from "../rolePolicy.js";
 
   let users = [];
   // Archived users are shown in a separate list below the active roster.
@@ -25,6 +27,10 @@
   let archiveTarget = null;
   // The archived user object selected for restoring — triggers RestoreUserDialog.
   let restoreTarget = null;
+  // The user whose flextime account is open. Balance corrections live here
+  // rather than in the user dialog: they are dated ledger entries, not a
+  // profile setting that could be edited into rewriting past reports.
+  let flextimeTarget = null;
   // Whether SMTP is configured — controls the warning shown in TempPasswordDialog.
   let smtpEnabled = false;
   // The allow_team_lead_manage_assistants setting, shown above the user list.
@@ -183,6 +189,17 @@
           >
             <Icon name="Shield" size={13} />
           </button>
+          <!-- Only people who actually have a flextime ledger: assistants
+               have no flextime account, pure-admins track no time. -->
+          {#if hasFlextimeAccount(u) && tracksOwnTime(u)}
+            <button
+              class="zf-btn zf-btn-ghost zf-btn-sm"
+              title={$t("Flextime account")}
+              on:click={() => (flextimeTarget = u)}
+            >
+              <Icon name="Clock" size={13} />
+            </button>
+          {/if}
           <!-- Archive: data is preserved and restorable from the Archived list. -->
           <button
             class="zf-btn zf-btn-ghost zf-btn-sm zf-btn-danger"
@@ -258,6 +275,17 @@
         }
         load();
       }
+    }}
+  />
+{/if}
+
+{#if flextimeTarget}
+  <FlextimeAccountDialog
+    userId={flextimeTarget.id}
+    canEdit={true}
+    onClose={(changed) => {
+      flextimeTarget = null;
+      if (changed) load();
     }}
   />
 {/if}

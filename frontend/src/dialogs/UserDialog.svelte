@@ -47,10 +47,12 @@
   // already worked the full year before adopting Zerf mid-year without their
   // entitlement being wrongly pro-rated from the (later) Zerf start date.
   let hire_date = template.hire_date || "";
-  let overtime_start_balance_hours = fmtDecimal(
-    Math.round(((template.overtime_start_balance_min || 0) / 60) * 100) / 100,
-    2,
-  );
+  // Flextime hours the employee already carried before the account existed.
+  // Asked once, when the account is created, and stored as the first booking
+  // in their flextime ledger — never as an editable profile setting, because
+  // changing it later would move every balance ever reported for them. Later
+  // changes go through the flextime account view instead.
+  let flextime_opening_balance_hours = fmtDecimal(0, 2);
   let approver_ids = Array.isArray(template.approver_ids)
     ? template.approver_ids.map(Number)
     : [];
@@ -196,8 +198,13 @@
 
   $: if (isAssistantRole) {
     weekly_hours = fmtDecimal(0, 2);
-    overtime_start_balance_hours = fmtDecimal(0, 2);
+    flextime_opening_balance_hours = fmtDecimal(0, 2);
   }
+
+  // The carry-in balance is only asked for on accounts that will actually have
+  // a flextime ledger: not for assistants (no flextime account) and not for a
+  // pure-admin account created with time tracking switched off.
+  $: showOpeningBalanceField = isNew && !isAssistantRole && tracks_time;
 
   // Non-admin users always have tracks_time=true (backend enforces this too).
   $: if (normalizedRole !== "admin") tracks_time = true;
@@ -403,15 +410,15 @@
         }
         normalizedWeeklyHours = parsed;
       }
-      const normalizedOvertimeStartBalanceMin = isAssistantRole
-        ? 0
-        : Math.round(
+      const normalizedOpeningBalanceMin = showOpeningBalanceField
+        ? Math.round(
             (Math.round(
-              (parseDecimal(overtime_start_balance_hours) || 0) * 100,
+              (parseDecimal(flextime_opening_balance_hours) || 0) * 100,
             ) /
               100) *
               60,
-          );
+          )
+        : 0;
       const body = {
         email,
         first_name,
@@ -426,8 +433,12 @@
         // Always send explicitly: `null` clears it back to the start_date
         // fallback on update, and is simply stored as unset on create.
         hire_date: hire_date || null,
-        overtime_start_balance_min: normalizedOvertimeStartBalanceMin,
       };
+      // Only ever sent on create: the balance is a ledger booking, not a
+      // setting, so an update must not be able to carry one.
+      if (showOpeningBalanceField) {
+        body.flextime_opening_balance_min = normalizedOpeningBalanceMin;
+      }
       if (requiresApprover) {
         body.approver_ids = approver_ids;
       } else {
@@ -617,23 +628,31 @@
             />
           </div>
         </div>
-        <div>
-          <label class="zf-label" for="user-overtime-balance"
-            >{$t("Overtime start balance (hours)")}</label
-          >
-          <input
-            id="user-overtime-balance"
-            class="zf-input"
-            type="text"
-            inputmode="decimal"
-            bind:value={overtime_start_balance_hours}
-          />
+        {#if showOpeningBalanceField}
+          <div>
+            <label class="zf-label" for="user-opening-balance"
+              >{$t("Flextime hours brought along")}</label
+            >
+            <input
+              id="user-opening-balance"
+              class="zf-input"
+              type="text"
+              inputmode="decimal"
+              bind:value={flextime_opening_balance_hours}
+            />
+            <div class="field-hint">
+              {$t(
+                "Flextime hours this person has already built up elsewhere. Booked once on their start date. Negative means they start with a shortfall.",
+              )}
+            </div>
+          </div>
+        {:else if !isNew}
           <div class="field-hint">
             {$t(
-              "Initial overtime balance in hours when the user starts. Negative = deficit.",
+              "The flextime balance is managed on the user's flextime account, not here.",
             )}
           </div>
-        </div>
+        {/if}
       {/if}
       <div>
         <div class="field-section-label">{$t("Leave accounts")}</div>

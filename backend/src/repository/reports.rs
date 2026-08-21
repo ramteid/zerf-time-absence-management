@@ -465,7 +465,7 @@ impl ReportDb {
             "SELECT id, email, password_hash, first_name, last_name, role, \
              weekly_hours, workdays_per_week, start_date, hire_date, active, must_change_password, created_at, \
              allow_reopen_without_approval, allow_submission_without_approval, dark_mode, \
-             overtime_start_balance_min, tracks_time, archived_at, \
+             tracks_time, archived_at, \
              receives_error_notifications \
              FROM users";
         if is_admin {
@@ -509,7 +509,7 @@ impl ReportDb {
             "SELECT id, email, password_hash, first_name, last_name, role, \
              weekly_hours, workdays_per_week, start_date, hire_date, active, must_change_password, created_at, \
              allow_reopen_without_approval, allow_submission_without_approval, dark_mode, \
-             overtime_start_balance_min, tracks_time, archived_at, \
+             tracks_time, archived_at, \
              receives_error_notifications \
              FROM users \
              WHERE start_date <= $2 \
@@ -530,10 +530,10 @@ impl ReportDb {
             .await?)
     }
 
-    /// User start date and overtime start balance (minutes).
-    pub async fn user_start_and_overtime(&self, user_id: i64) -> AppResult<(NaiveDate, i64)> {
+    /// The date a user's flextime ledger starts at.
+    pub async fn user_start_date(&self, user_id: i64) -> AppResult<NaiveDate> {
         Ok(
-            sqlx::query_as("SELECT start_date, overtime_start_balance_min FROM users WHERE id=$1")
+            sqlx::query_scalar("SELECT start_date FROM users WHERE id=$1")
                 .bind(user_id)
                 .fetch_one(&self.pool)
                 .await?,

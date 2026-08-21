@@ -32,9 +32,9 @@ function userRow(page, fullName) {
 test("admin: archive the employee", async ({ page }) => {
   await page.goto("/settings/users");
   const row = userRow(page, `${EMPLOYEE.firstName} ${EMPLOYEE.lastName}`);
-  // The Archive button is the only icon-only action button that carries a
-  // `title` attribute (Edit and "Reset PW" don't), so it's the only one of
-  // the three reachable by accessible name rather than position.
+  // Edit and "Reset PW" carry no `title`, so Archive is reachable by its
+  // accessible name while they are not. (The "Flextime account" button next to
+  // it has a title too, but a different one.)
   await row.getByRole("button", { name: "Archive" }).click();
 
   const dialog = page.getByRole("dialog");

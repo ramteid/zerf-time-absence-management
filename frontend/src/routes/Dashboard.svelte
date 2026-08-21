@@ -259,7 +259,13 @@
     overtimeRows.find((row) => row.month === currentMonthKey) ??
     (overtimeRows.length ? overtimeRows[overtimeRows.length - 1] : null);
   $: overtimeBalanceMin = currentOvertimeRow?.cumulative_min || 0;
-  $: currentMonthDiffMin = currentOvertimeRow?.diff_min || 0;
+  // How the balance moved this month, which is what the sub-line next to the
+  // balance claims. Admin bookings are part of that movement even though they
+  // are not worked hours, so leaving them out would make the two numbers
+  // contradict each other whenever a correction lands in the current month.
+  $: currentMonthDiffMin =
+    (currentOvertimeRow?.diff_min || 0) +
+    (currentOvertimeRow?.adjustment_min || 0);
 
   // ── Reactive derivations: submission compliance ───────────────────────────────
 

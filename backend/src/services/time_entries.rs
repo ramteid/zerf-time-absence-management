@@ -576,7 +576,6 @@ mod tests {
             allow_reopen_without_approval: false,
             allow_submission_without_approval: false,
             dark_mode: false,
-            overtime_start_balance_min: 0,
             tracks_time: true,
             archived_at: None,
             receives_error_notifications: false,

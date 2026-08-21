@@ -8,7 +8,8 @@ use serde_json::{json, Value};
 
 use crate::common::TestApp;
 use crate::helpers::{
-    admin_login, bootstrap_team, id, login_change_pw, next_monday, reference_date, temp_pw,
+    admin_login, bootstrap_team, id, login_change_pw, next_monday, reference_date,
+    set_flextime_opening_balance, temp_pw,
 };
 
 fn vacation_balance(balances: &Value) -> &Value {
@@ -1114,9 +1115,7 @@ async fn flextime_balance_revalidated_at_approval() {
     // positive seed for the request, then flip it negative to drain the balance
     // below the floor for the approval re-check. The exact numbers don't
     // matter; the assertion is "pass at request, fail at approval after drain."
-    sqlx::query("UPDATE users SET overtime_start_balance_min = 99000000 WHERE id = $1")
-        .bind(emp_id)
-        .execute(&app.state.pool)
+    set_flextime_opening_balance(&app.state.pool, emp_id, 99_000_000)
         .await
         .expect("seed flextime balance positive");
 
@@ -1137,9 +1136,7 @@ async fn flextime_balance_revalidated_at_approval() {
     // Drain the balance: zeroing the seed leaves only the multi-million-minute
     // historical deficit (years of workdays with no logged time), which is far
     // below the default floor (0). The re-validation at approval must reject.
-    sqlx::query("UPDATE users SET overtime_start_balance_min = 0 WHERE id = $1")
-        .bind(emp_id)
-        .execute(&app.state.pool)
+    set_flextime_opening_balance(&app.state.pool, emp_id, 0)
         .await
         .expect("drain flextime balance");
 
@@ -1176,10 +1173,13 @@ async fn flextime_balance_reserves_past_requests_after_cutoff() {
     // so the balance cutoff stays before this start date.
     let past_monday = next_monday(-21);
     let future_monday = next_monday(7);
-    sqlx::query("UPDATE users SET start_date = $1, overtime_start_balance_min = 468 WHERE id = $2")
+    sqlx::query("UPDATE users SET start_date = $1 WHERE id = $2")
         .bind(past_monday)
         .bind(emp_id)
         .execute(&app.state.pool)
+        .await
+        .expect("set flextime test start date");
+    set_flextime_opening_balance(&app.state.pool, emp_id, 468)
         .await
         .expect("set flextime test balance");
 
@@ -1241,16 +1241,18 @@ async fn flextime_balance_charges_every_potential_weekday_for_reduced_schedules(
     let target_per_day_min: i64 = 288;
     let monday = next_monday(7);
     sqlx::query(
-        "UPDATE users SET start_date=$1, weekly_hours=24, workdays_per_week=3, \
-         overtime_start_balance_min=$2 WHERE id=$3",
+        "UPDATE users SET start_date=$1, weekly_hours=24, workdays_per_week=3 WHERE id=$2",
     )
     .bind(monday)
-    .bind(target_per_day_min * 4) // 1152 min: enough for the 3-day quota (864)
-    // but short of the true 5-day cost (1440).
     .bind(emp_id)
     .execute(&app.state.pool)
     .await
-    .expect("seed reduced-schedule flextime balance");
+    .expect("seed reduced schedule");
+    // 1152 min: enough for the 3-day quota (864) but short of the true
+    // 5-day cost (1440).
+    set_flextime_opening_balance(&app.state.pool, emp_id, target_per_day_min * 4)
+        .await
+        .expect("seed reduced-schedule flextime balance");
 
     let friday = monday + chrono::Duration::days(4);
     let (st, body) = emp

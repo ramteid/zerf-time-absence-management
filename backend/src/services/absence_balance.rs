@@ -776,20 +776,28 @@ pub async fn validate_flextime_balance(
         user.workdays_per_week,
     )
     .await?;
-    let current_balance_min = if cutoff_date < user.start_date {
-        // Cutoff is before start date: no approved history yet, use seed only
-        user.overtime_start_balance_min
+    let balance_through_cutoff = if cutoff_date < user.start_date {
+        // Cutoff is before the start date: no approved history exists yet.
+        0
     } else {
         let (flextime_days, _) =
             crate::services::reports::build_flextime_for_user(pool, user, cutoff_date, cutoff_date)
                 .await?;
-        flextime_days
-            .first()
-            .map(|d| d.cumulative_min)
-            .unwrap_or(user.overtime_start_balance_min)
+        flextime_days.first().map(|d| d.cumulative_min).unwrap_or(0)
     };
 
     let unaccounted_from = cutoff_date + Duration::days(1);
+
+    // Admin bookings are not gated on week approval, so one dated after the
+    // cutoff is already binding even though the ledger above stops there.
+    // Counting it here keeps a post-cutoff debit from being spent twice.
+    // Deliberately unbounded at the far end: a carry-in balance booked for a
+    // contract that starts in the future is just as committed as one from
+    // last week, and dropping it would understate what the person may spend.
+    let post_cutoff_adjustments_min = crate::repository::FlextimeAdjustmentDb::new(pool.clone())
+        .sum_from(user.id, user.start_date, unaccounted_from)
+        .await?;
+    let current_balance_min = balance_through_cutoff + post_cutoff_adjustments_min;
 
     // (2) Committed-but-not-yet-accounted flextime usage from OTHER absences.
     //
@@ -1259,7 +1267,6 @@ mod tests {
             allow_reopen_without_approval: false,
             allow_submission_without_approval: false,
             dark_mode: false,
-            overtime_start_balance_min: 0,
             tracks_time: true,
             archived_at: None,
             receives_error_notifications: false,

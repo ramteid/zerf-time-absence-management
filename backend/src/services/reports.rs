@@ -494,21 +494,23 @@ pub async fn build_flextime_for_user(
     )
     .await?;
 
-    let mut cumulative_min = if from < user.start_date {
-        0
-    } else {
-        user.overtime_start_balance_min
-    };
+    let adjustments_db = crate::repository::FlextimeAdjustmentDb::new(pool.clone());
+
+    // Balance carried into `from`. Nothing exists before the contract start,
+    // and an adjustment dated on `from` itself belongs to the per-day loop
+    // below, not to the seed.
+    let mut cumulative_min = 0;
     if from > user.start_date {
-        // Cap the seed end at the cutoff date so contributions beyond it
-        // cannot leak into the seeded cumulative.
-        let day_before_from = (from - Duration::days(1)).min(cutoff_date);
-        let month_start =
-            NaiveDate::from_ymd_opt(day_before_from.year(), day_before_from.month(), 1)
-                .ok_or_else(|| AppError::BadRequest("date".into()))?;
+        // Cap the *work* seed at the cutoff date so contributions beyond it
+        // cannot leak into the seeded cumulative. Adjustments are deliberately
+        // not capped: an admin booking is an authoritative fact about the
+        // account, not something waiting for a week to be approved.
+        let work_seed_end = (from - Duration::days(1)).min(cutoff_date);
+        let month_start = NaiveDate::from_ymd_opt(work_seed_end.year(), work_seed_end.month(), 1)
+            .ok_or_else(|| AppError::BadRequest("date".into()))?;
 
         let cumulative_before_month = if month_start <= user.start_date {
-            user.overtime_start_balance_min
+            0
         } else {
             let previous_month_end = month_start - Duration::days(1);
             cumulative_at_month_end(
@@ -517,21 +519,40 @@ pub async fn build_flextime_for_user(
                 previous_month_end.year(),
                 previous_month_end.month(),
                 user.start_date,
-                user.overtime_start_balance_min,
                 cutoff_date,
             )
             .await?
         };
 
         let seed_from = std::cmp::max(month_start, user.start_date);
-        if seed_from <= day_before_from {
+        if seed_from <= work_seed_end {
             let month_seed_report =
-                build_range_with_user(pool, user, seed_from, day_before_from, "seed").await?;
+                build_range_with_user(pool, user, seed_from, work_seed_end, "seed").await?;
             cumulative_min = cumulative_before_month + month_seed_report.diff_min;
         } else {
             cumulative_min = cumulative_before_month;
         }
+        // `cumulative_before_month` already covers adjustments up to the end of
+        // the previous month, so only the partial month up to (but excluding)
+        // `from` is still missing.
+        cumulative_min += adjustments_db
+            .sum_in_range(
+                target_user_id,
+                user.start_date,
+                seed_from,
+                from - Duration::days(1),
+            )
+            .await?;
     }
+
+    // Adjustments landing inside the rendered range, keyed by the day they take
+    // effect on. Ones dated before the contract start are reported on the start
+    // date itself, which is where the ledger begins.
+    let adjustment_by_day: HashMap<NaiveDate, i64> = adjustments_db
+        .totals_by_date(target_user_id, user.start_date, from, to)
+        .await?
+        .into_iter()
+        .collect();
 
     let auto_break_cfg = load_auto_break_config(pool).await?;
 
@@ -613,11 +634,6 @@ pub async fn build_flextime_for_user(
     let mut flextime_days = vec![];
     let mut current_date = from;
     while current_date <= to {
-        // Inject the configured overtime start balance on the user's first day
-        // when the requested range begins before that date.
-        if current_date == user.start_date && from < user.start_date {
-            cumulative_min += user.overtime_start_balance_min;
-        }
         let holiday = holiday_map.get(&current_date).cloned();
         let absence = absence_by_day.get(&current_date).cloned();
         let before_start = current_date < user.start_date;
@@ -642,12 +658,21 @@ pub async fn build_flextime_for_user(
                 .copied()
                 .unwrap_or(0)
         };
-        let day_diff_min = actual - target;
+        // Admin bookings apply on their effective date regardless of the
+        // cutoff, and are folded into `diff_min` so that "yesterday's balance
+        // plus today's diff" stays the definition of the running total — the
+        // opening/closing balances in the PDF and CSV are derived that way.
+        let adjustment = adjustment_by_day
+            .get(&current_date)
+            .copied()
+            .unwrap_or(0);
+        let day_diff_min = actual - target + adjustment;
         cumulative_min += day_diff_min;
         flextime_days.push(FlextimeDay {
             date: current_date,
             actual_min: actual,
             target_min: target,
+            adjustment_min: adjustment,
             diff_min: day_diff_min,
             cumulative_min,
             absence,
@@ -1266,8 +1291,15 @@ pub struct TeamRow {
     pub target_min: i64,
     /// Actual minutes: approved time entries in the report month (including today).
     pub actual_min: i64,
-    /// Diff = actual - target for the report month. None for assistants.
+    /// Diff = actual - target for the report month. Deliberately excludes admin
+    /// bookings so the target/actual/diff triple stays consistent. None for
+    /// assistants.
     pub diff_min: Option<i64>,
+    /// Signed minutes booked by an admin with an effective date in the report
+    /// month. Clients that present "how the balance moved this month" add this
+    /// to `diff_min`; otherwise the movement would not match
+    /// `flextime_balance_min`. None for assistants.
+    pub adjustment_min: Option<i64>,
     /// Usage is keyed by account category id so duplicate names cannot merge
     /// unrelated account values in clients.
     pub leave_account_usage: Vec<LeaveAccountUsage>,
@@ -1393,7 +1425,13 @@ pub struct MonthRow {
     pub month: String,
     pub target_min: i64,
     pub actual_min: i64,
+    /// Worked minus target for the month. Deliberately excludes admin
+    /// bookings so the triple target/actual/diff stays internally consistent.
     pub diff_min: i64,
+    /// Signed minutes booked by an admin with an effective date in this month.
+    pub adjustment_min: i64,
+    /// Running balance at the end of this month: every earlier month's
+    /// `diff_min` and `adjustment_min`, plus this month's.
     pub cumulative_min: i64,
 }
 
@@ -1481,10 +1519,19 @@ async fn build_overtime_rows_with_cutoff(
         return Ok(vec![]);
     };
 
-    // Determine the user's start_date and overtime start balance.
     let reports_db = crate::repository::ReportDb::new(pool.clone());
-    let (user_start_date, overtime_start_balance_min): (NaiveDate, i64) =
-        reports_db.user_start_and_overtime(target_user_id).await?;
+    let user_start_date = reports_db.user_start_date(target_user_id).await?;
+
+    // Admin bookings, bucketed by the month they take effect in. Fetched once
+    // for the user's whole history because the loops below walk every month
+    // since their start date anyway. Adjustments dated before the start date
+    // are reported in the start month, so the loops can never skip one.
+    let adjustment_by_month: HashMap<String, i64> =
+        crate::repository::FlextimeAdjustmentDb::new(pool.clone())
+            .totals_by_month(target_user_id, user_start_date, today)
+            .await?
+            .into_iter()
+            .collect();
 
     let first_month_in_year = if user_start_date.year() == year {
         user_start_date.month()
@@ -1497,7 +1544,9 @@ async fn build_overtime_rows_with_cutoff(
 
     let mut month_rows = vec![];
     // Accumulate all prior-year months to seed the running overtime balance.
-    let mut cumulative_min = overtime_start_balance_min;
+    // It starts at zero: a carry-in balance is now an ordinary adjustment
+    // dated on the start date, so the start month's bucket already holds it.
+    let mut cumulative_min = 0;
     for prior_year in user_start_date.year()..year {
         let prior_year_first_month = if prior_year == user_start_date.year() {
             user_start_date.month()
@@ -1509,7 +1558,8 @@ async fn build_overtime_rows_with_cutoff(
             let month_report =
                 month_contribution_up_to_cutoff(pool, target_user_id, &month_label, cutoff_date)
                     .await?;
-            cumulative_min += month_report.diff_min;
+            cumulative_min += month_report.diff_min
+                + adjustment_by_month.get(&month_label).copied().unwrap_or(0);
         }
     }
 
@@ -1518,12 +1568,14 @@ async fn build_overtime_rows_with_cutoff(
         let month_report =
             month_contribution_up_to_cutoff(pool, target_user_id, &month_label, cutoff_date)
                 .await?;
-        cumulative_min += month_report.diff_min;
+        let adjustment_min = adjustment_by_month.get(&month_label).copied().unwrap_or(0);
+        cumulative_min += month_report.diff_min + adjustment_min;
         month_rows.push(MonthRow {
             month: month_label,
             target_min: month_report.target_min,
             actual_min: month_report.actual_min,
             diff_min: month_report.diff_min,
+            adjustment_min,
             cumulative_min,
         });
     }
@@ -1531,43 +1583,66 @@ async fn build_overtime_rows_with_cutoff(
     Ok(month_rows)
 }
 
-/// Cumulative flextime balance at the end of `year-month`, capped at
-/// `cutoff_date` (the end of the last fully approved week). Callers pass the
-/// cutoff in because they have already resolved it for the same user.
+/// Cumulative flextime balance at the end of `year-month`. Worked time only
+/// counts through `cutoff_date` (the end of the last fully approved week);
+/// admin bookings count on their effective date. Callers pass the cutoff in
+/// because they have already resolved it for the same user.
 pub async fn cumulative_at_month_end(
     pool: &crate::db::DatabasePool,
     target_user_id: i64,
     year: i32,
     month: u32,
     user_start_date: NaiveDate,
-    overtime_start_balance_min: i64,
     cutoff_date: NaiveDate,
 ) -> AppResult<i64> {
+    let month_end = month_end_date(year, month)?;
+    let adjustments_db = crate::repository::FlextimeAdjustmentDb::new(pool.clone());
+    // The balance is always "worked contributions so far + admin bookings so
+    // far". Every early return below is a case where the worked part is
+    // provably zero, leaving just the bookings.
+    //
+    // Capped at today as well as at the month end: for the current month the
+    // month end is still ahead, and a booking dated later in it has not moved
+    // the balance yet.
+    let adjustments_cutoff = month_end.min(crate::services::settings::app_today(pool).await);
+    let adjustments_through_month_end = adjustments_db
+        .sum_through(target_user_id, user_start_date, adjustments_cutoff)
+        .await?;
+
     if year < user_start_date.year()
         || (year == user_start_date.year() && month < user_start_date.month())
     {
-        return Ok(overtime_start_balance_min);
+        return Ok(adjustments_through_month_end);
     }
-    // Nothing has been approved yet — the balance is still the seeded one.
+    // Nothing has been approved yet, so no worked time counts.
     if cutoff_date < user_start_date {
-        return Ok(overtime_start_balance_min);
+        return Ok(adjustments_through_month_end);
     }
 
     let cutoff_year = cutoff_date.year();
     // Beyond the cutoff year there is nothing left to accumulate, so the last
-    // row of the cutoff's own year already holds the final balance.
+    // row of the cutoff's own year already holds the final worked balance.
     let rows =
         build_overtime_rows_with_cutoff(pool, target_user_id, year.min(cutoff_year), cutoff_date)
             .await?;
-    if rows.is_empty() {
-        return Ok(overtime_start_balance_min);
-    }
+    let Some(last_row) = rows.last() else {
+        return Ok(adjustments_through_month_end);
+    };
 
     if year > cutoff_year || (year == cutoff_year && month > cutoff_date.month()) {
-        return Ok(rows
-            .last()
-            .map(|row| row.cumulative_min)
-            .unwrap_or(overtime_start_balance_min));
+        // The requested month lies past the last row. Worked time cannot grow
+        // any further, so take that row's balance and swap its bookings for
+        // the ones in effect at the requested month end.
+        // Capped the same way the row itself was built, otherwise this
+        // subtraction would remove bookings the row never counted.
+        let last_row_end = month_bounds(&last_row.month)?
+            .1
+            .min(crate::services::settings::app_today(pool).await);
+        let adjustments_through_last_row = adjustments_db
+            .sum_through(target_user_id, user_start_date, last_row_end)
+            .await?;
+        return Ok(last_row.cumulative_min - adjustments_through_last_row
+            + adjustments_through_month_end);
     }
 
     let key = format!("{:04}-{:02}", year, month);
@@ -1576,8 +1651,40 @@ pub async fn cumulative_at_month_end(
     }
 
     // Defensive: the only way to miss the row is a month before the user's
-    // first listed month of that year, where the seeded balance is correct.
-    Ok(overtime_start_balance_min)
+    // first listed month of that year, where no worked time exists yet.
+    Ok(adjustments_through_month_end)
+}
+
+/// Signed flextime-adjustment minutes in effect on or before `through`.
+/// Thin service-level wrapper so handlers never reach into the repository.
+pub async fn flextime_adjustments_through(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    ledger_start: NaiveDate,
+    through: NaiveDate,
+) -> AppResult<i64> {
+    crate::repository::FlextimeAdjustmentDb::new(pool.clone())
+        .sum_through(user_id, ledger_start, through)
+        .await
+}
+
+/// Signed flextime-adjustment minutes taking effect within `[from, to]`.
+pub async fn flextime_adjustments_in_range(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    ledger_start: NaiveDate,
+    from: NaiveDate,
+    to: NaiveDate,
+) -> AppResult<i64> {
+    crate::repository::FlextimeAdjustmentDb::new(pool.clone())
+        .sum_in_range(user_id, ledger_start, from, to)
+        .await
+}
+
+/// Last calendar day of `year-month`.
+fn month_end_date(year: i32, month: u32) -> AppResult<NaiveDate> {
+    NaiveDate::from_ymd_opt(year, month, crate::time_calc::last_day_of_month(year, month))
+        .ok_or_else(|| AppError::BadRequest("date".into()))
 }
 
 /// Checks whether all fully elapsed working weeks overlapping the given month
@@ -1787,6 +1894,12 @@ pub struct FlextimeDay {
     pub date: NaiveDate,
     pub actual_min: i64,
     pub target_min: i64,
+    /// Signed minutes booked by an admin on this day (see
+    /// `services::flextime_adjustments`). Already contained in `diff_min`;
+    /// reported separately so the UI can explain a jump in the balance that
+    /// no worked hours account for.
+    pub adjustment_min: i64,
+    /// How much the balance moved on this day: `actual - target + adjustment`.
     pub diff_min: i64,
     pub cumulative_min: i64,
     pub absence: Option<String>,

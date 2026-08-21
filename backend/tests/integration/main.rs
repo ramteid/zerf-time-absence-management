@@ -34,6 +34,7 @@ mod carryover;
 mod categories;
 mod email_queue;
 mod error_notifications;
+mod flextime_adjustments;
 mod full_suite;
 mod holidays;
 mod medical_certificate;

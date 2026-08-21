@@ -6,7 +6,8 @@ use crate::services::reports::{
     active_reportable_team_members, all_weeks_submitted_for_month, assert_can_access_user,
     build_flextime_for_user, build_month, build_month_without_submission_status,
     build_overtime_rows_for_year, build_range, build_team_timesheet_sections,
-    build_timesheet_section, csv_response, month_bounds, parse_report_time, pdf_response,
+    build_timesheet_section, csv_response, flextime_adjustments_in_range,
+    flextime_adjustments_through, month_bounds, parse_report_time, pdf_response,
     sort_categories_desc, validate_range, CategoryTotal, FlextimeDay, LeaveAccountCategory,
     LeaveAccountUsage, MonthReport, MonthRow, TeamReport, TeamRow, UserCategoryRow,
 };
@@ -339,16 +340,25 @@ pub async fn team(
                     let (overtime_rows, cutoff_date) =
                         build_overtime_rows_for_year(&pool, team_member.id, month_start.year())
                             .await?;
-                    (
-                        Some(
-                            overtime_rows
-                                .iter()
-                                .find(|r| r.month == query_month)
-                                .map(|r| r.cumulative_min)
-                                .unwrap_or(team_member.overtime_start_balance_min),
-                        ),
-                        Some(month_end.min(cutoff_date)),
-                    )
+                    let balance_min = match overtime_rows
+                        .iter()
+                        .find(|r| r.month == query_month)
+                    {
+                        Some(row) => row.cumulative_min,
+                        // No row for the month: the member had not started yet,
+                        // or the month is still ahead of today. Either way no
+                        // worked time counts, leaving only admin bookings.
+                        None => {
+                            flextime_adjustments_through(
+                                &pool,
+                                team_member.id,
+                                team_member.start_date,
+                                month_end.min(today),
+                            )
+                            .await?
+                        }
+                    };
+                    (Some(balance_min), Some(month_end.min(cutoff_date)))
                 };
 
                 let weeks_all_submitted = all_weeks_submitted_for_month(
@@ -371,6 +381,24 @@ pub async fn team(
                         None
                     } else {
                         Some(month_report.diff_min)
+                    },
+                    adjustment_min: if team_member_is_assistant {
+                        None
+                    } else {
+                        Some(
+                            // Capped at today like the balance itself: a
+                            // booking dated later this month has not moved it
+                            // yet, so counting it here would make the monthly
+                            // diff disagree with the balance beside it.
+                            flextime_adjustments_in_range(
+                                &pool,
+                                team_member.id,
+                                team_member.start_date,
+                                month_start,
+                                month_end.min(today),
+                            )
+                            .await?,
+                        )
                     },
                     leave_account_usage,
                     sick_days: sick_workdays,

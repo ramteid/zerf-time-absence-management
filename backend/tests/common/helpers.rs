@@ -71,7 +71,7 @@ pub async fn seed_admin(
         let temp = users::generate_password();
         let hash = auth::hash_password(&temp)?;
         let ref_date = reference_date();
-        sqlx::query("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,start_date,must_change_password,overtime_start_balance_min) VALUES ($1,$2,$3,$4,'admin',39.0,$5,TRUE,0)")
+        sqlx::query("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,start_date,must_change_password) VALUES ($1,$2,$3,$4,'admin',39.0,$5,TRUE)")
             .bind(admin_email.to_lowercase()).bind(hash).bind("Test").bind("Admin").bind(ref_date)
             .execute(pool).await?;
 

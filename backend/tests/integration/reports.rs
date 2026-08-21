@@ -1052,9 +1052,7 @@ async fn reports_full_workflow() {
         // (validate_flextime_balance) passes. The integration test user is
         // created with start_date=2024-01-01 but has no approved hours, so
         // without a positive seed the balance would be deeply negative.
-        sqlx::query("UPDATE users SET overtime_start_balance_min = 9999999 WHERE id = $1")
-            .bind(emp_id)
-            .execute(&app.state.pool)
+        set_flextime_opening_balance(&app.state.pool, emp_id, 9_999_999)
             .await
             .expect("seed flextime balance");
 
@@ -1549,14 +1547,17 @@ async fn reports_full_workflow() {
         assert_eq!(st, StatusCode::OK, "create assistant for reports");
         let assistant_id = id(&body);
 
-        // Simulate legacy/imported inconsistency that bypasses API validation.
-        sqlx::query(
-            "UPDATE users SET weekly_hours = 39.0, overtime_start_balance_min = 120 WHERE id = $1",
-        )
-        .bind(assistant_id)
-        .execute(&app.state.pool)
-        .await
-        .unwrap();
+        // Simulate legacy/imported inconsistency that bypasses API validation:
+        // an assistant with contract hours AND a flextime carry-in balance,
+        // neither of which their role can have.
+        sqlx::query("UPDATE users SET weekly_hours = 39.0 WHERE id = $1")
+            .bind(assistant_id)
+            .execute(&app.state.pool)
+            .await
+            .unwrap();
+        set_flextime_opening_balance(&app.state.pool, assistant_id, 120)
+            .await
+            .expect("seed assistant flextime balance");
 
         let (st, body) = admin
             .get(&format!(

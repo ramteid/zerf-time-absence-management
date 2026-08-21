@@ -80,7 +80,7 @@ Additional modules:
 
 **Sub-repositories** (fields on `repository::Db`):
 
-`sessions`, `users`, `time_entries`, `absences`, `reopen_requests`, `categories`, `holidays`, `notifications`, `audit`, `settings`, `reports`, `export_queue`, `payroll_queue`, `error_queue`, `email_queue`
+`sessions`, `users`, `time_entries`, `flextime_adjustments`, `absences`, `reopen_requests`, `categories`, `holidays`, `notifications`, `audit`, `settings`, `reports`, `export_queue`, `payroll_queue`, `error_queue`, `email_queue`
 
 **Access patterns in services:**
 
@@ -183,6 +183,7 @@ sends a real message and must not be blocked by unrelated breaker state.
 | `login_attempts` | Failed login tracking for rate-limit lockout |
 | `categories` | Work categories |
 | `time_entries` | Daily entries (date, start/end, category, status) |
+| `flextime_adjustments` | Dated, signed changes to a flextime balance that no worked time explains (carry-in balance, admin corrections) |
 | `absences` | Absence requests with status workflow |
 | `holidays` | Public holidays (auto-fetched or manual) |
 | `reopen_requests` | Requests to reopen a submitted week |
@@ -196,7 +197,24 @@ sends a real message and must not be blocked by unrelated breaker state.
 | `user_leave_accounts` | Per-user base entitlement for each leave-account absence category |
 | `user_leave_account_year_overrides` | Per-user leave-account entitlement overrides by year |
 
-Notable constraints: non-admin users must have an approver; users cannot approve themselves; vacation range <= 1 year; time entry end_time >= start_time.
+Notable constraints: non-admin users must have an approver; users cannot approve themselves; vacation range <= 1 year; time entry end_time >= start_time; at most one `opening_balance` row and at most one reversal per row in `flextime_adjustments`.
+
+**Flextime balances.** A balance is `sum(worked - target) through the flextime
+cutoff + sum(flextime_adjustments effective on or before the date asked for)`.
+The carry-in balance used to live in `users.overtime_start_balance_min`, where
+editing it silently rewrote the employee's whole reported history; migration 043
+moved every value into `flextime_adjustments` and then dropped the column, so
+there is no second, writable copy of the same fact left anywhere. That makes the
+migration one-way: an older binary still selects the column and cannot start
+against a migrated database. Adjustments are **not** capped at the
+flextime cutoff — an admin booking is authoritative immediately — and one dated
+before a user's start date is pulled forward to that date, so moving a start
+date relocates it instead of dropping it. The table is **append-only**: rows are
+never updated or deleted, and a wrong entry is cancelled by a row carrying the
+opposite minutes on the same date (`reverses_id`). Deleting would reintroduce
+the original defect, so there is no delete endpoint. Effective dates may lie in
+the future; every balance query asks "effective on or before date X", so a
+future booking simply has not applied yet.
 
 ### Build
 
@@ -302,9 +320,10 @@ Supported languages: `en` (en-US) and `de` (de-DE). Stored in localStorage key `
 ```
 /auth/*             Login, logout, setup, forgot/reset password, preferences
 /time-entries/*     CRUD, submit, batch-approve, batch-reject
+/flextime-adjustments/{id}/reverse  Cancel a flextime entry out (admin; no delete exists)
 /absences/*         CRUD, approve, reject, revoke, calendar, leave balances
 /reopen-requests/*  Create, list pending, approve/reject
-/users/*            CRUD, deactivate, reset password, leave-account entitlements
+/users/*            CRUD, deactivate, reset password, leave-account entitlements, flextime account
 /categories/*       CRUD
 /holidays/*         CRUD, country/region lists
 /reports/*          Month, range, team, categories, overtime, flextime, CSV

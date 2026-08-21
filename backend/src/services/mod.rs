@@ -5,6 +5,7 @@ pub mod app_logs;
 pub mod audit_log;
 pub mod auth;
 pub mod categories;
+pub mod flextime_adjustments;
 pub mod holidays;
 pub mod medical_certificate;
 pub mod nextcloud;

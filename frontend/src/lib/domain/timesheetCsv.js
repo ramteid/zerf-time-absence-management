@@ -144,6 +144,29 @@ export function buildTimesheetCsv({
       ]),
     );
   }
+  // Admin bookings that landed in this period. Without this row the closing
+  // balance would not reconcile against the opening balance plus the hours
+  // listed above, and the reader would have no way to see why.
+  const adjustmentTotal = (flextimeData || []).reduce(
+    (total, day) => total + (day.adjustment_min || 0),
+    0,
+  );
+  if (adjustmentTotal !== 0) {
+    rows.push(
+      csvEncode([
+        "",
+        translate("Flextime adjustments"),
+        "",
+        "",
+        "",
+        (adjustmentTotal >= 0 ? "+" : "") + minToHM(adjustmentTotal),
+        "",
+        "",
+        "",
+        "",
+      ]),
+    );
+  }
   if (closing !== null) {
     rows.push(
       csvEncode([

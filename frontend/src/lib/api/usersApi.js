@@ -39,3 +39,34 @@ export function restoreUser(userId, startDate, approverIds) {
     },
   });
 }
+
+/**
+ * One person's flextime account: the current balance plus every admin
+ * booking behind it.
+ */
+export function getFlextimeAccount(userId) {
+  return api(`/users/${userId}/flextime-account`);
+}
+
+/**
+ * Book a flextime adjustment (admin only).
+ * @param {number} userId
+ * @param {{effective_date: string, minutes: number, reason: string|null}} entry
+ */
+export function createFlextimeAdjustment(userId, entry) {
+  return api(`/users/${userId}/flextime-adjustments`, {
+    method: "POST",
+    body: entry,
+  });
+}
+
+/**
+ * Cancel a flextime booking out by writing its opposite on the same date
+ * (admin only). There is no delete: removing a row would move every balance
+ * reported since its date with nothing left on the record to explain it.
+ */
+export function reverseFlextimeAdjustment(adjustmentId) {
+  return api(`/flextime-adjustments/${adjustmentId}/reverse`, {
+    method: "POST",
+  });
+}

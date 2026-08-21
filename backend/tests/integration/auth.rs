@@ -659,8 +659,8 @@ async fn create_password_reset_user(
     let password_hash = hash_password(password).expect("hash reset test password");
     let user_id: i64 = sqlx::query_scalar(
         "INSERT INTO users(email, password_hash, first_name, last_name, role, weekly_hours, \
-         start_date, active, must_change_password, overtime_start_balance_min) \
-         VALUES ($1, $2, $3, $4, 'employee', 39.0, CURRENT_DATE, $5, FALSE, 0) \
+         start_date, active, must_change_password) \
+         VALUES ($1, $2, $3, $4, 'employee', 39.0, CURRENT_DATE, $5, FALSE) \
          RETURNING id",
     )
     .bind(email)

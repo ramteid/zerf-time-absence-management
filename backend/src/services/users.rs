@@ -2,7 +2,9 @@ use crate::audit;
 use crate::error::{AppError, AppResult};
 use crate::i18n;
 use crate::middleware::auth::User;
-use crate::repository::{AbsenceDb, ReopenRequestDb, SessionDb, TimeEntryDb, UserDb};
+use crate::repository::{
+    AbsenceDb, ReopenRequestDb, SessionDb, TimeEntryDb, UserDb, MAX_ADJUSTMENT_MIN,
+};
 use crate::roles::{
     is_admin_role, is_assistant_role, is_team_lead_role, normalize_role, ROLE_ASSISTANT,
 };
@@ -92,7 +94,9 @@ pub struct NewUser {
     pub leave_accounts: Option<Vec<LeaveAccountInput>>,
     pub start_date: chrono::NaiveDate,
     pub hire_date: Option<chrono::NaiveDate>,
-    pub overtime_start_balance_min: Option<i64>,
+    /// Carry-in flextime minutes, booked once as an `opening_balance`
+    /// adjustment dated on `start_date`. `None`/`Some(0)` books nothing.
+    pub flextime_opening_balance_min: Option<i64>,
     pub password: Option<String>,
     pub approver_ids: Vec<i64>,
     pub tracks_time: bool,
@@ -131,7 +135,6 @@ pub fn repo_user_to_auth_user(u: crate::repository::User) -> User {
         allow_reopen_without_approval: u.allow_reopen_without_approval,
         allow_submission_without_approval: u.allow_submission_without_approval,
         dark_mode: u.dark_mode,
-        overtime_start_balance_min: u.overtime_start_balance_min,
         tracks_time: u.tracks_time,
         archived_at: u.archived_at,
         receives_error_notifications: u.receives_error_notifications,
@@ -551,7 +554,6 @@ pub async fn update_basic_tx(
     hire_date: Option<Option<chrono::NaiveDate>>,
     allow_reopen_without_approval: Option<bool>,
     allow_submission_without_approval: Option<bool>,
-    overtime_start_balance_min: Option<i64>,
     tracks_time: Option<bool>,
 ) -> Result<(), crate::db::SqlxError> {
     UserDb::update_basic(
@@ -567,7 +569,6 @@ pub async fn update_basic_tx(
         hire_date,
         allow_reopen_without_approval,
         allow_submission_without_approval,
-        overtime_start_balance_min,
         tracks_time,
     )
     .await
@@ -737,7 +738,6 @@ pub async fn team_settings_update(
         None, // hire_date
         Some(allow_reopen_without_approval),
         Some(allow_submission_without_approval),
-        None, // overtime_start_balance_min
         None, // tracks_time
     )
     .await?;
@@ -809,9 +809,9 @@ pub async fn create(
                 "Assistants must have weekly_hours set to 0.".into(),
             ));
         }
-        if body.overtime_start_balance_min.unwrap_or(0) != 0 {
+        if body.flextime_opening_balance_min.unwrap_or(0) != 0 {
             return Err(AppError::BadRequest(
-                "Assistants cannot have an overtime start balance.".into(),
+                "Assistants cannot have a flextime opening balance.".into(),
             ));
         }
         if body.workdays_per_week.is_some() {
@@ -843,10 +843,20 @@ pub async fn create(
     };
     let password_hash =
         crate::services::auth::hash_password_async(temporary_password.clone()).await?;
-    let overtime_balance = body.overtime_start_balance_min.unwrap_or(0);
-    if !(-525_600..=525_600).contains(&overtime_balance) {
+    // The carry-in balance is only meaningful for an account that actually has
+    // a flextime ledger. A pure-admin user (tracks_time = false) has none, so
+    // the value is dropped rather than booked into a ledger nobody reads —
+    // enabling tracking later starts the ledger from that day (see the
+    // start_date reset in handlers::users::update) and the admin can book an
+    // opening correction then.
+    let opening_balance_min = if body.tracks_time {
+        body.flextime_opening_balance_min.unwrap_or(0)
+    } else {
+        0
+    };
+    if !(-MAX_ADJUSTMENT_MIN..=MAX_ADJUSTMENT_MIN).contains(&opening_balance_min) {
         return Err(AppError::BadRequest(
-            "Invalid overtime_start_balance_min.".into(),
+            "Invalid flextime_opening_balance_min.".into(),
         ));
     }
     if let Some(ref ids) = body.category_ids {
@@ -870,7 +880,6 @@ pub async fn create(
         body.start_date,
         body.hire_date,
         true,
-        overtime_balance,
         body.tracks_time,
         body.category_ids.as_deref(),
         body.absence_category_ids.as_deref(),
@@ -881,6 +890,22 @@ pub async fn create(
         user_unique_conflict(&e)
             .unwrap_or_else(|| AppError::Conflict("Could not create user.".into()))
     })?;
+    // Book the carry-in balance as the account's opening ledger entry, in the
+    // same transaction as the user row so a failure can never leave a user
+    // without their starting balance.
+    if opening_balance_min != 0 {
+        crate::repository::FlextimeAdjustmentDb::create_tx(
+            &mut transaction,
+            new_user_id,
+            body.start_date,
+            opening_balance_min,
+            crate::repository::KIND_OPENING_BALANCE,
+            None,
+            Some(requester.id),
+            None,
+        )
+        .await?;
+    }
     for approver_id in &body.approver_ids {
         UserDb::insert_approver_tx(&mut transaction, new_user_id, *approver_id).await?;
     }
@@ -1415,7 +1440,6 @@ mod tests {
             allow_reopen_without_approval: false,
             allow_submission_without_approval: false,
             dark_mode: false,
-            overtime_start_balance_min: 0,
             tracks_time: true,
             archived_at: None,
             receives_error_notifications: false,
@@ -1436,7 +1460,6 @@ mod tests {
         assert_eq!(auth.hire_date, None);
         assert!(auth.active);
         assert!(!auth.must_change_password);
-        assert_eq!(auth.overtime_start_balance_min, 0);
         assert!(auth.tracks_time);
     }
 
@@ -1450,7 +1473,6 @@ mod tests {
         src.allow_submission_without_approval = true;
         src.dark_mode = true;
         src.tracks_time = false;
-        src.overtime_start_balance_min = 480;
         let auth = repo_user_to_auth_user(src);
         assert_eq!(auth.hire_date, chrono::NaiveDate::from_ymd_opt(2020, 3, 1));
         assert!(auth.must_change_password);
@@ -1458,7 +1480,6 @@ mod tests {
         assert!(auth.allow_submission_without_approval);
         assert!(auth.dark_mode);
         assert!(!auth.tracks_time);
-        assert_eq!(auth.overtime_start_balance_min, 480);
     }
 
     #[test]

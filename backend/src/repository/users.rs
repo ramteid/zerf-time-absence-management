@@ -45,7 +45,6 @@ pub struct User {
     /// and no emails are sent for the auto-approval.
     pub allow_submission_without_approval: bool,
     pub dark_mode: bool,
-    pub overtime_start_balance_min: i64,
     /// When FALSE (admin only), this user has no time/absence tracking.
     /// All related endpoints are blocked; navigation items are hidden.
     pub tracks_time: bool,
@@ -70,7 +69,7 @@ const USER_SELECT: &str =
     "SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, workdays_per_week, \
      start_date, hire_date, active, must_change_password, created_at, \
      allow_reopen_without_approval, allow_submission_without_approval, dark_mode, \
-     overtime_start_balance_min, tracks_time, archived_at, \
+     tracks_time, archived_at, \
      receives_error_notifications \
      FROM users";
 
@@ -375,18 +374,6 @@ impl UserDb {
         )
     }
 
-    pub async fn get_start_date_and_overtime_balance(
-        &self,
-        user_id: i64,
-    ) -> AppResult<(NaiveDate, i64)> {
-        Ok(sqlx::query_as::<_, (NaiveDate, i64)>(
-            "SELECT start_date, overtime_start_balance_min FROM users WHERE id=$1",
-        )
-        .bind(user_id)
-        .fetch_one(&self.pool)
-        .await?)
-    }
-
     pub async fn check_email_available(
         &self,
         email: &str,
@@ -581,8 +568,8 @@ impl UserDb {
         sqlx::query(
             "INSERT INTO users(email, password_hash, first_name, last_name, role, \
                weekly_hours, workdays_per_week, start_date, hire_date, must_change_password, \
-               overtime_start_balance_min, tracks_time) \
-               VALUES ($1, $2, $3, $4, 'admin', 39.0, 5, $5, NULL, FALSE, 0, $6)",
+               tracks_time) \
+               VALUES ($1, $2, $3, $4, 'admin', 39.0, 5, $5, NULL, FALSE, $6)",
         )
         .bind(email)
         .bind(password_hash)
@@ -642,7 +629,6 @@ impl UserDb {
         start_date: NaiveDate,
         hire_date: Option<NaiveDate>,
         must_change_password: bool,
-        overtime_start_balance_min: i64,
         tracks_time: bool,
         category_ids: Option<&[i64]>,
         absence_category_ids: Option<&[i64]>,
@@ -650,8 +636,8 @@ impl UserDb {
         let new_user_id: i64 = sqlx::query_scalar(
             "INSERT INTO users(email, password_hash, first_name, last_name, role, \
              weekly_hours, workdays_per_week, start_date, hire_date, must_change_password, \
-             overtime_start_balance_min, tracks_time) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id",
+             tracks_time) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id",
         )
         .bind(email)
         .bind(password_hash)
@@ -663,7 +649,6 @@ impl UserDb {
         .bind(start_date)
         .bind(hire_date)
         .bind(must_change_password)
-        .bind(overtime_start_balance_min)
         .bind(tracks_time)
         .fetch_one(&mut *tx)
         .await?;
@@ -730,7 +715,6 @@ impl UserDb {
         hire_date: Option<Option<NaiveDate>>,
         allow_reopen_without_approval: Option<bool>,
         allow_submission_without_approval: Option<bool>,
-        overtime_start_balance_min: Option<i64>,
         tracks_time: Option<bool>,
     ) -> Result<(), sqlx::Error> {
         // hire_date is nullable, so a plain COALESCE cannot express "clear it
@@ -749,9 +733,8 @@ impl UserDb {
                  start_date=COALESCE($7,start_date), \
                  hire_date=CASE WHEN $8 THEN $9 ELSE hire_date END, \
                  allow_reopen_without_approval=COALESCE($10,allow_reopen_without_approval), \
-                 overtime_start_balance_min=COALESCE($11,overtime_start_balance_min), \
-                 tracks_time=COALESCE($12,tracks_time), \
-                 allow_submission_without_approval=COALESCE($14,allow_submission_without_approval) \
+                 allow_submission_without_approval=COALESCE($11,allow_submission_without_approval), \
+                 tracks_time=COALESCE($12,tracks_time) \
              WHERE id=$13",
         )
         .bind(email)
@@ -764,10 +747,9 @@ impl UserDb {
         .bind(update_hire_date)
         .bind(hire_date)
         .bind(allow_reopen_without_approval)
-        .bind(overtime_start_balance_min)
+        .bind(allow_submission_without_approval)
         .bind(tracks_time)
         .bind(id)
-        .bind(allow_submission_without_approval)
         .execute(tx)
         .await?;
         Ok(())

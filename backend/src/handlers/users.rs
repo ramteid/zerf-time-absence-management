@@ -181,7 +181,6 @@ pub async fn get_one(
         "allow_reopen_without_approval": user.allow_reopen_without_approval,
         "allow_submission_without_approval": user.allow_submission_without_approval,
         "dark_mode": user.dark_mode,
-        "overtime_start_balance_min": user.overtime_start_balance_min,
         "tracks_time": user.tracks_time,
         "receives_error_notifications": user.receives_error_notifications,
         "approver_ids": approver_ids,
@@ -229,7 +228,13 @@ pub struct NewUser {
     /// worked the full year before adopting Zerf mid-year.
     #[serde(default)]
     pub hire_date: Option<NaiveDate>,
-    pub overtime_start_balance_min: Option<i64>,
+    /// Flextime hours the employee already carried when the account is opened,
+    /// in signed minutes. Booked once as an `opening_balance` adjustment dated
+    /// on `start_date` — it is not a user setting and cannot be edited later;
+    /// see `services::flextime_adjustments`. Ignored for assistants (no
+    /// flextime account) and for users created with `tracks_time = false`.
+    #[serde(default)]
+    pub flextime_opening_balance_min: Option<i64>,
     pub password: Option<String>,
     /// Mandatory for non-admin users: list of team leads/admins who can approve this user's submissions.
     #[serde(default)]
@@ -281,7 +286,7 @@ pub async fn create(
             .map(|accounts| accounts.into_iter().map(Into::into).collect()),
         start_date: body.start_date,
         hire_date: body.hire_date,
-        overtime_start_balance_min: body.overtime_start_balance_min,
+        flextime_opening_balance_min: body.flextime_opening_balance_min,
         password: body.password,
         approver_ids: body.approver_ids,
         tracks_time: body.tracks_time,
@@ -320,7 +325,10 @@ pub struct UpdateUser {
     pub approver_ids: Option<Vec<i64>>,
     pub allow_reopen_without_approval: Option<bool>,
     pub allow_submission_without_approval: Option<bool>,
-    pub overtime_start_balance_min: Option<i64>,
+    // Deliberately no flextime balance field: the carry-in balance is a dated
+    // ledger booking, not a profile setting. Editing it here used to rewrite
+    // the employee's whole flextime history at once (see migration 043).
+    // Later changes go through POST /users/{id}/flextime-adjustments.
     /// For admin users only: when FALSE the user is in pure-admin mode with no
     /// time or absence tracking. Existing time and absence data is retained but
     /// excluded from all views and calculations.
@@ -390,13 +398,6 @@ pub async fn update(
             return Err(AppError::BadRequest("Invalid workdays_per_week.".into()));
         }
     }
-    if let Some(overtime_start_balance) = body.overtime_start_balance_min {
-        if !(-525_600..=525_600).contains(&overtime_start_balance) {
-            return Err(AppError::BadRequest(
-                "Invalid overtime_start_balance_min.".into(),
-            ));
-        }
-    }
     // Email format / length sanity (lowercase + minimal validation).
     let normalized_email = body.email.as_ref().map(|email| email.trim().to_lowercase());
     if let Some(email) = &normalized_email {
@@ -440,9 +441,6 @@ pub async fn update(
     let new_role =
         normalized_role.unwrap_or_else(|| previous_user.role.trim().to_ascii_lowercase());
     let effective_weekly_hours = body.weekly_hours.unwrap_or(previous_user.weekly_hours);
-    let effective_overtime_start_balance = body
-        .overtime_start_balance_min
-        .unwrap_or(previous_user.overtime_start_balance_min);
     if is_assistant_role(&new_role) {
         tracing::warn!(
             target: "zerf::assistant_role",
@@ -450,7 +448,6 @@ pub async fn update(
             previous_role = %previous_user.role,
             new_role = %new_role,
             effective_weekly_hours,
-            effective_overtime_start_balance,
             "validating assistant invariants during user update"
         );
         if effective_weekly_hours != 0.0 {
@@ -458,11 +455,11 @@ pub async fn update(
                 "Assistants must have weekly_hours set to 0.".into(),
             ));
         }
-        if effective_overtime_start_balance != 0 {
-            return Err(AppError::BadRequest(
-                "Assistants cannot have an overtime start balance.".into(),
-            ));
-        }
+        // Any flextime adjustments the user accumulated in a previous role are
+        // left in place, not deleted: assistants have no flextime account, so
+        // every balance path already ignores them, and keeping the rows means
+        // a change back to a flextime-bearing role restores the exact balance
+        // instead of silently starting from zero.
         if body.workdays_per_week.is_some() {
             return Err(AppError::BadRequest(
                 "Assistants cannot have fixed working days per week.".into(),
@@ -604,7 +601,6 @@ pub async fn update(
         body.hire_date,
         body.allow_reopen_without_approval,
         body.allow_submission_without_approval,
-        body.overtime_start_balance_min,
         effective_tracks_time,
     )
     .await

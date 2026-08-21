@@ -258,7 +258,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"assistant-invalid-overtime@example.com","first_name":"Assist","last_name":"Overtime",
-                    "role":"assistant","weekly_hours":0,"start_date":"2024-01-01","approver_ids": [1],"overtime_start_balance_min":60}),
+                    "role":"assistant","weekly_hours":0,"start_date":"2024-01-01","approver_ids": [1],"flextime_opening_balance_min":60}),
             )
             .await;
         assert_eq!(
@@ -269,7 +269,7 @@ async fn users_full_workflow() {
         assert!(body["error"]
             .as_str()
             .unwrap_or_default()
-            .contains("overtime"));
+            .contains("flextime"));
 
         // Valid assistant creation works with zero leave and zero weekly hours.
         let (st, body) = admin
@@ -391,18 +391,18 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"employee-invalid-overtime@example.com","first_name":"Emp","last_name":"Overtime",
-                    "role":"employee","weekly_hours":40,"overtime_start_balance_min":600001,"start_date":"2024-01-01","approver_ids":[1]}),
+                    "role":"employee","weekly_hours":40,"flextime_opening_balance_min":600001,"start_date":"2024-01-01","approver_ids":[1]}),
             )
             .await;
         assert_eq!(
             st,
             StatusCode::BAD_REQUEST,
-            "create rejects overtime balance above range"
+            "create rejects a carry-in balance above range"
         );
         assert!(body["error"]
             .as_str()
             .unwrap_or_default()
-            .contains("overtime"));
+            .contains("flextime"));
 
         let (st, body) = admin
             .post(
@@ -1208,16 +1208,23 @@ async fn users_full_workflow() {
             "update rejects invalid workdays_per_week"
         );
 
+        // The flextime carry-in balance is no longer part of the user
+        // profile, so a payload still carrying the old field is simply
+        // ignored rather than rewriting the employee's flextime history.
         let (st, _) = admin
             .put(
                 &format!("/api/v1/users/{emp_id}"),
                 &json!({"overtime_start_balance_min": 600000}),
             )
             .await;
-        assert_eq!(
-            st,
-            StatusCode::BAD_REQUEST,
-            "update rejects overtime balance out of range"
+        assert_eq!(st, StatusCode::OK, "legacy overtime field is ignored");
+        let (st, account) = admin
+            .get(&format!("/api/v1/users/{emp_id}/flextime-account"))
+            .await;
+        assert_eq!(st, StatusCode::OK, "flextime account readable: {account}");
+        assert!(
+            account["adjustments"].as_array().unwrap().is_empty(),
+            "no ledger booking may appear from a user update: {account}"
         );
 
         let (st, _) = admin
@@ -1235,13 +1242,13 @@ async fn users_full_workflow() {
         let (st, _) = admin
             .put(
                 &format!("/api/v1/users/{emp_id}"),
-                &json!({"role":"assistant","weekly_hours":0,"overtime_start_balance_min":5,"approver_ids":[1]}),
+                &json!({"role":"assistant","weekly_hours":0,"workdays_per_week":3,"approver_ids":[1]}),
             )
             .await;
         assert_eq!(
             st,
             StatusCode::BAD_REQUEST,
-            "assistant update rejects overtime start balance"
+            "assistant update rejects fixed working days per week"
         );
 
         let (st, _) = admin

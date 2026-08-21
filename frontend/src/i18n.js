@@ -144,6 +144,7 @@ const TRANSLATIONS = {
     audit_table_notifications: "Notification",
     audit_table_app_settings: "Setting",
     audit_table_reopen_requests: "Edit Request",
+    audit_table_flextime_adjustments: "Flextime Entry",
     audit_action_created: "Created",
     audit_action_updated: "Updated",
     audit_action_deleted: "Deleted",
@@ -234,6 +235,18 @@ const TRANSLATIONS = {
     Set: "Set",
     "Not enough flextime balance for this absence.":
       "Not enough flextime balance for this absence.",
+    "Flextime account": "Flextime account",
+    "Approved hours counted up to {date}":
+      "Approved hours counted up to {date}",
+    "Flextime balance updated.": "Flextime balance updated.",
+    "Flextime adjustment": "Flextime adjustment",
+    "Flextime adjustments": "Flextime adjustments",
+    Cancellation: "Cancellation",
+    Cancelled: "Cancelled",
+    "Takes effect later": "Takes effect later",
+    "Hours brought along": "Hours brought along",
+    "Added by {name} on {date}": "Added by {name} on {date}",
+    "Balance as of {date}": "Balance as of {date}",
     "Cannot change absence category cost type (vacation ↔ flextime). Cancel and re-request with the new category.":
       "Cannot change absence category cost type (vacation ↔ flextime). Cancel and re-request with the new category.",
     "Absence Request Details": "Absence Request Details",
@@ -540,9 +553,44 @@ const TRANSLATIONS = {
     "Workdays per week must be between 1 and 5.":
       "Arbeitstage pro Woche muss zwischen 1 und 5 liegen.",
     "Annual leave days": "Urlaubstage pro Jahr",
-    "Overtime start balance (hours)": "Überstunden-Startsaldo (Stunden)",
-    "Initial overtime balance in hours when the user starts. Negative = deficit.":
-      "Anfangssaldo der Überstunden in Stunden zum Startdatum. Negativ = Defizit.",
+    "Flextime hours brought along": "Mitgebrachte Gleitzeitstunden",
+    "Flextime hours this person has already built up elsewhere. Booked once on their start date. Negative means they start with a shortfall.":
+      "Gleitzeitstunden, die diese Person bereits angesammelt hat. Wird einmalig zum Startdatum gebucht. Negativ bedeutet: Sie startet mit einem Minus.",
+    "The flextime balance is managed on the user's flextime account, not here.":
+      "Der Gleitzeitsaldo wird im Gleitzeitkonto der Person verwaltet, nicht hier.",
+    "Flextime account": "Gleitzeitkonto",
+    "Approved hours counted up to {date}":
+      "Genehmigte Stunden gezählt bis {date}",
+    "Balance as of {date}": "Saldo per {date}",
+    "This person has not started yet, so there is no day an entry could take effect on.":
+      "Diese Person hat noch nicht angefangen, daher gibt es keinen Tag, an dem ein Eintrag wirken könnte.",
+    "This person has no flextime account, so there is no balance to correct.":
+      "Diese Person hat kein Gleitzeitkonto, daher gibt es keinen Saldo zu korrigieren.",
+    "Add an entry": "Eintrag hinzufügen",
+    "Effective from": "Wirksam ab",
+    "No note": "Keine Notiz",
+    "Negative subtracts hours, for example when overtime is paid out. Balances before the chosen date stay as they are.":
+      "Ein negativer Wert zieht Stunden ab, zum Beispiel bei einer Auszahlung von Überstunden. Salden vor dem gewählten Datum bleiben unverändert.",
+    "No entries yet — the balance comes purely from booked hours.":
+      "Noch keine Einträge – der Saldo ergibt sich allein aus den gebuchten Stunden.",
+    "Hours brought along": "Mitgebrachte Stunden",
+    Correction: "Korrektur",
+    "Added by {name} on {date}": "Erfasst von {name} am {date}",
+    System: "System",
+    "Enter the number of hours to add or subtract.":
+      "Bitte geben Sie an, wie viele Stunden hinzukommen oder abgezogen werden.",
+    "Cancel this entry?": "Diesen Eintrag stornieren?",
+    "The opposite amount is booked on the same date, so the balance returns to what it was. Both entries stay on the record.":
+      "Der Gegenbetrag wird auf dasselbe Datum gebucht, der Saldo entspricht danach wieder dem Stand davor. Beide Einträge bleiben erhalten.",
+    "Cancel entry": "Stornieren",
+    "Takes effect later": "Wirkt später",
+    "This entry has already been reversed.":
+      "Dieser Eintrag wurde bereits storniert.",
+    "This entry is itself a reversal and cannot be reversed.":
+      "Dieser Eintrag ist selbst eine Stornierung und kann nicht storniert werden.",
+    "Flextime balance updated.": "Gleitzeitsaldo aktualisiert.",
+    "Flextime adjustment": "Gleitzeitkorrektur",
+    "Flextime adjustments": "Gleitzeitkorrekturen",
     "Start date": "Startdatum",
     "Hire date": "Eintrittsdatum",
     "Used to calculate the prorated leave-account entitlement for employees who already worked before they started using the application. Leave empty to use the start date.":
@@ -983,8 +1031,17 @@ const TRANSLATIONS = {
     "Invalid weekly_hours.": "Ungültige Wochenstunden.",
     "Assistants must have weekly_hours set to 0.":
       "Aushilfen müssen Wochenstunden auf 0 gesetzt haben.",
-    "Assistants cannot have an overtime start balance.":
-      "Aushilfen dürfen keinen Überstunden-Startsaldo haben.",
+    "Assistants cannot have a flextime opening balance.":
+      "Aushilfen dürfen keinen Gleitzeit-Startsaldo haben.",
+    "Invalid flextime_opening_balance_min.": "Ungültiger Gleitzeit-Startsaldo.",
+    "This user has no flextime account.":
+      "Diese Person hat kein Gleitzeitkonto.",
+    "The adjustment must not be zero.":
+      "Der Eintrag darf nicht null Stunden betragen.",
+    "The adjustment is too large.": "Der Eintrag ist zu groß.",
+    "The date must be on or after the user's start date.":
+      "Das Datum muss am oder nach dem Startdatum der Person liegen.",
+    "The note is too long.": "Die Notiz ist zu lang.",
     "Invalid leave_days.": "Ungültige Urlaubstage.",
     "An approver (Team lead or Admin) is required for non-admin users.":
       "Für alle Nicht-Admin-Benutzer ist eine Teamleitung oder ein Admin als verantwortliche Person erforderlich.",
@@ -1243,6 +1300,7 @@ const TRANSLATIONS = {
     audit_table_notifications: "Benachrichtigung",
     audit_table_app_settings: "Einstellung",
     audit_table_reopen_requests: "Bearbeitungsanfrage",
+    audit_table_flextime_adjustments: "Gleitzeiteintrag",
     audit_action_created: "Erstellt",
     audit_action_updated: "Bearbeitet",
     audit_action_deleted: "Gelöscht",

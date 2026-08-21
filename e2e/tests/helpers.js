@@ -380,6 +380,11 @@ export async function createUserViaAdminUi(
     role,
     approverEmail,
     startDateOffsetDays = -21,
+    // Optional carry-in flextime balance, in hours (e.g. "12.5" or "-4").
+    // Only meaningful for non-assistant roles with time tracking on — the
+    // dialog itself hides the field otherwise, so passing this for e.g. an
+    // assistant would silently do nothing.
+    openingBalanceHours = null,
   },
 ) {
   await page.goto("/settings/users");
@@ -394,6 +399,10 @@ export async function createUserViaAdminUi(
   await dialog.locator("#user-role").selectOption(role);
 
   await setDate(page, "user-start-date", isoOffset(startDateOffsetDays));
+
+  if (openingBalanceHours !== null) {
+    await dialog.locator("#user-opening-balance").fill(openingBalanceHours);
+  }
 
   // The approver checklist lists every active team_lead/admin user except
   // the one being created; each row's label includes "(email)", so matching

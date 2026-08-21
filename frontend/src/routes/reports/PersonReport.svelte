@@ -295,7 +295,6 @@
       user.weekly_hours ?? "",
       user.start_date ?? "",
       user.hire_date ?? "",
-      user.overtime_start_balance_min ?? "",
       user.tracks_time !== false,
       user.active !== false,
     ].join(":");
@@ -900,6 +899,10 @@
         {#if chartLoading && chartDays.length === 0}
           <div class="zf-card-empty">{$t("Loading...")}</div>
         {:else if chartDays.length}
+          <!-- An admin booking on a day shows up in that day's chart tooltip.
+               It deliberately gets no section of its own: the changeover to a
+               dated ledger is meant to be invisible in the employee's own
+               views, and a balance step is explained where it is looked at. -->
           <FlextimeChart data={chartDays} asOf={chartBalanceAsOf} />
         {:else}
           <div class="zf-card-empty">{$t("No data.")}</div>

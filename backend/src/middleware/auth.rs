@@ -56,7 +56,6 @@ pub struct User {
     /// notifications or emails are sent to anyone (requester or approvers).
     pub allow_submission_without_approval: bool,
     pub dark_mode: bool,
-    pub overtime_start_balance_min: i64,
     /// When FALSE (admin only), this user operates in pure-admin mode: no time
     /// entries or absences are tracked, all related endpoints are blocked, and
     /// the corresponding navigation items are hidden in the frontend.
@@ -304,7 +303,6 @@ pub async fn auth_middleware(
         allow_reopen_without_approval: repo_user.allow_reopen_without_approval,
         allow_submission_without_approval: repo_user.allow_submission_without_approval,
         dark_mode: repo_user.dark_mode,
-        overtime_start_balance_min: repo_user.overtime_start_balance_min,
         tracks_time: repo_user.tracks_time,
         archived_at: repo_user.archived_at,
         receives_error_notifications: repo_user.receives_error_notifications,
@@ -377,7 +375,6 @@ mod tests {
             allow_reopen_without_approval: false,
             allow_submission_without_approval: false,
             dark_mode: false,
-            overtime_start_balance_min: 0,
             tracks_time: true,
             archived_at: None,
             receives_error_notifications: false,

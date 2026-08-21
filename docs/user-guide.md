@@ -38,6 +38,7 @@ Use this document if you are:
 - [Flextime logic](#flextime-logic)
   - [How daily targets are calculated](#how-daily-targets-are-calculated)
   - [What counts toward flextime actuals](#what-counts-toward-flextime-actuals)
+  - [The flextime account](#the-flextime-account)
   - [Automatic break deduction](#automatic-break-deduction)
 - [Submission status indicator](#submission-status-indicator)
   - [How completeness is determined](#how-completeness-is-determined)
@@ -535,6 +536,41 @@ Example flextime scenario:
 - Your Monday flextime result: 7 − 8 = −1 hour
 
 If your team meeting were crediting instead, the result would be: (7+1) − 8 = 0 hours flextime.
+
+### The flextime account
+
+Everything above describes the balance the app works out on its own, from the
+hours you book against your daily targets. Some changes to a balance have no
+hours behind them at all: the hours somebody brought along when they started, or
+overtime that was paid out. Those are recorded on the person's **flextime
+account** as separate entries.
+
+Each entry has a date, a number of hours (positive adds, negative subtracts) and
+an optional note. It changes the balance from its date onwards and leaves every
+earlier day exactly as it was, so a correction made today can never rewrite what
+last year's reports showed.
+
+Only admins can add entries. Open **Settings → Users**, then the clock button on
+the person's row. Any date from the person's start date onwards can be chosen,
+including one still ahead: an overtime payout agreed for the end of next month
+is written down when it is agreed and takes effect on that day, not before. A
+date that has already passed takes effect right away — it does not wait for a
+week to be approved.
+
+**Entries are never deleted.** A wrong entry is cancelled instead: the opposite
+amount is booked on the same date, so the balance returns to what it was while
+both the mistake and its cancellation stay on the record. Deleting would move
+every balance reported since that date with nothing left to show why, which is
+exactly the problem this account replaces. An entry can be cancelled once, and a
+cancellation cannot itself be cancelled.
+
+Employees are not asked to do anything with this and get no extra screen. The
+entry shows up where the balance is looked at: hovering that day in the flextime
+chart names it, and the monthly timesheet PDF and CSV export list the total for
+the period, so the closing balance always adds up.
+
+People without a flextime account (assistants, and admins with time tracking
+switched off) have no balance to correct, so the account view simply says so.
 
 ### Automatic break deduction
 
@@ -1450,16 +1486,21 @@ Required information:
 
 Role-specific rules:
 
-- Assistants must have zero weekly hours and no overtime start balance. The
-  corresponding fields are hidden in the form.
+- Assistants must have zero weekly hours and no flextime hours brought along.
+  The corresponding fields are hidden in the form.
 - When the assistant role is selected, leave-account entitlements are reset to
   0. This is intentional: under German law, Minijob (assistant) leave
   entitlement is derived from the number of days actually worked, which varies
   per person and per year. Enter the correct entitlement for each account and
   year manually.
 
-Optional: an initial flextime balance to carry in from before the user was
-created in the system.
+Optional: **flextime hours brought along** — hours the person had already built
+up before they existed in Zerf. Enter them in hours; a negative value means they
+start with a shortfall. This is asked only once, while the account is being
+created, and only for people who will actually track time. It is booked as the
+first entry on their flextime account, dated on their start date, and can be
+corrected later on that account (see [The flextime
+account](#the-flextime-account)) — never by editing the user again.
 
 Optional: a hire date — the date the person actually joined the company, if it
 differs from their start date in Zerf. This matters when introducing Zerf to an

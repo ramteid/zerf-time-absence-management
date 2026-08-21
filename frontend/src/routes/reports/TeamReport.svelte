@@ -415,6 +415,11 @@
         </thead>
         <tbody>
           {#each sortedTeamReport as r (r.user_id)}
+            <!-- The monthly diff sits next to the flextime balance, so it has
+                 to describe the same movement: worked-minus-target plus any
+                 admin booking dated in this month. -->
+            {@const monthlyDiffMin =
+              r.diff_min == null ? null : r.diff_min + (r.adjustment_min || 0)}
             <tr>
               <td class="fw-500">{r.name}</td>
               <td
@@ -442,16 +447,16 @@
               </td>
               <td
                 class="tab-num text-right"
-                style:color={r.diff_min == null
+                style:color={monthlyDiffMin == null
                   ? "var(--text-tertiary)"
-                  : r.diff_min < 0
+                  : monthlyDiffMin < 0
                     ? "var(--danger-text)"
                     : "var(--success-text)"}
               >
-                {#if r.diff_min == null}
+                {#if monthlyDiffMin == null}
                   -
                 {:else}
-                  {r.diff_min >= 0 ? "+" : ""}{minToHM(r.diff_min)}
+                  {monthlyDiffMin >= 0 ? "+" : ""}{minToHM(monthlyDiffMin)}
                 {/if}
               </td>
               <td class="tab-num text-right text-tertiary">

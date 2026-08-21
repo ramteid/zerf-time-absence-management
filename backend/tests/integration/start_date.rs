@@ -185,7 +185,7 @@ async fn start_date_full_workflow() {
                     "role": "admin",
                     "weekly_hours": 0,
                     "start_date": start_date,
-                    "overtime_start_balance_min": 120
+                    "flextime_opening_balance_min": 120
                 }),
             )
             .await;
@@ -230,7 +230,7 @@ async fn start_date_full_workflow() {
                     "role": "admin",
                     "weekly_hours": 0,
                     "start_date": start_day_str,
-                    "overtime_start_balance_min": 120
+                    "flextime_opening_balance_min": 120
                 }),
             )
             .await;

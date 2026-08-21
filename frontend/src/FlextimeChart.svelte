@@ -10,7 +10,7 @@
 
   /**
    * @typedef {{date: string, actual_min: number, target_min: number,
-   *   diff_min: number, cumulative_min: number,
+   *   adjustment_min: number, diff_min: number, cumulative_min: number,
    *   absence: string|null, holiday: string|null}} FlextimeDay
    */
 
@@ -261,7 +261,13 @@
 
   // ── Tooltip ──────────────────────────────────────────────────────────────
   const tooltipWidth = 190;
-  const tooltipHeight = 70;
+  const tooltipBaseHeight = 70;
+  const tooltipLineHeight = 17;
+  // An admin booking on the hovered day gets its own line, so the card grows
+  // by one row rather than overflowing its background.
+  $: hoverAdjustmentMin = hoverD?.adjustment_min || 0;
+  $: tooltipHeight =
+    tooltipBaseHeight + (hoverAdjustmentMin ? tooltipLineHeight : 0);
 
   $: tooltipX =
     hoverPt && hoverPt.x + tooltipWidth + marginRight + 10 > containerW
@@ -575,6 +581,18 @@
         >
           {$t("Daily diff")}: {fmtBal(hoverD.diff_min)}
         </text>
+        <!-- Admin booking: part of the daily diff above, named separately so
+             a jump the worked hours cannot explain is never a mystery. -->
+        {#if hoverAdjustmentMin}
+          <text
+            x={tooltipX + 9}
+            y={tooltipY + 68}
+            font-size="11"
+            fill="var(--text-tertiary)"
+          >
+            {$t("Flextime adjustment")}: {fmtBal(hoverAdjustmentMin)}
+          </text>
+        {/if}
       {/if}
     </svg>
 

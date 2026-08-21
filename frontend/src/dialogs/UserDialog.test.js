@@ -404,9 +404,9 @@ describe("UserDialog", () => {
     expect(target.querySelector("#leave-account-8-current").value).toBe("5");
   });
 
-  it("hides weekly hours, workdays, and overtime fields when role is assistant", async () => {
-    // Assistants are always set to 0 weekly hours and no overtime balance — these
-    // fields are irrelevant for their role and would only confuse the admin.
+  it("hides weekly hours, workdays, and the carry-in balance for assistants", async () => {
+    // Assistants have no work target and no flextime account, so all three
+    // fields are meaningless for their role and would only confuse the admin.
     const onClose = vi.fn();
     component = mount(UserDialog, {
       target,
@@ -417,7 +417,106 @@ describe("UserDialog", () => {
 
     expect(target.textContent).not.toContain("Weekly hours");
     expect(target.textContent).not.toContain("Workdays per week");
-    expect(target.textContent).not.toContain("Overtime start balance");
+    expect(target.querySelector("#user-opening-balance")).toBeNull();
+  });
+
+  it("asks for the carry-in flextime balance when creating an employee", async () => {
+    // The value is still collected at account creation — it just becomes a
+    // dated ledger booking rather than an editable profile setting.
+    const onClose = vi.fn();
+    component = mount(UserDialog, {
+      target,
+      props: { template: { role: "employee" }, onClose },
+    });
+    await waitForText(target, "Add User");
+    await settle();
+
+    expect(target.querySelector("#user-opening-balance")).not.toBeNull();
+  });
+
+  it("does not offer the carry-in balance when editing an existing user", async () => {
+    // This is the whole point of the change: editing that number used to
+    // rewrite every flextime balance ever reported for the person. The field
+    // is gone and the admin is pointed at the flextime account instead.
+    apiMock.mockImplementation(async (path) => {
+      if (path === "/users") return [];
+      if (path === "/users/7/leave-accounts") return userLeaveAccounts();
+      return {};
+    });
+    const onClose = vi.fn();
+    component = mount(UserDialog, {
+      target,
+      props: {
+        template: {
+          id: 7,
+          first_name: "Grace",
+          last_name: "Green",
+          role: "employee",
+          email: "grace@example.com",
+          weekly_hours: 40,
+          workdays_per_week: 5,
+          start_date: "2023-01-01",
+          approver_ids: [],
+          active: true,
+          tracks_time: true,
+        },
+        onClose,
+      },
+    });
+    await waitForText(target, "Edit User");
+    await settle();
+
+    expect(target.querySelector("#user-opening-balance")).toBeNull();
+    expect(target.textContent).toContain("flextime account");
+  });
+
+  it("omits the carry-in balance from the create payload for a pure admin", async () => {
+    // A pure-admin account (tracks_time=false) has no flextime ledger, so
+    // there is nothing to book a carry-in balance into.
+    const onClose = vi.fn();
+    component = mount(UserDialog, {
+      target,
+      props: {
+        template: { role: "admin", tracks_time: false },
+        onClose,
+      },
+    });
+    await waitForText(target, "Add User");
+    await settle();
+
+    expect(target.querySelector("#user-opening-balance")).toBeNull();
+
+    target.querySelector("#user-first-name").value = "Pat";
+    target
+      .querySelector("#user-first-name")
+      .dispatchEvent(new Event("input", { bubbles: true }));
+    target.querySelector("#user-last-name").value = "Pureadmin";
+    target
+      .querySelector("#user-last-name")
+      .dispatchEvent(new Event("input", { bubbles: true }));
+    target.querySelector("#user-email").value = "pat@example.com";
+    target
+      .querySelector("#user-email")
+      .dispatchEvent(new Event("input", { bubbles: true }));
+    await settle();
+
+    apiMock.mockClear();
+    apiMock.mockResolvedValue({ temporary_password: "Temp!12345678" });
+    const saveBtn = [...target.querySelectorAll("button")].find((b) =>
+      b.textContent.includes("Add User"),
+    );
+    saveBtn?.click();
+    await settle();
+    await settle();
+
+    const createCall = apiMock.mock.calls.find(
+      (call) => call[0] === "/users" && call[1]?.method === "POST",
+    );
+    expect(createCall).toBeTruthy();
+    expect(createCall[1].body).not.toHaveProperty(
+      "flextime_opening_balance_min",
+    );
+    expect(createCall[1].body).not.toHaveProperty("overtime_start_balance_min");
   });
 
   it("hides the technical-error-notification opt-in for non-admin roles", async () => {

@@ -479,13 +479,6 @@ async fn users_repository_workflow() {
         users.get_start_date(emp_id).await.expect("start date"),
         NaiveDate::from_ymd_opt(2024, 1, 1).unwrap()
     );
-    assert_eq!(
-        users
-            .get_start_date_and_overtime_balance(emp_id)
-            .await
-            .expect("start date + balance"),
-        (NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(), 0)
-    );
     assert!(users
         .check_email_available("lead-repo-users@example.com", None)
         .await
@@ -2037,9 +2030,9 @@ async fn reports_repository_workflow() {
         .any(|u| u.id == emp_id));
 
     let _ = report_db
-        .user_start_and_overtime(emp_id)
+        .user_start_date(emp_id)
         .await
-        .expect("user start and overtime");
+        .expect("user start date");
     let _ = report_db
         .flextime_entries(emp_id, monday, tuesday)
         .await
