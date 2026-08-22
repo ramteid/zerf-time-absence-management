@@ -159,6 +159,7 @@ const TRANSLATIONS = {
     audit_action_archived: "Archived",
     audit_action_restored: "Restored",
     audit_action_reopened: "Editing Enabled",
+    audit_action_reversed: "Reversed",
     audit_system_user: "System",
     audit_time_entries_week_summary:
       "Week {week}: {from} - {to} ({count} day entries)",
@@ -1315,6 +1316,7 @@ const TRANSLATIONS = {
     audit_action_archived: "Archiviert",
     audit_action_restored: "Wiederhergestellt",
     audit_action_reopened: "Bearbeitung freigegeben",
+    audit_action_reversed: "Storniert",
     Before: "Vorher",
     After: "Nachher",
     For: "Für",

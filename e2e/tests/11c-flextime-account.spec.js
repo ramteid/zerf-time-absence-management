@@ -12,8 +12,10 @@
 
 import { test, expect } from "@playwright/test";
 import {
+  bookableDateOffset,
   collectPageErrors,
   createUserViaAdminUi,
+  isoOffset,
   pastBookableDateOffset,
   setDate,
   storageStatePath,
@@ -36,6 +38,49 @@ function userRow(page, fullName) {
 // The signed HH:MM balance shown at the top right of the dialog.
 async function readBalance(dialog) {
   return (await dialog.locator(".account-balance").innerText()).trim();
+}
+
+// Resolves a user's numeric id by email via a direct API read — cheaper and
+// more robust than deriving it from DOM state, and already an established
+// pattern in this suite (see 03-admin-config.spec.js).
+async function resolveUserId(request, email) {
+  const response = await request.get("/api/v1/users");
+  expect(response.ok()).toBeTruthy();
+  const user = (await response.json()).find((u) => u.email === email);
+  expect(user).toBeTruthy();
+  return user.id;
+}
+
+// Opens the flextime account dialog for `fullName` from the user roster and
+// returns its locator, already asserted visible. Every test below that needs
+// the dialog goes through this instead of repeating the roster navigation.
+async function openFlextimeAccount(page, fullName) {
+  await page.goto("/settings/users");
+  const row = userRow(page, fullName);
+  await row.getByRole("button", { name: "Flextime account" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
+// Fills and submits the booking form, waits for the POST to resolve, and
+// returns the created adjustment.
+async function bookAdjustment(page, dialog, { date, hours, reason = "" }) {
+  await setDate(page, "flextime-adjustment-date", date);
+  await dialog.locator("#flextime-adjustment-hours").fill(hours);
+  if (reason) {
+    await dialog.locator("#flextime-adjustment-reason").fill(reason);
+  }
+  const created = page.waitForResponse(
+    (r) =>
+      /\/api\/v1\/users\/\d+\/flextime-adjustments$/.test(
+        new URL(r.url()).pathname,
+      ) && r.request().method() === "POST",
+  );
+  await dialog.getByRole("button", { name: "Add entry" }).click();
+  const response = await created;
+  expect(response.ok()).toBe(true);
+  return response.json();
 }
 
 test.describe("admin enters a carry-in balance while onboarding a new employee", () => {
@@ -62,12 +107,7 @@ test.describe("admin enters a carry-in balance while onboarding a new employee",
       openingBalanceHours: "12.5",
     });
 
-    await page.goto("/settings/users");
-    const row = userRow(page, "Ossi Opening");
-    await row.getByRole("button", { name: "Flextime account" }).click();
-
-    const dialog = page.getByRole("dialog");
-    await expect(dialog).toBeVisible();
+    const dialog = await openFlextimeAccount(page, "Ossi Opening");
 
     // Exactly one entry: the carry-in, booked as "Hours brought along" rather
     // than a correction, for the exact amount that was typed in.
@@ -106,12 +146,10 @@ test.describe("admin corrects an employee's flextime balance", () => {
     const pageErrors = collectPageErrors(page);
     correctionDate = await pastBookableDateOffset(page.request);
 
-    await page.goto("/settings/users");
-    const row = userRow(page, `${EMPLOYEE.firstName} ${EMPLOYEE.lastName}`);
-    await row.getByRole("button", { name: "Flextime account" }).click();
-
-    const dialog = page.getByRole("dialog");
-    await expect(dialog).toBeVisible();
+    const dialog = await openFlextimeAccount(
+      page,
+      `${EMPLOYEE.firstName} ${EMPLOYEE.lastName}`,
+    );
     await expect(
       dialog.getByText(`${EMPLOYEE.firstName} ${EMPLOYEE.lastName}`),
     ).toBeVisible();
@@ -131,27 +169,15 @@ test.describe("admin corrects an employee's flextime balance", () => {
   test("admin: a correction is booked and listed with its date and note", async ({
     page,
   }) => {
-    await page.goto("/settings/users");
-    const row = userRow(page, `${EMPLOYEE.firstName} ${EMPLOYEE.lastName}`);
-    await row.getByRole("button", { name: "Flextime account" }).click();
-
-    const dialog = page.getByRole("dialog");
-    await expect(dialog).toBeVisible();
-
-    await setDate(page, "flextime-adjustment-date", correctionDate);
-    await dialog.locator("#flextime-adjustment-hours").fill("-2.5");
-    await dialog
-      .locator("#flextime-adjustment-reason")
-      .fill("E2E overtime payout");
-
-    const created = page.waitForResponse(
-      (r) =>
-        /\/api\/v1\/users\/\d+\/flextime-adjustments$/.test(
-          new URL(r.url()).pathname,
-        ) && r.request().method() === "POST",
+    const dialog = await openFlextimeAccount(
+      page,
+      `${EMPLOYEE.firstName} ${EMPLOYEE.lastName}`,
     );
-    await dialog.getByRole("button", { name: "Add entry" }).click();
-    expect((await created).ok()).toBe(true);
+    await bookAdjustment(page, dialog, {
+      date: correctionDate,
+      hours: "-2.5",
+      reason: "E2E overtime payout",
+    });
 
     // The entry, its note, and the balance that now includes it.
     const entry = dialog.locator(".adjustment-row", {
@@ -167,31 +193,76 @@ test.describe("admin corrects an employee's flextime balance", () => {
   test("admin: the entry survives a reload", async ({ page }) => {
     // Re-opening the dialog re-fetches from the API, so this proves the entry
     // was persisted rather than only rendered optimistically.
-    await page.goto("/settings/users");
-    const row = userRow(page, `${EMPLOYEE.firstName} ${EMPLOYEE.lastName}`);
-    await row.getByRole("button", { name: "Flextime account" }).click();
-
-    const dialog = page.getByRole("dialog");
+    const dialog = await openFlextimeAccount(
+      page,
+      `${EMPLOYEE.firstName} ${EMPLOYEE.lastName}`,
+    );
     await expect(
       dialog.locator(".adjustment-row", { hasText: "E2E overtime payout" }),
     ).toBeVisible();
   });
 
+  test("admin: a correction only moves the balance from its date onward, leaving every earlier day exactly as it was", async ({
+    page,
+  }) => {
+    // The rule this whole file exists to pin down, checked directly against
+    // the day-level ledger rather than only against the running balance: a
+    // day strictly before the new booking must report the identical
+    // cumulative balance before and after it is made.
+    const employeeId = await resolveUserId(page.request, EMPLOYEE.email);
+    // Before `correctionDate` (drawn from offsets -1..-14 at the top of this
+    // file) yet still inside the employee's 21-day contract backdate (see
+    // createUserViaAdminUi), so real accumulated history exists on this day.
+    const earlierDay = await pastBookableDateOffset(page.request, -16, -20);
+
+    async function earlierDayBalance() {
+      const response = await page.request.get(
+        `/api/v1/reports/flextime?user_id=${employeeId}&from=${earlierDay}&to=${earlierDay}`,
+      );
+      expect(response.ok()).toBeTruthy();
+      return (await response.json()).days[0].cumulative_min;
+    }
+
+    async function currentBalance() {
+      const response = await page.request.get(
+        `/api/v1/users/${employeeId}/flextime-account`,
+      );
+      expect(response.ok()).toBeTruthy();
+      return (await response.json()).balance_min;
+    }
+
+    const earlierBefore = await earlierDayBalance();
+    const currentBefore = await currentBalance();
+
+    const todayIso = isoOffset(0);
+    const dialog = await openFlextimeAccount(
+      page,
+      `${EMPLOYEE.firstName} ${EMPLOYEE.lastName}`,
+    );
+    await bookAdjustment(page, dialog, {
+      date: todayIso,
+      hours: "-1.5",
+      reason: "E2E history guard",
+    });
+
+    expect(await earlierDayBalance()).toBe(earlierBefore);
+    expect(await currentBalance()).toBe(currentBefore - 90);
+  });
+
   test("admin: an entry is cancelled, never deleted", async ({ page }) => {
     // Uses a throwaway entry of its own so the correction the employee test
     // below looks at stays in force.
-    await page.goto("/settings/users");
-    const row = userRow(page, `${EMPLOYEE.firstName} ${EMPLOYEE.lastName}`);
-    await row.getByRole("button", { name: "Flextime account" }).click();
-
-    const dialog = page.getByRole("dialog");
-    await expect(dialog).toBeVisible();
+    const dialog = await openFlextimeAccount(
+      page,
+      `${EMPLOYEE.firstName} ${EMPLOYEE.lastName}`,
+    );
     const balanceBeforeMistake = await readBalance(dialog);
 
-    await setDate(page, "flextime-adjustment-date", correctionDate);
-    await dialog.locator("#flextime-adjustment-hours").fill("4");
-    await dialog.locator("#flextime-adjustment-reason").fill("E2E typo");
-    await dialog.getByRole("button", { name: "Add entry" }).click();
+    await bookAdjustment(page, dialog, {
+      date: correctionDate,
+      hours: "4",
+      reason: "E2E typo",
+    });
 
     const mistake = dialog.locator(".adjustment-row", { hasText: "E2E typo" });
     await expect(mistake).toBeVisible();
@@ -232,6 +303,142 @@ test.describe("admin corrects an employee's flextime balance", () => {
     await expect(
       dialog.locator(".field-hint", { hasText: "flextime account" }),
     ).toBeVisible();
+  });
+});
+
+test.describe("every view of a corrected balance agrees", () => {
+  test.use({ storageState: storageStatePath("admin") });
+
+  // Same signed HH:MM formatting the app itself uses (minToHM in format.js),
+  // so comparing rendered text against an independently-fetched API value is
+  // exact rather than a loose guess.
+  function signedHM(min) {
+    const sign = min < 0 ? "-" : "+";
+    const abs = Math.abs(Math.trunc(min));
+    return `${sign}${Math.floor(abs / 60)}:${String(abs % 60).padStart(2, "0")}`;
+  }
+
+  // Exactly the historical bug this guards against: the dashboard/team report
+  // and the flextime account dialog once disagreed about a booking dated
+  // later in the current month, because one view capped adjustments at today
+  // and the other did not. Comparing all three views against the same
+  // API-fetched balance pins them together.
+  test("admin: the flextime account, the team report, and the employee's own report all show the same balance after a booking", async ({
+    page,
+    browser,
+  }) => {
+    const employeeId = await resolveUserId(page.request, EMPLOYEE.email);
+
+    const dialog = await openFlextimeAccount(
+      page,
+      `${EMPLOYEE.firstName} ${EMPLOYEE.lastName}`,
+    );
+    await bookAdjustment(page, dialog, {
+      date: isoOffset(0),
+      hours: "3",
+      reason: "E2E cross-view check",
+    });
+
+    const accountResponse = await page.request.get(
+      `/api/v1/users/${employeeId}/flextime-account`,
+    );
+    expect(accountResponse.ok()).toBeTruthy();
+    const expected = signedHM((await accountResponse.json()).balance_min);
+    expect(await readBalance(dialog)).toBe(`${expected}h`);
+
+    await page.goto("/reports");
+    await page.getByRole("button", { name: "Team report" }).click();
+    // Scoped to the main balance table specifically: the Team report tab also
+    // renders separate category-totals and absence tables further down the
+    // page, which repeat the same employee name in their own <tbody> rows.
+    const teamRow = page.locator(".team-report-table tbody tr", {
+      hasText: `${EMPLOYEE.firstName} ${EMPLOYEE.lastName}`,
+    });
+    await expect(teamRow).toBeVisible();
+    await expect(teamRow.locator("td").nth(1)).toContainText(expected);
+
+    // The employee's own report, read from their own session.
+    const employeeContext = await browser.newContext({
+      storageState: storageStatePath("employee"),
+    });
+    const employeePage = await employeeContext.newPage();
+    await employeePage.goto("/reports");
+    const flexCard = employeePage.locator(".stat-card", {
+      hasText: "Flextime balance",
+    });
+    await expect(flexCard.locator(".stat-card-value")).toContainText(
+      expected,
+    );
+    await employeeContext.close();
+  });
+
+  // A booking dated ahead of today is on the record already (see the account
+  // dialog's own "Takes effect later" chip), but must not move the balance
+  // any view shows until its own day arrives.
+  test("admin: a booking dated ahead of today does not move the balance shown anywhere yet", async ({
+    page,
+  }) => {
+    const employeeId = await resolveUserId(page.request, EMPLOYEE.email);
+    const accountBefore = await page.request.get(
+      `/api/v1/users/${employeeId}/flextime-account`,
+    );
+    expect(accountBefore.ok()).toBeTruthy();
+    const expected = signedHM((await accountBefore.json()).balance_min);
+
+    const futureDay = await bookableDateOffset(page.request, 10);
+    const dialog = await openFlextimeAccount(
+      page,
+      `${EMPLOYEE.firstName} ${EMPLOYEE.lastName}`,
+    );
+    await bookAdjustment(page, dialog, {
+      date: futureDay,
+      hours: "-6",
+      reason: "E2E future payout",
+    });
+
+    await expect(
+      dialog.locator(".adjustment-row", { hasText: "E2E future payout" }),
+    ).toContainText("Takes effect later");
+    expect(await readBalance(dialog)).toBe(`${expected}h`);
+
+    await page.goto("/reports");
+    await page.getByRole("button", { name: "Team report" }).click();
+    // Scoped to the main balance table specifically: the Team report tab also
+    // renders separate category-totals and absence tables further down the
+    // page, which repeat the same employee name in their own <tbody> rows.
+    const teamRow = page.locator(".team-report-table tbody tr", {
+      hasText: `${EMPLOYEE.firstName} ${EMPLOYEE.lastName}`,
+    });
+    await expect(teamRow.locator("td").nth(1)).toContainText(expected);
+  });
+
+  test("admin: bookings and their cancellation appear in the audit log with a translated action", async ({
+    page,
+  }) => {
+    const dialog = await openFlextimeAccount(
+      page,
+      `${EMPLOYEE.firstName} ${EMPLOYEE.lastName}`,
+    );
+    await bookAdjustment(page, dialog, {
+      date: isoOffset(0),
+      hours: "1",
+      reason: "E2E audit trail",
+    });
+    const entry = dialog.locator(".adjustment-row", {
+      hasText: "E2E audit trail",
+    });
+    await entry.getByRole("button", { name: "Cancel entry" }).click();
+    const confirm = page.getByRole("dialog").last();
+    await confirm.getByRole("button", { name: "Cancel entry" }).click();
+    await expect(entry).toContainText("Cancelled");
+
+    await page.goto("/settings/audit-log");
+    const rows = page.locator(".audit-row");
+    // Newest first: the reversal lands above the booking it cancels.
+    await expect(rows.nth(0)).toContainText("Flextime Entry");
+    await expect(rows.nth(0)).toContainText("Reversed");
+    await expect(rows.nth(1)).toContainText("Flextime Entry");
+    await expect(rows.nth(1)).toContainText("Created");
   });
 });
 

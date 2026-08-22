@@ -967,3 +967,114 @@ async fn a_future_booking_only_takes_effect_on_its_own_date() {
 
     app.cleanup().await;
 }
+
+/// A booking (or its reversal) dated in an already-archived month must
+/// re-queue that month's timesheet export — otherwise a PDF already uploaded
+/// to Nextcloud keeps showing the old closing balance forever, even though
+/// the app itself now reports a different one. No other mutation in the app
+/// changes a past month's rendered balance without going through
+/// `requeue_export_for_dates`/`requeue_export_for_absence_period`; bookings
+/// used to be the one exception.
+#[tokio::test]
+async fn a_booking_in_a_past_month_requeues_its_export() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    // Last day of the previous month: guaranteed to be in an already-past
+    // month regardless of what day of the month the suite runs on, and the
+    // walk from this single day through today never reaches a second past
+    // month (only the current one, which is deliberately excluded from
+    // requeuing because it has not been archived yet).
+    let today = reference_date();
+    let first_of_this_month = today.with_day(1).expect("valid date");
+    let booking_day = first_of_this_month - chrono::Duration::days(1);
+    let booking_period = booking_day.format("%Y-%m").to_string();
+    let booking_iso = booking_day.format("%Y-%m-%d").to_string();
+    let start_iso = (booking_day - chrono::Duration::days(30))
+        .format("%Y-%m-%d")
+        .to_string();
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "requeue@example.com",
+                "first_name": "Rex", "last_name": "Requeue",
+                "role": "employee", "weekly_hours": 39,
+                "start_date": start_iso,
+                "approver_ids": [1]
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create user: {body}");
+    let user_id = id(&body);
+
+    // Feature disabled (the default): booking must not queue anything.
+    let (st, body) = admin
+        .post(
+            &format!("/api/v1/users/{user_id}/flextime-adjustments"),
+            &json!({"effective_date": booking_iso, "minutes": 120}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "book while upload disabled: {body}");
+    let pending = app.state.db.export_queue.list_pending().await.unwrap();
+    assert!(
+        pending.is_empty(),
+        "no requeue while report upload is disabled"
+    );
+
+    app.state
+        .db
+        .settings
+        .save_setting(zerf::services::settings::REPORT_UPLOAD_ENABLED_KEY, "true")
+        .await
+        .expect("enable report upload");
+
+    let (st, body) = admin
+        .post(
+            &format!("/api/v1/users/{user_id}/flextime-adjustments"),
+            &json!({"effective_date": booking_iso, "minutes": -50, "reason": "correction"}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "book while upload enabled: {body}");
+    let adjustment_id = id(&body);
+
+    let pending = app.state.db.export_queue.list_pending().await.unwrap();
+    let pending_pairs: Vec<(i64, String)> = pending
+        .iter()
+        .map(|entry| (entry.user_id, entry.period.clone()))
+        .collect();
+    assert_eq!(
+        pending_pairs,
+        vec![(user_id, booking_period.clone())],
+        "exactly the one past month touched"
+    );
+
+    app.state
+        .db
+        .export_queue
+        .delete_entry(user_id, &booking_period)
+        .await
+        .expect("clear the queue entry");
+
+    // Reversing the booking touches the same archived month again.
+    let (st, body) = admin
+        .post(
+            &format!("/api/v1/flextime-adjustments/{adjustment_id}/reverse"),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "reverse booking: {body}");
+    let pending = app.state.db.export_queue.list_pending().await.unwrap();
+    let pending_pairs: Vec<(i64, String)> = pending
+        .iter()
+        .map(|entry| (entry.user_id, entry.period.clone()))
+        .collect();
+    assert_eq!(
+        pending_pairs,
+        vec![(user_id, booking_period)],
+        "the reversal must requeue the same month"
+    );
+
+    app.cleanup().await;
+}

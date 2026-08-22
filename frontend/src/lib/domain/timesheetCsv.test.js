@@ -148,6 +148,47 @@ describe("buildTimesheetCsv", () => {
     expect(csv).toContain("+2:30");
   });
 
+  it("appends a flextime adjustments row when an admin booking landed in the period", () => {
+    // Without this row, opening + worked hours would not reconcile against
+    // closing, and the reader would have no way to see why: the difference
+    // is an admin booking, not a data error.
+    const csv = buildTimesheetCsv({
+      report: baseReport,
+      flextimeData: [
+        // Day 1: diff -20 (no adjustment), day 2: diff +50, of which +90 is
+        // an admin booking and -40 is worked time. Opening 100 -> closing 180.
+        { cumulative_min: 80, diff_min: -20, adjustment_min: 0 },
+        { cumulative_min: 130, diff_min: 50, adjustment_min: 90 },
+      ],
+      translate,
+    });
+    expect(csv).toContain("Flextime opening balance");
+    expect(csv).toContain("Flextime adjustments");
+    expect(csv).toContain("+1:30"); // 90 minutes
+    expect(csv).toContain("Flextime closing balance");
+
+    // opening (100) + sum(diff_min) (-20 + 50) == closing (130): the
+    // reconciliation the "Flextime adjustments" row exists to explain.
+    const { opening, closing } = flextimeBounds([
+      { cumulative_min: 80, diff_min: -20, adjustment_min: 0 },
+      { cumulative_min: 130, diff_min: 50, adjustment_min: 90 },
+    ]);
+    expect(opening).toBe(100);
+    expect(opening - 20 + 50).toBe(closing);
+  });
+
+  it("omits the adjustments row when no booking landed in the period", () => {
+    const csv = buildTimesheetCsv({
+      report: baseReport,
+      flextimeData: [
+        { cumulative_min: 100, diff_min: 20, adjustment_min: 0 },
+        { cumulative_min: 150, diff_min: 50, adjustment_min: 0 },
+      ],
+      translate,
+    });
+    expect(csv).not.toContain("Flextime adjustments");
+  });
+
   it("adds the balance cutoff row, capped at the last ledger day", () => {
     // The closing balance stops at the last fully approved week; the export
     // must say so instead of letting the number read as "end of range".

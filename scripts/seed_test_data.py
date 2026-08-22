@@ -314,8 +314,10 @@ PERSONAS: list[Persona] = [
 # Status values match backend/migrations/001 & 003:
 #   requested, approved, rejected, cancelled, cancellation_pending
 # Seeded category slugs (backend/migrations/017_absence_categories.sql):
-#   vacation, sick, training, special_leave, unpaid,
-#   general_absence, flextime_reduction
+#   vacation, sick, training, special_leave, unpaid, flextime_reduction
+# `general_absence` was seeded here too, but migration 038 drops it on any
+# install where it was never used (it is behaviourally identical to
+# special_leave) — a fresh database this script targets never has it.
 ABSENCE_SCRIPT: list[tuple[str, str, date, date, str, str | None]] = [
     # ── Tabea (team_lead) ────────────────────────────────────────────────
     # Winter break around her start date — already approved.
@@ -351,8 +353,9 @@ ABSENCE_SCRIPT: list[tuple[str, str, date, date, str, str | None]] = [
     # Sick on a day she was actually scheduled — she was filling in for Eva's
     # spring leave (2026-04-13..04-17), got sick on day 2 of that cover shift.
     ("assistant", "sick",      date(2026, 4, 14), date(2026, 4, 14),  "approved",  "Erkältung"),
-    # Future general_absence — exam day.
-    ("assistant", "general_absence", date(2026, 6, 22), date(2026, 6, 22), "requested", "Klausur an der Hochschule"),
+    # Future special_leave — exam day. (general_absence was behaviourally
+    # identical and migration 038 drops it from a fresh database.)
+    ("assistant", "special_leave", date(2026, 6, 22), date(2026, 6, 22), "requested", "Klausur an der Hochschule"),
 ]
 
 
@@ -698,12 +701,12 @@ def insert_users(cur) -> None:
             INSERT INTO users(email, password_hash, first_name, last_name, role,
                               weekly_hours, workdays_per_week, start_date, active,
                               must_change_password, allow_reopen_without_approval,
-                              dark_mode, overtime_start_balance_min, tracks_time,
+                              dark_mode, tracks_time,
                               created_at)
             VALUES (%s, %s, %s, %s, %s,
                     %s, %s, %s, TRUE,
                     %s, %s,
-                    FALSE, %s, %s,
+                    FALSE, %s,
                     %s)
             RETURNING id
             """,
@@ -718,12 +721,27 @@ def insert_users(cur) -> None:
                 persona.start_date,
                 persona.must_change_password,
                 persona.allow_reopen_without_approval,
-                persona.overtime_start_balance_min,
                 persona.tracks_time,
                 datetime.combine(persona.start_date, time(8, 0), tzinfo=timezone.utc),
             ),
         )
         persona.user_id = cur.fetchone()[0]
+        # The carry-in balance is a dated ledger booking, not a user column
+        # (migration 043) — mirrors what services::users::create books for a
+        # real account created through the admin UI.
+        if persona.overtime_start_balance_min != 0:
+            cur.execute(
+                """
+                INSERT INTO flextime_adjustments
+                    (user_id, effective_date, minutes, kind, created_by)
+                VALUES (%s, %s, %s, 'opening_balance', NULL)
+                """,
+                (
+                    persona.user_id,
+                    persona.start_date,
+                    persona.overtime_start_balance_min,
+                ),
+            )
 
 
 def persona_by_key(key: str) -> Persona:

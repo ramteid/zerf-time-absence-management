@@ -2095,7 +2095,11 @@ pub async fn requeue_export_for_start_date_change(
     .await;
 }
 
-/// Re-queue every past-month timesheet touched by an absence date range.
+/// Re-queue every past-month timesheet touched by a date range. Named for its
+/// original caller (absence periods); `services::flextime_adjustments` reuses
+/// it unchanged to re-queue from a booking's effective date through today,
+/// since a flextime adjustment changes archived closing balances the same way
+/// an absence changes archived hours.
 pub async fn requeue_export_for_absence_period(
     pool: &crate::db::DatabasePool,
     user_id: i64,

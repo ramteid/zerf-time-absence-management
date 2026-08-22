@@ -187,6 +187,20 @@ pub async fn create(
     .await?;
     transaction.commit().await?;
 
+    // A booking changes the closing balance of every archived month from its
+    // own date through today, so any of those months already exported (PDF
+    // uploaded to Nextcloud) is now stale and must be regenerated. A future
+    // effective_date re-queues nothing (start > end), matching "not applied
+    // yet" — see the module doc.
+    let today = crate::services::settings::app_today(&app_state.pool).await;
+    crate::services::reports::requeue_export_for_absence_period(
+        &app_state.pool,
+        target_user_id,
+        body.effective_date,
+        today,
+    )
+    .await;
+
     let created = app_state
         .db
         .flextime_adjustments
@@ -257,6 +271,17 @@ pub async fn reverse(
         AppError::Conflict("This entry has already been reversed.".into())
     })?;
     transaction.commit().await?;
+
+    // Same reasoning as `create`: the reversal changes archived months' closing
+    // balances too, dated the same as the entry it cancels.
+    let today = crate::services::settings::app_today(&app_state.pool).await;
+    crate::services::reports::requeue_export_for_absence_period(
+        &app_state.pool,
+        original.user_id,
+        original.effective_date,
+        today,
+    )
+    .await;
 
     let created = app_state
         .db
