@@ -6,7 +6,9 @@ Rust/Axum app, and the backup sidecar — the same services `start_local.sh`
 brings up).
 
 The bash script `run.sh` is the entry point: it boots the stack, waits for the
-API, runs the suite in `tests/`, verifies the real backup/restore mechanism
+API, verifies `scripts/seed_test_data.py` against that still-empty database
+(`seed-script-check.sh`), resets to a fresh empty database, runs the suite in
+`tests/`, verifies the real backup/restore mechanism
 (`backup-restore-check.sh`), then always tears the stack down.
 
 ## What the suite covers
@@ -37,6 +39,29 @@ drivers, the credential store written/read across files). Each role's
 authenticated session is saved with Playwright's `storageState` after its
 first login, so later spec files resume the session instead of re-implementing
 login.
+
+### Seed script check
+
+Before the Playwright suite runs, `seed-script-check.sh` exercises
+`scripts/seed_test_data.py` — the standalone seeder operators run against a
+freshly deployed production instance — against the just-booted, still-empty
+e2e database (it has to happen here: the script's safety guard refuses to run
+against any database that already has a user row, and the Playwright suite's
+first spec creates exactly that row via the real admin setup flow):
+
+1. Installs the seeder's Python dependencies into a throwaway venv.
+2. Runs `--dry-run` and confirms it rolled back (still zero users).
+3. Runs the real seed and confirms the row counts for users, time entries,
+   absences, and reopen requests match what the script's own persona/story
+   tables define.
+4. Confirms every seeded persona (admin, team lead, employee, assistant) can
+   actually sign in through the real HTTP API.
+5. Runs the seeder again and confirms it refuses — the safety guard against
+   double-seeding a real deployment actually guards.
+
+`run.sh` then tears the stack down (`down -v`) and boots it again so the
+Playwright suite starts from a genuinely empty database, exactly as it would
+against a fresh deployment.
 
 ### Backup/restore check
 

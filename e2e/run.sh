@@ -3,7 +3,9 @@
 #
 # Boots the full, production-like Docker stack (postgres with pg_tde, the
 # Rust/Axum app, and the backup sidecar — exactly as start_local.sh does) under
-# an isolated Compose project, waits until the API is reachable, runs the
+# an isolated Compose project, waits until the API is reachable, verifies
+# scripts/seed_test_data.py against that still-empty database
+# (e2e/seed-script-check.sh), resets to a fresh empty database, runs the
 # Playwright browser flow against it, then verifies the real backup/restore
 # mechanism (e2e/backup-restore-check.sh), then always tears the stack down.
 #
@@ -53,24 +55,38 @@ ZERF_POSTGRES_DB=zerf_e2e
 ZERF_POSTGRES_USER=zerf_e2e
 EOF
 
+wait_for_api() {
+  echo "Waiting for the API at $BASE_URL …"
+  local ready=0
+  for _ in $(seq 1 60); do
+    if curl -fsS "$BASE_URL/api/v1/settings/public" 2>/dev/null | grep -q ui_language; then
+      ready=1
+      break
+    fi
+    sleep 2
+  done
+  if [ "$ready" -ne 1 ]; then
+    echo "API did not become ready in time." >&2
+    compose logs --no-color
+    exit 1
+  fi
+  echo "API is ready."
+}
+
 echo "Starting the production-like stack…"
 compose up --build --wait --wait-timeout 420 -d
+wait_for_api
 
-echo "Waiting for the API at $BASE_URL …"
-ready=0
-for _ in $(seq 1 60); do
-  if curl -fsS "$BASE_URL/api/v1/settings/public" 2>/dev/null | grep -q ui_language; then
-    ready=1
-    break
-  fi
-  sleep 2
-done
-if [ "$ready" -ne 1 ]; then
-  echo "API did not become ready in time." >&2
-  compose logs --no-color
-  exit 1
-fi
-echo "API is ready."
+# scripts/seed_test_data.py refuses to run against a database that already
+# has a user row, so it must be exercised now -- while the freshly migrated
+# database is still empty -- rather than after the Playwright flow below has
+# completed the real admin setup.
+"$SCRIPT_DIR/seed-script-check.sh" zerf-e2e-postgres "$ENV_FILE" "$BASE_URL"
+
+echo "Resetting the stack to a fresh, empty database for the Playwright flow…"
+compose down -v --remove-orphans
+compose up --build --wait --wait-timeout 420 -d
+wait_for_api
 
 BASE_URL="$BASE_URL" npx --prefix "$SCRIPT_DIR" playwright test --config "$SCRIPT_DIR/playwright.config.js"
 
