@@ -11,7 +11,9 @@
     categoryById,
     computeDayBreakInfo,
     creditedEntryMinutes,
+    dailyTargetMinutes,
     entryCountsAsWork,
+    potentialWorkdaysPerWeek,
   } from "../../lib/domain/time.js";
   import { settings } from "../../stores.js";
 
@@ -28,19 +30,11 @@
 
   const dispatch = createEventDispatcher();
 
-  function potentialWorkdaysPerWeek(workdaysPerWeek) {
-    const configured = Number(workdaysPerWeek || 0);
-    if (!Number.isFinite(configured) || configured <= 0) return 0;
-    if (configured <= 5) return 5;
-    if (configured === 6) return 6;
-    return 7;
-  }
-
   $: configuredWorkdays = Number(currentUser?.workdays_per_week || 5);
   $: potentialWorkdays = potentialWorkdaysPerWeek(configuredWorkdays);
   $: isPotentialDay = dayIndex < potentialWorkdays;
   $: dailyTargetHours = isPotentialDay
-    ? (currentUser?.weekly_hours || 0) / potentialWorkdays
+    ? dailyTargetMinutes(currentUser?.weekly_hours, configuredWorkdays) / 60
     : 0;
   $: breakRules = buildBreakRules($settings);
   // Break requirement/coverage for this day (day-total based, ArbZG §4 "insgesamt";

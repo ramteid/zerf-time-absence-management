@@ -869,9 +869,14 @@ async fn a_debit_after_the_cutoff_guards_the_balance_floor() {
     app.cleanup().await;
 }
 
-/// A booking dated ahead of today is recorded now and takes effect on its day.
-/// Today's balance must not move yet — otherwise agreeing a payout for month
-/// end would silently spend the hours the moment it is written down.
+/// A booking dated ahead of today is recorded now and only takes effect once
+/// today actually reaches its date. Today's balance must not move yet —
+/// otherwise agreeing a payout for month end would silently spend the hours
+/// the moment it is written down. And querying *ahead* for the payout day
+/// itself, while it is still in the future, must not show it applied either
+/// — every balance view (dashboard, overtime rows, the flextime-account
+/// dialog, and the day ledger alike) has to agree that a future booking is
+/// invisible until its day arrives, not just until someone asks about it.
 #[tokio::test]
 async fn a_future_booking_only_takes_effect_on_its_own_date() {
     let app = TestApp::spawn().await;
@@ -927,10 +932,29 @@ async fn a_future_booking_only_takes_effect_on_its_own_date() {
     let days = flextime_days(&admin, user_id, &today_iso, &today_iso).await;
     assert_eq!(days[0]["cumulative_min"], 600);
 
-    // Reading the ledger up to the payout day shows it applied.
-    let days = flextime_days(&admin, user_id, &payout_iso, &payout_iso).await;
-    assert_eq!(days[0]["adjustment_min"], -300);
-    assert_eq!(days[0]["cumulative_min"], 300);
+    // Reading the ledger for a range that extends past the payout day — while
+    // that day is still in the future — must not show the booking applied on
+    // any row, including the payout day's own row. It is recorded (the entry
+    // exists, as asserted above), but it has not "taken effect" until today
+    // actually gets there: the ledger and the account dialog must agree.
+    let range_end_past_payout_iso = (payout_day + chrono::Duration::days(5))
+        .format("%Y-%m-%d")
+        .to_string();
+    let days = flextime_days(&admin, user_id, &today_iso, &range_end_past_payout_iso).await;
+    let payout_row = days
+        .iter()
+        .find(|d| d["date"] == payout_iso)
+        .unwrap_or_else(|| panic!("payout day missing from ledger: {days:?}"));
+    assert_eq!(
+        payout_row["adjustment_min"], 0,
+        "a future booking must not appear on its row until today reaches it: {payout_row}"
+    );
+    for day in &days {
+        assert_eq!(
+            day["cumulative_min"], 600,
+            "no row in a range that reaches past a future booking may already reflect it: {day}"
+        );
+    }
 
     // The monthly rows must agree with today's balance, not with the month the
     // payout happens to fall in. Grouping bookings by month without capping

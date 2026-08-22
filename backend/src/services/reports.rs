@@ -264,6 +264,38 @@ pub async fn build_range_with_user(
     to: NaiveDate,
     label: &str,
 ) -> AppResult<MonthReport> {
+    build_range_with_user_core(pool, user, from, to, label, None).await
+}
+
+/// Same as [`build_range_with_user`], but for every day whose ISO week is not
+/// in `approved_weeks`, the day is treated exactly like a future day: its
+/// target and actual are zeroed and its entries are excluded from every
+/// total. Used by the flextime/overtime balance pipelines, where a week still
+/// waiting for approval — wherever it falls in the user's history — must
+/// never look like a deficit (see [`ApprovedWeeks`]).
+async fn build_range_for_balance(
+    pool: &crate::db::DatabasePool,
+    user: &crate::middleware::auth::User,
+    from: NaiveDate,
+    to: NaiveDate,
+    label: &str,
+    approved_weeks: &ApprovedWeeks,
+) -> AppResult<MonthReport> {
+    build_range_with_user_core(pool, user, from, to, label, Some(approved_weeks)).await
+}
+
+/// Shared implementation behind [`build_range_with_user`] and
+/// [`build_range_for_balance`]. `approved_weeks` is `None` for the plain
+/// monthly report (every day counts) and `Some` for the balance pipelines
+/// (only days in an approved week count).
+async fn build_range_with_user_core(
+    pool: &crate::db::DatabasePool,
+    user: &crate::middleware::auth::User,
+    from: NaiveDate,
+    to: NaiveDate,
+    label: &str,
+    approved_weeks: Option<&ApprovedWeeks>,
+) -> AppResult<MonthReport> {
     let user_id = user.id;
     // Role is the canonical source for fixed-target behavior. Assistants never
     // have target minutes, even if legacy/imported data contains non-zero hours.
@@ -333,6 +365,11 @@ pub async fn build_range_with_user(
         let absence_name = active_absence.map(|(_, _, _, _, name)| name.clone());
         let before_start = current_date < user.start_date;
         let after_today = current_date > today;
+        // Only set for the balance pipelines: a day whose week is not fully
+        // approved contributes nothing, exactly like a future day.
+        let week_not_approved = approved_weeks
+            .map(|weeks| !weeks.counts(current_date))
+            .unwrap_or(false);
 
         // A day has a work target when it is a weekday within the user's contract,
         // not covered by a holiday or absence, and not in the future.
@@ -344,7 +381,7 @@ pub async fn build_range_with_user(
             && holiday.is_none()
             && !absence_blocks_target
             && !before_start;
-        let target = if is_workday && !after_today {
+        let target = if is_workday && !after_today && !week_not_approved {
             target_per_day_min
         } else {
             0
@@ -358,8 +395,8 @@ pub async fn build_range_with_user(
         // Times for approved and submitted crediting entries, used for block-aware break deduction.
         let mut approved_times: Vec<(NaiveTime, NaiveTime)> = vec![];
         let mut submitted_times: Vec<(NaiveTime, NaiveTime)> = vec![];
-        // Skip entry processing entirely for inactive/future days.
-        if !before_start && !after_today {
+        // Skip entry processing entirely for inactive/future/unapproved-week days.
+        if !before_start && !after_today && !week_not_approved {
             for (
                 start_time,
                 end_time,
@@ -485,14 +522,35 @@ pub async fn build_flextime_for_user(
 
     let reports_db = crate::repository::ReportDb::new(pool.clone());
 
-    // Fetch the cutoff date (end of last fully approved week).
-    let cutoff_date = flex_balance_cutoff_date(
+    // Every week whose entries are all approved (end of last such week is the
+    // cutoff). A day only ever contributes to the balance when its own week
+    // is in this set — see `ApprovedWeeks`.
+    let approved = approved_weeks(
         pool,
         target_user_id,
         user.start_date,
         user.workdays_per_week,
     )
     .await?;
+
+    // Adjustments are authoritative the moment their effective date arrives,
+    // but not before: a booking dated in the future must not already move a
+    // balance rendered "as of" today. `effective_through` bounds every
+    // adjustment query below. It's `today.max(user.start_date)`, not plain
+    // `today`: for a user whose contract starts in the future, an opening
+    // balance is routinely booked on that future start date ahead of time
+    // (`services::users::create` does exactly this), and it must show up the
+    // moment the range reaches that date — plain `today` would hide it until
+    // the person's actual first day, weeks after it was already booked. It is
+    // deliberately `start_date`, not `cutoff_date` (which sits one day
+    // *before* start_date in this same situation, having no approved week to
+    // point to yet): capping at the cutoff would exclude the start date's own
+    // opening balance, the one thing this exists to show.
+    // `validate_flextime_balance`'s separate `sum_from(cutoff + 1)` covers
+    // everything after the cutoff up to (and beyond) today, so nothing here
+    // needs its own upper-unbounded case.
+    let today = crate::services::settings::app_today(pool).await;
+    let effective_through = today.max(user.start_date);
 
     let adjustments_db = crate::repository::FlextimeAdjustmentDb::new(pool.clone());
 
@@ -503,9 +561,10 @@ pub async fn build_flextime_for_user(
     if from > user.start_date {
         // Cap the *work* seed at the cutoff date so contributions beyond it
         // cannot leak into the seeded cumulative. Adjustments are deliberately
-        // not capped: an admin booking is an authoritative fact about the
-        // account, not something waiting for a week to be approved.
-        let work_seed_end = (from - Duration::days(1)).min(cutoff_date);
+        // not capped at the cutoff (only at today, above): an admin booking is
+        // an authoritative fact about the account, not something waiting for a
+        // week to be approved.
+        let work_seed_end = (from - Duration::days(1)).min(approved.cutoff_date);
         let month_start = NaiveDate::from_ymd_opt(work_seed_end.year(), work_seed_end.month(), 1)
             .ok_or_else(|| AppError::BadRequest("date".into()))?;
 
@@ -515,11 +574,10 @@ pub async fn build_flextime_for_user(
             let previous_month_end = month_start - Duration::days(1);
             cumulative_at_month_end(
                 pool,
-                target_user_id,
+                user,
                 previous_month_end.year(),
                 previous_month_end.month(),
-                user.start_date,
-                cutoff_date,
+                &approved,
             )
             .await?
         };
@@ -527,29 +585,34 @@ pub async fn build_flextime_for_user(
         let seed_from = std::cmp::max(month_start, user.start_date);
         if seed_from <= work_seed_end {
             let month_seed_report =
-                build_range_with_user(pool, user, seed_from, work_seed_end, "seed").await?;
+                build_range_for_balance(pool, user, seed_from, work_seed_end, "seed", &approved)
+                    .await?;
             cumulative_min = cumulative_before_month + month_seed_report.diff_min;
         } else {
             cumulative_min = cumulative_before_month;
         }
         // `cumulative_before_month` already covers adjustments up to the end of
         // the previous month, so only the partial month up to (but excluding)
-        // `from` is still missing.
+        // `from` is still missing. Capped at `effective_through`: a booking
+        // dated later in that gap has not taken effect yet.
         cumulative_min += adjustments_db
             .sum_in_range(
                 target_user_id,
                 user.start_date,
                 seed_from,
-                from - Duration::days(1),
+                (from - Duration::days(1)).min(effective_through),
             )
             .await?;
     }
 
     // Adjustments landing inside the rendered range, keyed by the day they take
     // effect on. Ones dated before the contract start are reported on the start
-    // date itself, which is where the ledger begins.
+    // date itself, which is where the ledger begins. Capped at
+    // `effective_through` so a future-dated booking does not already count in
+    // a range that reaches past it (this endpoint's `to` is caller-supplied
+    // and not itself clamped) — every other balance view caps the same way.
     let adjustment_by_day: HashMap<NaiveDate, i64> = adjustments_db
-        .totals_by_date(target_user_id, user.start_date, from, to)
+        .totals_by_date(target_user_id, user.start_date, from, to.min(effective_through))
         .await?
         .into_iter()
         .collect();
@@ -637,9 +700,11 @@ pub async fn build_flextime_for_user(
         let holiday = holiday_map.get(&current_date).cloned();
         let absence = absence_by_day.get(&current_date).cloned();
         let before_start = current_date < user.start_date;
-        // The flextime balance is defined as "up to and including the cutoff date"
-        // (end of last fully approved week). Days beyond the cutoff contribute zero.
-        let after_cutoff = current_date > cutoff_date;
+        // The flextime balance only counts a day whose own week is fully
+        // approved (see `ApprovedWeeks`) — not just "on or before the cutoff
+        // date": a rejected or still-open week contributes nothing even when
+        // an entirely different, later week has already been approved.
+        let week_not_approved = !approved.counts(current_date);
         let absence_blocks_target = absence
             .as_deref()
             .map(|kind| absence_removes_target(&category_flags, kind))
@@ -648,9 +713,9 @@ pub async fn build_flextime_for_user(
             && holiday.is_none()
             && !absence_blocks_target
             && !before_start
-            && !after_cutoff;
+            && !week_not_approved;
         let target = if is_workday { target_per_day_min } else { 0 };
-        let actual = if before_start || after_cutoff {
+        let actual = if before_start || week_not_approved {
             0
         } else {
             approved_crediting_minutes_by_day
@@ -680,7 +745,7 @@ pub async fn build_flextime_for_user(
         });
         current_date += Duration::days(1);
     }
-    Ok((flextime_days, cutoff_date))
+    Ok((flextime_days, approved.cutoff_date))
 }
 
 pub async fn build_range(
@@ -836,25 +901,62 @@ fn week_is_fully_covered(
     covered_days >= required_days
 }
 
-/// Determine the cutoff date for flextime balance calculation.
+/// The set of weeks (identified by their Monday) that are "fully approved" —
+/// see [`approved_weeks`] for the definition — plus the cutoff date derived
+/// from them.
 ///
-/// The flextime balance is calculated up to and including the last Sunday of the
-/// last fully approved week. A week is fully approved when:
+/// The flextime balance counts a day only when its own week is in this set.
+/// This is deliberately *not* "every day up to a single cutoff date": a week
+/// that is rejected or still awaiting approval contributes nothing, whether
+/// it falls before or after some other, later week that did get approved.
+/// Without this, a rejected week sitting behind a later approved one would
+/// look like a real deficit purely because the scan that finds the cutoff
+/// date jumps straight to the most recent approved week and stops there.
+pub struct ApprovedWeeks {
+    mondays: std::collections::HashSet<NaiveDate>,
+    /// Sunday of the most recent approved week, or `user_start_date - 1` when
+    /// none exists yet. This is the same value historically returned by
+    /// `flex_balance_cutoff_date` — every "As of &lt;date&gt;" display keeps
+    /// using it unchanged.
+    pub cutoff_date: NaiveDate,
+}
+
+impl ApprovedWeeks {
+    /// True when `date`'s ISO week is fully approved and therefore counts
+    /// toward the flextime balance.
+    fn counts(&self, date: NaiveDate) -> bool {
+        self.mondays.contains(&crate::time_calc::week_monday(date))
+    }
+}
+
+/// Determine every fully approved week in the user's history, and the cutoff
+/// date derived from them (the Sunday of the most recent one).
+///
+/// A week is fully approved when:
 /// 1. Every required workday has either an approved entry, is a holiday, covered
 ///    by an approved absence, or is before the user's start date.
 /// 2. NO day in the week has any unapproved entry (draft, submitted, rejected).
 ///
-/// If no such week exists (e.g., a new employee, first week still being worked),
-/// returns `user_start_date - 1` (nothing counts yet).
-pub async fn flex_balance_cutoff_date(
+/// Unlike a plain "everything up to this date counts" cutoff, each week is
+/// judged independently: a rejected or still-open week never gets folded into
+/// the balance just because a later week was approved.
+///
+/// If no week is ever fully approved (e.g. a new employee, first week still
+/// being worked), `cutoff_date` is `user_start_date - 1` (nothing counts yet).
+pub async fn approved_weeks(
     pool: &crate::db::DatabasePool,
     user_id: i64,
     user_start_date: NaiveDate,
     workdays_per_week: i16,
-) -> AppResult<NaiveDate> {
+) -> AppResult<ApprovedWeeks> {
+    let no_history = ApprovedWeeks {
+        mondays: std::collections::HashSet::new(),
+        cutoff_date: user_start_date - Duration::days(1),
+    };
+
     // Assistant role: no flextime account.
     if workdays_per_week == 0 {
-        return Ok(user_start_date - Duration::days(1));
+        return Ok(no_history);
     }
 
     let today = crate::services::settings::app_today(pool).await;
@@ -867,7 +969,7 @@ pub async fn flex_balance_cutoff_date(
     };
 
     if last_elapsed_week_monday < user_start_date {
-        return Ok(user_start_date - Duration::days(1));
+        return Ok(no_history);
     }
 
     // Load all data for the entire history once.
@@ -889,39 +991,55 @@ pub async fn flex_balance_cutoff_date(
         .unapproved_entry_dates_in_range(user_id, history_from, history_to)
         .await?;
 
-    // Scan backwards from the last elapsed week to find the first (most recent)
-    // week that is fully approved.
-    let mut current_monday = last_elapsed_week_monday;
-    loop {
-        if current_monday < user_start_date {
-            break;
-        }
-
-        // Check if this week has any unapproved entries at all.
+    // Walk every elapsed week from the user's first week through the most
+    // recent one, deciding approval independently for each. (`history_from`
+    // may land a few days before `user_start_date` when the start date isn't
+    // a Monday; `week_is_fully_covered` already treats days before the start
+    // date as trivially covered, so that partial first week is judged
+    // correctly too.)
+    let mut mondays = std::collections::HashSet::new();
+    let mut cutoff_date = user_start_date - Duration::days(1);
+    let mut current_monday = history_from;
+    while current_monday <= last_elapsed_week_monday {
         let week_has_unapproved = (0..7i64).any(|d| {
             let day = current_monday + Duration::days(d);
             unapproved_dates.contains(&day)
         });
-        if !week_has_unapproved {
-            // Check if all required workdays are covered by approved entries, holidays, or absences.
-            if week_is_fully_covered(
+        if !week_has_unapproved
+            && week_is_fully_covered(
                 current_monday,
                 &holiday_set,
                 &absent_days,
                 &approved_dates,
                 user_start_date,
                 workdays_per_week,
-            ) {
-                // Found the cutoff: return the Sunday of this week.
-                return Ok(current_monday + Duration::days(6));
+            )
+        {
+            mondays.insert(current_monday);
+            let week_sunday = current_monday + Duration::days(6);
+            if week_sunday > cutoff_date {
+                cutoff_date = week_sunday;
             }
         }
-
-        current_monday -= Duration::days(7);
+        current_monday += Duration::days(7);
     }
 
-    // No fully approved week found.
-    Ok(user_start_date - Duration::days(1))
+    Ok(ApprovedWeeks { mondays, cutoff_date })
+}
+
+/// Determine the cutoff date for flextime balance calculation: the Sunday of
+/// the last fully approved week, or `user_start_date - 1` when none exists.
+/// Thin wrapper around [`approved_weeks`] for callers that only need the
+/// single date, not the full per-week detail.
+pub async fn flex_balance_cutoff_date(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    user_start_date: NaiveDate,
+    workdays_per_week: i16,
+) -> AppResult<NaiveDate> {
+    Ok(approved_weeks(pool, user_id, user_start_date, workdays_per_week)
+        .await?
+        .cutoff_date)
 }
 
 /// Returns true when every week in `complete_week_mondays` is considered submitted.
@@ -1443,42 +1561,39 @@ pub async fn build_overtime_rows_for_year(
     target_user_id: i64,
     year: i32,
 ) -> AppResult<(Vec<MonthRow>, NaiveDate)> {
-    let user = crate::repository::UserDb::new(pool.clone())
+    let repo_user = crate::repository::UserDb::new(pool.clone())
         .find_by_id(target_user_id)
         .await?
         .ok_or(AppError::NotFound)?;
     // Assistant role is the canonical source for "no flextime account" behavior.
     // They get no rows and no meaningful cutoff, so skip the cutoff scan too.
-    if is_assistant_role(&user.role) {
-        return Ok((vec![], user.start_date - Duration::days(1)));
+    if is_assistant_role(&repo_user.role) {
+        return Ok((vec![], repo_user.start_date - Duration::days(1)));
     }
-    let cutoff_date = flex_balance_cutoff_date(
-        pool,
-        target_user_id,
-        user.start_date,
-        user.workdays_per_week,
-    )
-    .await?;
-    let rows = build_overtime_rows_with_cutoff(pool, target_user_id, year, cutoff_date).await?;
-    Ok((rows, cutoff_date))
+    let user = crate::services::users::repo_user_to_auth_user(repo_user);
+    let approved =
+        approved_weeks(pool, target_user_id, user.start_date, user.workdays_per_week).await?;
+    let rows = build_overtime_rows_with_cutoff(pool, &user, year, &approved).await?;
+    Ok((rows, approved.cutoff_date))
 }
 
-/// Builds a single month's balance contribution, capped at `cutoff_date`.
-///
-/// Days after the cutoff contribute nothing at all (neither target nor actual),
-/// so a week that has not been approved yet can never look like a deficit.
+/// Builds a single month's balance contribution. Every day counts only when
+/// its own week is in `approved` (see `ApprovedWeeks`); the month is also
+/// capped at the cutoff date purely to bound the query range — no week after
+/// the cutoff can ever be approved, since the cutoff *is* the Sunday of the
+/// most recent approved week.
 async fn month_contribution_up_to_cutoff(
     pool: &crate::db::DatabasePool,
-    target_user_id: i64,
+    user: &crate::middleware::auth::User,
     month_label: &str,
-    cutoff_date: NaiveDate,
+    approved: &ApprovedWeeks,
 ) -> AppResult<MonthReport> {
     let (month_start, month_end) = month_bounds(month_label)?;
-    let capped_end = month_end.min(cutoff_date);
+    let capped_end = month_end.min(approved.cutoff_date);
     if capped_end < month_start {
         // The whole month lies after the cutoff: no balance contribution yet.
         return Ok(MonthReport {
-            user_id: target_user_id,
+            user_id: user.id,
             month: month_label.to_string(),
             days: vec![],
             target_min: 0,
@@ -1492,18 +1607,20 @@ async fn month_contribution_up_to_cutoff(
             current_week_status: None,
         });
     }
-    build_range(pool, target_user_id, month_start, capped_end, month_label).await
+    build_range_for_balance(pool, user, month_start, capped_end, month_label, approved).await
 }
 
-/// Same as [`build_overtime_rows_for_year`] but with an already-resolved cutoff,
-/// so callers that computed it once (the flextime ledger, the absence-balance
-/// guard) do not pay for the cutoff scan again.
+/// Same as [`build_overtime_rows_for_year`] but with an already-resolved
+/// [`ApprovedWeeks`], so callers that computed it once (the flextime ledger,
+/// the absence-balance guard) do not pay for the underlying week scan again.
 async fn build_overtime_rows_with_cutoff(
     pool: &crate::db::DatabasePool,
-    target_user_id: i64,
+    user: &crate::middleware::auth::User,
     year: i32,
-    cutoff_date: NaiveDate,
+    approved: &ApprovedWeeks,
 ) -> AppResult<Vec<MonthRow>> {
+    let target_user_id = user.id;
+    let user_start_date = user.start_date;
     let today = crate::services::settings::app_today(pool).await;
     let current_year = today.year();
     // Cap the loop so future months (with zero actuals but full targets) do not
@@ -1518,9 +1635,6 @@ async fn build_overtime_rows_with_cutoff(
         // Future year - nothing has been worked yet.
         return Ok(vec![]);
     };
-
-    let reports_db = crate::repository::ReportDb::new(pool.clone());
-    let user_start_date = reports_db.user_start_date(target_user_id).await?;
 
     // Admin bookings, bucketed by the month they take effect in. Fetched once
     // for the user's whole history because the loops below walk every month
@@ -1556,8 +1670,7 @@ async fn build_overtime_rows_with_cutoff(
         for prior_month in prior_year_first_month..=12 {
             let month_label = format!("{:04}-{:02}", prior_year, prior_month);
             let month_report =
-                month_contribution_up_to_cutoff(pool, target_user_id, &month_label, cutoff_date)
-                    .await?;
+                month_contribution_up_to_cutoff(pool, user, &month_label, approved).await?;
             cumulative_min += month_report.diff_min
                 + adjustment_by_month.get(&month_label).copied().unwrap_or(0);
         }
@@ -1566,8 +1679,7 @@ async fn build_overtime_rows_with_cutoff(
     for month_num in first_month_in_year..=max_month {
         let month_label = format!("{:04}-{:02}", year, month_num);
         let month_report =
-            month_contribution_up_to_cutoff(pool, target_user_id, &month_label, cutoff_date)
-                .await?;
+            month_contribution_up_to_cutoff(pool, user, &month_label, approved).await?;
         let adjustment_min = adjustment_by_month.get(&month_label).copied().unwrap_or(0);
         cumulative_min += month_report.diff_min + adjustment_min;
         month_rows.push(MonthRow {
@@ -1584,17 +1696,19 @@ async fn build_overtime_rows_with_cutoff(
 }
 
 /// Cumulative flextime balance at the end of `year-month`. Worked time only
-/// counts through `cutoff_date` (the end of the last fully approved week);
-/// admin bookings count on their effective date. Callers pass the cutoff in
-/// because they have already resolved it for the same user.
+/// counts through `approved.cutoff_date` (the end of the last fully approved
+/// week), and only for days whose own week is approved; admin bookings count
+/// on their effective date. Callers pass `approved` in because they have
+/// already resolved it for the same user.
 pub async fn cumulative_at_month_end(
     pool: &crate::db::DatabasePool,
-    target_user_id: i64,
+    user: &crate::middleware::auth::User,
     year: i32,
     month: u32,
-    user_start_date: NaiveDate,
-    cutoff_date: NaiveDate,
+    approved: &ApprovedWeeks,
 ) -> AppResult<i64> {
+    let target_user_id = user.id;
+    let user_start_date = user.start_date;
     let month_end = month_end_date(year, month)?;
     let adjustments_db = crate::repository::FlextimeAdjustmentDb::new(pool.clone());
     // The balance is always "worked contributions so far + admin bookings so
@@ -1615,21 +1729,20 @@ pub async fn cumulative_at_month_end(
         return Ok(adjustments_through_month_end);
     }
     // Nothing has been approved yet, so no worked time counts.
-    if cutoff_date < user_start_date {
+    if approved.cutoff_date < user_start_date {
         return Ok(adjustments_through_month_end);
     }
 
-    let cutoff_year = cutoff_date.year();
+    let cutoff_year = approved.cutoff_date.year();
     // Beyond the cutoff year there is nothing left to accumulate, so the last
     // row of the cutoff's own year already holds the final worked balance.
     let rows =
-        build_overtime_rows_with_cutoff(pool, target_user_id, year.min(cutoff_year), cutoff_date)
-            .await?;
+        build_overtime_rows_with_cutoff(pool, user, year.min(cutoff_year), approved).await?;
     let Some(last_row) = rows.last() else {
         return Ok(adjustments_through_month_end);
     };
 
-    if year > cutoff_year || (year == cutoff_year && month > cutoff_date.month()) {
+    if year > cutoff_year || (year == cutoff_year && month > approved.cutoff_date.month()) {
         // The requested month lies past the last row. Worked time cannot grow
         // any further, so take that row's balance and swap its bookings for
         // the ones in effect at the requested month end.

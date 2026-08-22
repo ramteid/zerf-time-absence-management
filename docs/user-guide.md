@@ -480,12 +480,14 @@ Flextime (positive or negative balance) is calculated as:
 
 Only **crediting entries** count as actual work hours in this calculation. Non-crediting entries are recorded and approved like all others, but they do not contribute to your flextime.
 
-**The flextime balance runs up to the end of your last fully approved week.**
-A week counts once every workday in it is either approved, a public holiday, or
+**Only fully approved weeks count toward the flextime balance.** A week
+counts once every workday in it is either approved, a public holiday, or
 covered by an approved absence — and nothing in that week is still waiting for
-approval. Everything after that date is left out of the balance: those days add
-neither hours nor targets, so a week you have not booked or submitted yet can
-never pull your balance down.
+approval or was rejected. A week that does not meet this bar adds neither
+hours nor targets, so it can never pull your balance down or up — whether it
+is the most recent week, or an older one still waiting to be corrected and
+resubmitted while a later week has already been approved. The balance is
+shown "as of" the most recent week that does count; see below.
 
 Wherever a balance is shown (dashboard, reports, team overview, balance chart,
 CSV and PDF exports) the date it refers to is shown right next to it, as
@@ -512,11 +514,21 @@ Daily target hours are `0` when:
 
 Absences from categories with cost type `flextime` (e.g. flextime reduction) are the exception: they follow the absence workflow and block normal time entry creation on those days, but the daily work target is not removed. This lets the days reduce your flextime balance intentionally. To prevent the balance from going below the configured minimum (default 0 minutes; admin can override via the `flextime_min_balance_min` setting), the balance is checked TWICE: when you submit the request AND when the approver approves it. The check accounts for any other already-pending/approved flextime-cost absences you have so multiple requests that each individually fit cannot together breach the floor, and the approver's re-check catches the case where you spent balance between request and approval.
 
-Otherwise, target is calculated as:
+Otherwise, your weekly hours are spread evenly across a fixed pool of
+weekdays, and that same daily target applies on every one of them —
+regardless of how many days you are actually contracted to work:
 
-**Daily target = (Weekly hours ÷ Workdays per week) × (1 day)**
+- **1 to 5 days a week:** the pool is Monday–Friday, so **daily target =
+  weekly hours ÷ 5**. You choose freely which of the five weekdays you work.
+- **6 days a week:** the pool is Monday–Saturday, so **daily target =
+  weekly hours ÷ 6**.
+- **7 days a week:** every day counts, so **daily target = weekly hours ÷ 7**.
 
-Example: If you work 40 hours per week over 5 days, your daily target is 8 hours.
+Example: if you work 40 hours per week over 5 days, your daily target is
+8 hours. If you work 24 hours per week over 3 days, your daily target is
+still 4.8 hours on every weekday (24 ÷ 5) — you simply stop logging time once
+you have worked your 3 days, and a public holiday removes a fifth of your
+weekly target, not a third of it.
 
 ### What counts toward flextime actuals
 

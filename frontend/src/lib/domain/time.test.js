@@ -154,6 +154,55 @@ describe("time domain helpers", () => {
     ).toBe(3 * 8 * 60);
   });
 
+  it("spreads a part-time weekly target evenly across the 5-weekday pool, not the contracted day count", () => {
+    // 24h over 3 days/week: mirrors the backend `target_minutes_per_day`
+    // (weekly_hours / potential_workdays_per_week, always 5 for 1-5 day
+    // contracts) rather than dividing by the contracted 3 days.
+    const currentUser = { weekly_hours: 24, workdays_per_week: 3 };
+    const perDayMinutes = 288; // 24h / 5 * 60
+
+    // Mid-week: only Mon-Wed are eligible (Thu/Fri are still in the future).
+    const midWeek = buildWeekDays(new Date(2026, 0, 5), [], [], []);
+    expect(
+      weekTargetMinutes({
+        weekdays: midWeek.weekdays,
+        weekendDays: midWeek.weekendDays,
+        currentUser,
+        todayIso: "2026-01-07",
+      }),
+    ).toBe(3 * perDayMinutes);
+
+    // Fully elapsed week, no holidays/absences: all 5 weekdays are eligible,
+    // and the total equals the full weekly hours (24h = 1440 min).
+    const fullWeek = buildWeekDays(new Date(2026, 0, 5), [], [], []);
+    expect(
+      weekTargetMinutes({
+        weekdays: fullWeek.weekdays,
+        weekendDays: fullWeek.weekendDays,
+        currentUser,
+        todayIso: "2026-01-31",
+      }),
+    ).toBe(5 * perDayMinutes);
+    expect(5 * perDayMinutes).toBe(24 * 60);
+
+    // A public holiday removes one weekday's target, same as any 5-day
+    // contract — not one third of the week's target.
+    const withHoliday = buildWeekDays(
+      new Date(2026, 0, 5),
+      [],
+      [],
+      [{ holiday_date: "2026-01-07", name: "Holiday" }],
+    );
+    expect(
+      weekTargetMinutes({
+        weekdays: withHoliday.weekdays,
+        weekendDays: withHoliday.weekendDays,
+        currentUser,
+        todayIso: "2026-01-31",
+      }),
+    ).toBe(4 * perDayMinutes);
+  });
+
   it("keeps partial status for mixed draft and non-draft weeks", () => {
     const entries = [{ status: "draft" }, { status: "approved" }];
     expect(

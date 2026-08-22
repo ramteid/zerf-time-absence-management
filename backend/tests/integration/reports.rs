@@ -2103,3 +2103,135 @@ async fn combined_timesheet_pdf_orders_sections_by_role_then_name() {
 
     app.cleanup().await;
 }
+
+/// Creates and submits 5 weekday entries (Mon-Fri) starting at `monday`, each
+/// exactly `minutes` long from 08:00, then decides the whole batch as the
+/// given lead — approved or rejected. Local to the test below since it needs
+/// to book a whole week and immediately decide it, which none of the shared
+/// helpers do in one step.
+async fn book_and_decide_week(
+    emp: &TestClient,
+    lead: &TestClient,
+    monday: NaiveDate,
+    cat_id: i64,
+    minutes: i64,
+    approve: bool,
+) {
+    let end_time = (chrono::NaiveTime::from_hms_opt(8, 0, 0).unwrap()
+        + chrono::Duration::minutes(minutes))
+    .format("%H:%M")
+    .to_string();
+
+    let mut entry_ids = Vec::new();
+    for offset in 0..5i64 {
+        let day = (monday + chrono::Duration::days(offset))
+            .format("%Y-%m-%d")
+            .to_string();
+        let (st, body) = emp
+            .post(
+                "/api/v1/time-entries",
+                &json!({
+                    "entry_date": day,
+                    "start_time": "08:00",
+                    "end_time": end_time,
+                    "category_id": cat_id,
+                    "comment": "approved-weeks-gate"
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create entry: {body}");
+        entry_ids.push(id(&body));
+    }
+    let (st, body) = emp
+        .post("/api/v1/time-entries/submit", &json!({"ids": entry_ids}))
+        .await;
+    assert_eq!(st, StatusCode::OK, "submit week: {body}");
+
+    let (path, payload) = if approve {
+        (
+            "/api/v1/time-entries/batch-approve",
+            json!({"ids": entry_ids}),
+        )
+    } else {
+        (
+            "/api/v1/time-entries/batch-reject",
+            json!({"ids": entry_ids, "reason": "needs correction"}),
+        )
+    };
+    let (st, body) = lead.post(path, &payload).await;
+    assert_eq!(st, StatusCode::OK, "decide week: {body}");
+}
+
+/// A rejected week sitting behind the flextime cutoff must never become a
+/// phantom deficit just because a *later* week got approved.
+///
+/// `flex_balance_cutoff_date` finds the cutoff by jumping straight to the
+/// most recent fully approved week; before the fix, every balance pipeline
+/// then treated that single date as a plain "count everything up to here"
+/// threshold, so a rejected week sitting *before* the cutoff still charged
+/// its full target against zero approved hours. This regression-guards the
+/// fix: only weeks that are themselves approved contribute anything at all,
+/// wherever they fall relative to the cutoff.
+#[tokio::test]
+async fn a_rejected_week_behind_the_cutoff_does_not_pull_the_balance_down() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, lead_pw, emp_id, emp_pw, _default_monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "approved-weeks-gate").await;
+    let lead = login_change_pw(&app, "lead-approved-weeks-gate@example.com", &lead_pw).await;
+    let emp = login_change_pw(&app, "emp-approved-weeks-gate@example.com", &emp_pw).await;
+
+    // Three consecutive, already-elapsed weeks, chosen far enough back to
+    // stay clear of the holidays seeded around the reference date itself
+    // (`TestApp` seeds holidays only for the reference year and the next —
+    // see `tests/common/app.rs` — so a date safely inside the *prior* year
+    // is guaranteed holiday-free rather than merely holiday-free today).
+    // Anchoring the user's start date to week A keeps the balance free of
+    // any history from bootstrap's default 2024-01-01 start date. No week
+    // after week C is ever touched, so it remains the most recently
+    // *approved* week regardless of how many untouched weeks sit between it
+    // and today — those never enter the approved set at all.
+    let week_a = next_monday(-49);
+    let week_b = next_monday(-42);
+    let week_c = next_monday(-35);
+    sqlx::query("UPDATE users SET start_date=$1 WHERE id=$2")
+        .bind(week_a)
+        .bind(emp_id)
+        .execute(&app.state.pool)
+        .await
+        .expect("anchor start date to the first of the three test weeks");
+
+    let per_day_target = per_day_target_minutes(39); // bootstrap's default weekly_hours
+
+    // Week A: fully approved, booked exactly at target -> nets to 0.
+    book_and_decide_week(&emp, &lead, week_a, cat_id, per_day_target, true).await;
+    // Week B: booked exactly at target too, but REJECTED. A week that never
+    // got approved must contribute nothing — not a full week's deficit.
+    book_and_decide_week(&emp, &lead, week_b, cat_id, per_day_target, false).await;
+    // Week C: the most recently *approved* week (nothing later is ever
+    // touched), also fully approved at target -> nets to 0. Its Sunday
+    // becomes the balance cutoff.
+    book_and_decide_week(&emp, &lead, week_c, cat_id, per_day_target, true).await;
+
+    let cutoff_iso = (week_c + chrono::Duration::days(6))
+        .format("%Y-%m-%d")
+        .to_string();
+    let (st, body) = emp
+        .get(&format!(
+            "/api/v1/reports/flextime?from={cutoff_iso}&to={cutoff_iso}"
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK, "flextime as of the cutoff: {body}");
+    assert_eq!(
+        body["balance_as_of"], cutoff_iso,
+        "the cutoff must still land on week C's Sunday, unaffected by week B's rejection: {body}"
+    );
+    let days = body["days"].as_array().unwrap();
+    assert_eq!(
+        days[0]["cumulative_min"], 0,
+        "week A and week C both net to zero; the rejected week B in between \
+         must contribute nothing at all, not a full week's deficit: {body}"
+    );
+
+    app.cleanup().await;
+}

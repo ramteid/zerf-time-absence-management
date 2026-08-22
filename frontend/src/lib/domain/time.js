@@ -360,12 +360,32 @@ export function buildWeekDays(weekFrom, entries, absences, holidays) {
   };
 }
 
-function potentialWorkdaysPerWeek(workdaysPerWeek) {
+/**
+ * The pool of weekdays a contract can place its working days on.
+ * Mirrors the backend `time_calc::potential_workdays_per_week`: a 1-5 day
+ * contract is not pinned to fixed weekdays, so its pool is all five weekdays.
+ */
+export function potentialWorkdaysPerWeek(workdaysPerWeek) {
   const configured = Number(workdaysPerWeek || 0);
   if (!Number.isFinite(configured) || configured <= 0) return 0;
   if (configured <= 5) return 5;
   if (configured === 6) return 6;
   return 7;
+}
+
+/**
+ * The target in minutes a single eligible day carries.
+ * Mirrors the backend `services::reports::target_minutes_per_day`: the weekly
+ * hours are spread evenly across the whole potential-workday pool, not across
+ * the contracted number of days. Someone on 24h over 3 days therefore carries
+ * 288 min on each of Mon-Fri and picks which of them they actually fill.
+ */
+export function dailyTargetMinutes(weeklyHours, workdaysPerWeek) {
+  const poolDays = potentialWorkdaysPerWeek(workdaysPerWeek);
+  if (poolDays === 0) return 0;
+  const hours = Number(weeklyHours || 0);
+  if (!Number.isFinite(hours) || hours <= 0) return 0;
+  return Math.round((hours / poolDays) * 60);
 }
 
 function isPotentialDay(dayName, workdaysPerWeek) {
@@ -382,16 +402,13 @@ export function weekTargetMinutes({
 }) {
   const weeklyHours = Number(currentUser?.weekly_hours || 0);
   const workdaysPerWeek = Number(currentUser?.workdays_per_week || 5);
-  const potentialDays = potentialWorkdaysPerWeek(workdaysPerWeek);
-  if (potentialDays <= 0 || workdaysPerWeek <= 0) return 0;
-  // Daily target is weekly_hours / workdays_per_week for 1-5 day schedules
-  // (so 8h for 1-day at 8h weekly), not weekly / potential (which would be 1.6h).
-  const divisor =
-    workdaysPerWeek >= 1 && workdaysPerWeek <= 5
-      ? workdaysPerWeek
-      : potentialDays;
-  const perDayMinutes = (weeklyHours / divisor) * 60;
-  if (!Number.isFinite(perDayMinutes) || perDayMinutes <= 0) return 0;
+  if (workdaysPerWeek <= 0) return 0;
+  // Mirrors the backend `target_minutes_per_day`: weekly hours are spread
+  // evenly across the whole potential-workday pool (always 5 for 1-5 day
+  // contracts, not the contracted day count), and each eligible day carries
+  // that same per-day target regardless of how many days the week has left.
+  const perDayMinutes = dailyTargetMinutes(weeklyHours, workdaysPerWeek);
+  if (perDayMinutes <= 0) return 0;
   const eligibleDays = [...(weekdays || []), ...(weekendDays || [])]
     .filter((day) => isPotentialDay(day.dayName, workdaysPerWeek))
     .filter((day) => {
@@ -401,9 +418,7 @@ export function weekTargetMinutes({
       return !(day.absentForTarget || day.holiday || isBeforeStart || isFuture);
     });
 
-  // Use floor to avoid systematic +1 minute per day accumulation from rounding.
-  const eligibleCount = Math.min(eligibleDays.length, workdaysPerWeek);
-  return Math.floor(eligibleCount * perDayMinutes);
+  return eligibleDays.length * perDayMinutes;
 }
 
 export function entryDurationHours(startTime, endTime) {
