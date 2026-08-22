@@ -275,6 +275,14 @@ export async function signIn(page, email, password) {
 // spec files can resume this exact session via
 // `test.use({ storageState: storageStatePath(role) })` rather than repeating
 // the sign-in + password-change dance.
+//
+// Tolerates being called when the change was already made: a Playwright
+// retry re-runs a `beforeAll` that calls this from scratch, signing in again
+// with the (already-updated) password a prior, partially-successful attempt
+// wrote to credentials.json. The server then has nothing left to force, so
+// login lands straight on the normal home route instead of /account —
+// waiting for /account unconditionally would hang for the whole hook
+// timeout and take the retry down with it.
 export async function changeTempPassword(
   page,
   context,
@@ -282,7 +290,11 @@ export async function changeTempPassword(
   email,
   newPassword,
 ) {
-  await page.waitForURL("**/account");
+  await page.waitForURL((url) => url.pathname !== "/");
+  if (new URL(page.url()).pathname !== "/account") {
+    await context.storageState({ path: storageStatePath(role) });
+    return;
+  }
   await page.locator("#account-new-password").fill(newPassword);
   await page.locator("#account-confirm-password").fill(newPassword);
   await page.getByRole("button", { name: "Save" }).click();

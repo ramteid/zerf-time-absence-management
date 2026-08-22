@@ -67,7 +67,15 @@ test.describe("admin onboards two people for absence-slider testing", () => {
     // request context (any signed-in user can read /holidays).
     weekOneDate = await pastWeekWorkday(page.request, 1);
     weekTwoDate = await pastWeekWorkday(page.request, 2);
-    weekFourDate = await pastWeekWorkday(page.request, 4);
+    // Sick is auto-approved, and the backend refuses to auto-approve a start
+    // date more than 30 days back (validate_backdating_window). Four weeks
+    // is only 28 days, but pastWeekWorkday's default preferredWeekday
+    // (Wednesday) can land as much as 32 days back depending on which
+    // weekday the suite happens to run on — the request is then rejected
+    // instead of approved, and the dialog never closes. Pinning to Friday
+    // (the latest weekday pastWeekWorkday can choose within the target
+    // Mon-Fri week) keeps every case at 30 days back or fewer.
+    weekFourDate = await pastWeekWorkday(page.request, 4, 4);
 
     const onePassword = await createUserViaAdminUi(page, {
       ...ABSENCE_SLIDER_EMPLOYEE_ONE,
