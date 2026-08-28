@@ -135,6 +135,12 @@ pub struct ProvisionalNotice {
     /// People the month covers in total (included + omitted).
     pub total: usize,
     pub omitted: Vec<PayrollOmittedPerson>,
+    /// True when the reported month is still running, so the figures are a
+    /// snapshot of what was approved up to the send date. The caveat is then
+    /// the unfinished *month*, not unfinished people — printing "3 of 12
+    /// people included" would misrepresent that, so the notice is worded
+    /// differently and no one is listed as missing.
+    pub in_progress: bool,
 }
 
 /// Everything the payroll report PDF renders. Assembled by
@@ -188,9 +194,21 @@ fn render_provisional_notice(
 ) {
     renderer.draw_section_heading(&i18n::translate(
         language,
-        "pdf_payroll_provisional_heading",
+        if notice.in_progress {
+            "pdf_payroll_snapshot_heading"
+        } else {
+            "pdf_payroll_provisional_heading"
+        },
         &[],
     ));
+    if notice.in_progress {
+        renderer.draw_note(&i18n::translate(
+            language,
+            "pdf_payroll_snapshot_summary",
+            &[("included", notice.included.to_string())],
+        ));
+        return;
+    }
     renderer.draw_note(&i18n::translate(
         language,
         "pdf_payroll_provisional_summary",
@@ -403,6 +421,30 @@ mod tests {
                         name: "Doe, Jane".into(),
                         reason_key: "payroll_report_reason_not_submitted",
                     }],
+                    in_progress: false,
+                }),
+            };
+            let bytes = render_payroll_report_pdf(&data, &language);
+            assert!(bytes.starts_with(b"%PDF"), "{code}");
+        }
+    }
+
+    /// The interim-snapshot notice takes a different wording branch with its
+    /// own translation keys, so it needs the same every-language guard.
+    #[test]
+    fn renders_an_interim_snapshot_pdf_in_every_language() {
+        for code in ["en", "de"] {
+            let language = Language::from_setting(code);
+            let data = PayrollReportData {
+                period_label: "August 2026".into(),
+                organization_name: "Example GmbH".into(),
+                absence_rows: Some(vec![]),
+                hours_sections: vec![],
+                provisional: Some(ProvisionalNotice {
+                    included: 5,
+                    total: 5,
+                    omitted: vec![],
+                    in_progress: true,
                 }),
             };
             let bytes = render_payroll_report_pdf(&data, &language);

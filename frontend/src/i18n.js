@@ -363,9 +363,13 @@ const TRANSLATIONS = {
     "All other employees": "All other employees",
     inactive: "inactive",
     "Send now": "Send now",
-    "Sends the previous month's report right away, covering everyone who has finished their month. Anyone still open is named in the report as missing. It does not replace the automatic delivery — the complete report is still sent on the selected day.":
-      "Sends the previous month's report right away, covering everyone who has finished their month. Anyone still open is named in the report as missing. It does not replace the automatic delivery — the complete report is still sent on the selected day.",
+    "Send {month} now": "Send {month} now",
+    "Sends the current state of the named month right away, with the times approved so far. It does not replace the automatic delivery — the complete report is still sent on the selected day.":
+      "Sends the current state of the named month right away, with the times approved so far. It does not replace the automatic delivery — the complete report is still sent on the selected day.",
     "Report sent.": "Report sent.",
+    "{month} sent.": "{month} sent.",
+    "Nothing to send for {month} — no approved times yet.":
+      "Nothing to send for {month} — no approved times yet.",
     // --- Payroll report: people included ---
     "People included": "People included",
     "All employees and assistants": "All employees and assistants",
@@ -897,6 +901,8 @@ const TRANSLATIONS = {
     "Connection OK": "Verbindung OK",
     "Not tested": "Nicht getestet",
     "SMTP connection test failed": "SMTP-Verbindungstest fehlgeschlagen",
+    "The payroll report could not be sent":
+      "Die Lohnmeldung konnte nicht gesendet werden",
     "Initial setup required.": "Ersteinrichtung erforderlich.",
     "Please configure the country and default weekly hours before using the application.":
       "Bitte konfigurieren Sie Land und Standard-Wochenstunden, bevor Sie die Anwendung nutzen.",
@@ -1503,9 +1509,13 @@ const TRANSLATIONS = {
     "All other employees": "Alle übrigen Mitarbeitenden",
     inactive: "inaktiv",
     "Send now": "Jetzt senden",
-    "Sends the previous month's report right away, covering everyone who has finished their month. Anyone still open is named in the report as missing. It does not replace the automatic delivery — the complete report is still sent on the selected day.":
-      "Sendet die Lohnmeldung für den Vormonat sofort mit allen Personen, die ihren Monat abgeschlossen haben. Wer noch offen ist, wird in der Meldung als fehlend aufgeführt. Das ersetzt nicht den automatischen Versand — die vollständige Meldung wird am gewählten Tag trotzdem verschickt.",
+    "Send {month} now": "{month} jetzt senden",
+    "Sends the current state of the named month right away, with the times approved so far. It does not replace the automatic delivery — the complete report is still sent on the selected day.":
+      "Sendet sofort den aktuellen Stand des genannten Monats mit den bisher genehmigten Zeiten. Das ersetzt nicht den automatischen Versand — die vollständige Meldung wird am gewählten Tag trotzdem verschickt.",
     "Report sent.": "Lohnmeldung gesendet.",
+    "{month} sent.": "{month} gesendet.",
+    "Nothing to send for {month} — no approved times yet.":
+      "Für {month} gibt es nichts zu senden — noch keine genehmigten Zeiten.",
     // --- Lohnmeldung: einbezogene Personen ---
     "People included": "Einbezogene Personen",
     "All employees and assistants": "Alle Mitarbeitenden und Aushilfen",
@@ -1724,6 +1734,14 @@ export function localizeErrorMessage(message, lang = get(language)) {
   if (normalized.startsWith(smtpPrefix)) {
     const detail = normalized.slice(smtpPrefix.length).trim();
     return translate(lang, "SMTP connection test failed") + ": " + detail;
+  }
+
+  const payrollPrefix = "PAYROLL_SEND_FAILED:";
+  if (normalized.startsWith(payrollPrefix)) {
+    const detail = normalized.slice(payrollPrefix.length).trim();
+    return (
+      translate(lang, "The payroll report could not be sent") + ": " + detail
+    );
   }
 
   return normalized;

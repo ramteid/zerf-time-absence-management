@@ -24,13 +24,10 @@
 //! payroll dashboard tile (`services::payroll_report::build_status`) is where
 //! admins and team leads see who is still missing.
 //!
-//! `run_now` (admin "Send now" button) queues the previous month and processes
-//! everything immediately, skipping the day-of-month threshold. Unlike the
-//! scheduled run it does **not** wait for everyone: it sends a *provisional*
-//! report covering whoever is already final, clearly marked as partial in both
-//! the PDF and the email so the recipient cannot mistake short figures for
-//! final ones. A manual send never removes the period from the queue, so the
-//! regular scheduled delivery for that month still goes out separately.
+//! `run_now` (admin "Send now" button) sends exactly one month immediately,
+//! skipping the day-of-month threshold, and never removes a period from the
+//! queue — the regular scheduled delivery still goes out separately. Which
+//! month it picks, and how much it waits for, is [`SendMode`].
 
 use crate::background::schedule;
 use crate::error::{AppError, AppResult};
@@ -42,6 +39,32 @@ use crate::services::settings;
 use crate::AppState;
 use chrono::NaiveDate;
 use std::time::Duration;
+
+/// How much a single send waits for, and what it does to the queue afterwards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SendMode {
+    /// Nightly delivery. Nothing goes out until every covered person's month
+    /// is final; once the SMTP server accepts it, the period leaves the queue
+    /// and the month counts as delivered. This is the copy the payroll
+    /// accountant files, so it must be complete.
+    Scheduled,
+    /// Admin "Send now" for a month that is owed but not finished yet. Sends
+    /// whoever is already final and names the rest as missing, in both the PDF
+    /// and the email. The period stays queued, so the complete delivery above
+    /// still follows.
+    ManualPartial,
+    /// Admin "Send now" for the month currently running. Nobody can be final
+    /// yet, so nothing is waited for: everyone who has booked something is
+    /// included with their approved figures to date, and the result is marked
+    /// as an interim snapshot. Touches no queue — the month is not owed yet.
+    ManualSnapshot,
+}
+
+impl SendMode {
+    fn is_manual(self) -> bool {
+        !matches!(self, SendMode::Scheduled)
+    }
+}
 
 /// Background loop: checks once per day (midnight in app timezone).
 pub async fn run_loop(state: AppState) {
@@ -71,22 +94,28 @@ pub async fn run_once(state: &AppState) -> AppResult<()> {
     // Always backfill missed months, even before configured day.
     queue_previous_month(state, today).await?;
 
-    process_pending_periods(state, &config, process_through_period.as_deref(), false).await;
+    process_pending_periods(state, &config, process_through_period.as_deref()).await;
     Ok(())
 }
 
 /// Result of an admin-triggered run, so the UI can say whether a report
-/// actually went out or the months are still waiting for approvals.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+/// actually went out or the month had nothing worth sending.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize)]
 pub struct RunSummary {
     /// Periods whose report was accepted by the SMTP server.
     pub sent: usize,
-    /// Periods that stay queued (not final yet, or delivery failed).
+    /// Periods that produced no document (nobody final, or nobody covered).
     pub pending: usize,
+    /// The month this run targeted, "YYYY-MM", so the UI can name it.
+    pub period: String,
 }
 
-/// Triggered by the admin "Send now" button: queues the previous month
-/// (idempotent) and processes all pending periods right away.
+/// Triggered by the admin "Send now" button: sends one month right away.
+///
+/// The target is [`payroll_report::manual_send_target`] — the previous month
+/// while its report is still owed, otherwise the month currently running. The
+/// previous month is also (idempotently) queued here so a manual click never
+/// lets the scheduled pipeline fall behind.
 pub async fn run_now(state: &AppState) -> AppResult<RunSummary> {
     let config = payroll_report::load_config(&state.pool).await?;
     if !config.enabled {
@@ -113,7 +142,24 @@ pub async fn run_now(state: &AppState) -> AppResult<RunSummary> {
 
     let today = settings::app_today(&state.pool).await;
     queue_previous_month(state, today).await?;
-    Ok(process_pending_periods(state, &config, None, true).await)
+
+    let target = payroll_report::manual_send_target(&state.pool).await?;
+    let mode = if target.in_progress {
+        SendMode::ManualSnapshot
+    } else {
+        SendMode::ManualPartial
+    };
+    let language = crate::i18n::load_ui_language(&state.pool).await?;
+
+    // Unlike the nightly loop, a failure here is propagated instead of being
+    // swallowed into `pending`: the admin is standing in front of the button
+    // and has to be told the send did not work.
+    let sent = process_period(state, &target.period, &config, &language, mode).await?;
+    Ok(RunSummary {
+        sent: usize::from(sent),
+        pending: usize::from(!sent),
+        period: target.period,
+    })
 }
 
 /// Queue every month from the last recorded one through the previous month.
@@ -132,33 +178,29 @@ async fn queue_previous_month(state: &AppState, today: NaiveDate) -> AppResult<(
 }
 
 /// Send every queued period that is due and ready; leave the rest queued.
-///
-/// `is_manual` distinguishes an admin-triggered "Send now" run from the daily
-/// scheduled one: a manual send never removes the period from the queue (see
-/// [`process_period`]), so it never stops the regular delivery for that month.
+/// Errors are logged and the period retried tomorrow — this runs inside the
+/// nightly loop, where there is nobody to report a failure to.
 async fn process_pending_periods(
     state: &AppState,
     config: &PayrollReportConfig,
     process_through_period: Option<&str>,
-    is_manual: bool,
-) -> RunSummary {
-    let mut summary = RunSummary::default();
+) {
     let periods = match state.db.payroll_queue.list_pending().await {
         Ok(periods) => periods,
         Err(e) => {
             tracing::error!("Payroll report: failed to list queue: {e}");
-            return summary;
+            return;
         }
     };
     if periods.is_empty() {
-        return summary;
+        return;
     }
 
     let language = match crate::i18n::load_ui_language(&state.pool).await {
         Ok(language) => language,
         Err(e) => {
             tracing::error!("Payroll report: failed to load UI language: {e}");
-            return summary;
+            return;
         }
     };
 
@@ -167,108 +209,140 @@ async fn process_pending_periods(
             tracing::debug!(
                 "Payroll report: deferring period {period} until the configured day of month"
             );
-            summary.pending += 1;
             continue;
         }
-        match process_period(state, &period, config, &language, is_manual).await {
-            Ok(true) => summary.sent += 1,
-            Ok(false) => summary.pending += 1,
-            Err(e) => {
-                tracing::warn!("Payroll report: skipping period {period}: {e}");
-                summary.pending += 1;
-            }
+        if let Err(e) =
+            process_period(state, &period, config, &language, SendMode::Scheduled).await
+        {
+            tracing::warn!("Payroll report: skipping period {period}: {e}");
         }
     }
-    summary
 }
 
 /// Build and send one period's report. Returns whether anything was sent.
 ///
-/// The two callers differ in what an unfinished month means:
-///
-/// * **scheduled run** — nothing goes out until every covered person is final.
-///   The period stays queued and is retried tomorrow. This is the delivery the
-///   payroll accountant treats as authoritative, so it must be complete.
-/// * **`is_manual`** (admin "Send now") — sends a provisional report with
-///   whoever is already final, marked as partial in the PDF and the email. It
-///   never deletes the queue entry, so the complete scheduled delivery still
-///   follows on the configured day.
+/// What an unfinished month means depends entirely on [`SendMode`]; see its
+/// variants. Everything below that decision — assembling the data, rendering
+/// the PDF and handing it to SMTP — is shared.
 async fn process_period(
     state: &AppState,
     period: &str,
     config: &PayrollReportConfig,
     language: &Language,
-    is_manual: bool,
+    mode: SendMode,
 ) -> AppResult<bool> {
-    let (from, to) = schedule::period_bounds(period)?;
+    let (from, month_end) = schedule::period_bounds(period)?;
+    // A snapshot reports the month "up to today", so it stops at today rather
+    // than the month end. Worked hours already do this on their own (a future
+    // day contributes nothing), but absence days do not: an approved holiday
+    // running to the 31st would otherwise be counted in full while the hours
+    // beside it stop at today, making the two halves of the same document
+    // disagree. Clamping the window here keeps every section on the same date.
+    let to = if mode == SendMode::ManualSnapshot {
+        month_end.min(settings::app_today(&state.pool).await)
+    } else {
+        month_end
+    };
     // Start with the same period-aware member set as the timesheet export,
     // then remove admins, explicitly excluded people, and assistants without
-    // any recorded hours in this month.
-    let members =
-        payroll_report::payroll_members(state, from, to, &config.excluded_user_ids).await?;
-
-    // Full approval is only required when this person's hours literally end
-    // up in the PDF — an unapproved entry that never gets printed doesn't
-    // make the document wrong. (The dashboard tile asks a stricter,
-    // unconditional question; see `evaluate_members`'s doc comment.)
-    let readiness = payroll_report::evaluate_members(state, &members, from, to, |role| {
-        config.includes_hours_for(role)
-    })
+    // any recorded hours in this month. A snapshot of the running month drops
+    // everyone who has not booked yet, not just assistants — see
+    // [`payroll_report::payroll_members`].
+    let members = payroll_report::payroll_members(
+        state,
+        from,
+        to,
+        &config.excluded_user_ids,
+        mode == SendMode::ManualSnapshot,
+    )
     .await?;
-    let (ready, pending): (Vec<_>, Vec<_>) = readiness
-        .into_iter()
-        .partition(|member| member.reason_key.is_none());
 
-    if ready.is_empty() && pending.is_empty() {
-        // The month covers nobody at all — the installation is younger than
-        // the period, or everyone in it was excluded. There is nothing to
-        // report, so settle the period instead of retrying it every night
-        // forever and leaving the dashboard card stuck on "0 of 0".
-        //
-        // Only the scheduled run may settle it. A manual "Send now" pressed
-        // before anyone has booked the month would otherwise drop the period
-        // from the queue for good, and the scheduled run would never deliver
-        // it once the data did arrive.
-        if !is_manual {
-            state.db.payroll_queue.delete_entry(period).await?;
+    let (included, provisional) = match mode {
+        // A running month has no finality to test: every figure in it is
+        // approved-to-date by construction (worked hours come from approved
+        // entries, absence rows from approved absences), so everyone who
+        // booked something is reported and nobody is a blocker.
+        SendMode::ManualSnapshot => {
+            if members.is_empty() {
+                tracing::info!("Payroll report: period {period} has no booked time yet");
+                return Ok(false);
+            }
+            let notice = ProvisionalNotice {
+                included: members.len(),
+                total: members.len(),
+                omitted: Vec::new(),
+                in_progress: true,
+            };
+            (members, Some(notice))
         }
-        tracing::info!("Payroll report: period {period} covers nobody; nothing to send");
-        return Ok(false);
-    }
-    if !pending.is_empty() && !is_manual {
-        // Not an error — people just have not finished their month. Stay
-        // silent and retry tomorrow; the dashboard tile shows who is missing.
-        tracing::info!(
-            "Payroll report: period {period} still waiting for {} of {} people",
-            pending.len(),
-            ready.len() + pending.len()
-        );
-        return Ok(false);
-    }
-    if ready.is_empty() {
-        // A manual send while nobody has finished yet: an empty document helps
-        // the payroll accountant no more than no document at all.
-        tracing::info!("Payroll report: period {period} has no finalized people yet");
-        return Ok(false);
-    }
-
-    // Only a manual send can get here with people missing, and only then does
-    // the report need the "this is partial" marker.
-    let provisional = (!pending.is_empty()).then(|| ProvisionalNotice {
-        included: ready.len(),
-        total: ready.len() + pending.len(),
-        omitted: pending
-            .iter()
-            .map(|member| PayrollOmittedPerson {
-                name: format!("{} {}", member.user.first_name, member.user.last_name),
-                reason_key: member
-                    .reason_key
-                    .unwrap_or("payroll_report_reason_not_submitted"),
+        SendMode::Scheduled | SendMode::ManualPartial => {
+            // Full approval is only required when this person's hours literally
+            // end up in the PDF — an unapproved entry that never gets printed
+            // doesn't make the document wrong. (The dashboard tile asks a
+            // stricter, unconditional question; see `evaluate_members`.)
+            let readiness = payroll_report::evaluate_members(state, &members, from, to, |role| {
+                config.includes_hours_for(role)
             })
-            .collect(),
-    });
+            .await?;
+            let (ready, pending): (Vec<_>, Vec<_>) = readiness
+                .into_iter()
+                .partition(|member| member.reason_key.is_none());
 
-    let included: Vec<User> = ready.into_iter().map(|member| member.user).collect();
+            if ready.is_empty() && pending.is_empty() {
+                // The month covers nobody at all — the installation is younger
+                // than the period, or everyone in it was excluded. There is
+                // nothing to report, so settle the period instead of retrying
+                // it every night forever and leaving the dashboard card stuck
+                // on "0 of 0".
+                //
+                // Only the scheduled run may settle it. A manual "Send now"
+                // pressed before anyone has booked the month would otherwise
+                // drop the period from the queue for good, and the scheduled
+                // run would never deliver it once the data did arrive.
+                if !mode.is_manual() {
+                    state.db.payroll_queue.delete_entry(period).await?;
+                }
+                tracing::info!("Payroll report: period {period} covers nobody; nothing to send");
+                return Ok(false);
+            }
+            if !pending.is_empty() && !mode.is_manual() {
+                // Not an error — people just have not finished their month.
+                // Stay silent and retry tomorrow; the dashboard tile shows who
+                // is missing.
+                tracing::info!(
+                    "Payroll report: period {period} still waiting for {} of {} people",
+                    pending.len(),
+                    ready.len() + pending.len()
+                );
+                return Ok(false);
+            }
+            if ready.is_empty() {
+                // A manual send while nobody has finished yet: an empty
+                // document helps the payroll accountant no more than none.
+                tracing::info!("Payroll report: period {period} has no finalized people yet");
+                return Ok(false);
+            }
+
+            // Only a manual send can get here with people missing, and only
+            // then does the report need the "this is partial" marker.
+            let notice = (!pending.is_empty()).then(|| ProvisionalNotice {
+                included: ready.len(),
+                total: ready.len() + pending.len(),
+                omitted: pending
+                    .iter()
+                    .map(|member| PayrollOmittedPerson {
+                        name: format!("{} {}", member.user.first_name, member.user.last_name),
+                        reason_key: member
+                            .reason_key
+                            .unwrap_or("payroll_report_reason_not_submitted"),
+                    })
+                    .collect(),
+                in_progress: false,
+            });
+            let included: Vec<User> = ready.into_iter().map(|member| member.user).collect();
+            (included, notice)
+        }
+    };
     let data = payroll_report::build_report_data(
         state,
         from,
@@ -297,7 +371,7 @@ async fn process_period(
         language,
         &data.period_label,
         &organization_label(state, language).await,
-        is_manual,
+        mode.is_manual(),
         data.provisional.as_ref(),
     );
 
@@ -314,14 +388,26 @@ async fn process_period(
         },
     )
     .await
-    .map_err(|e| AppError::Internal(format!("Payroll report email failed: {e}")))?;
+    .map_err(|e| {
+        tracing::error!("Payroll report: sending period {period} failed: {e}");
+        if mode.is_manual() {
+            // An admin is waiting on the button and has to be told what broke.
+            // `Internal` deliberately hides its message from the client, so a
+            // manual send reports the reason as a prefixed BadRequest instead
+            // (the frontend splits the prefix off and translates the lead-in).
+            AppError::BadRequest(format!("PAYROLL_SEND_FAILED:{e}"))
+        } else {
+            AppError::Internal(format!("Payroll report email failed: {e}"))
+        }
+    })?;
 
-    if is_manual {
+    if mode.is_manual() {
         // A manual "Send now" copy never replaces the scheduled delivery: the
         // period stays queued, so the automatic run still sends the regular
         // copy for this month on the configured day. For the same reason it
         // must not mark the period as sent — the dashboard tile has to keep
-        // showing the outstanding delivery.
+        // showing the outstanding delivery. (A snapshot of the running month
+        // has no queue entry to begin with, so this is equally a no-op there.)
         tracing::info!(
             "Payroll report: sent period {period} manually to {} (period stays queued for the scheduled run)",
             config.recipients.join(", ")
@@ -376,8 +462,9 @@ async fn delete_payroll_period_with_retry(state: &AppState, period: &str) -> App
 /// `manual` appends a note identifying the email as an admin-triggered "Send
 /// now" copy, so the recipient does not mistake it for the regular automatic
 /// delivery, which — see [`process_period`] — is still sent separately.
-/// `provisional` additionally spells out that the attached report covers only
-/// part of the staff, mirroring the notice printed in the PDF.
+/// `provisional` additionally spells out why the attached report is not final,
+/// mirroring the notice printed in the PDF: either it covers only part of the
+/// staff, or the reported month itself is still running.
 fn email_text(
     language: &Language,
     period_label: &str,
@@ -399,29 +486,41 @@ fn email_text(
         if !text.body.ends_with('\n') {
             text.body.push_str("\n\n");
         }
-        text.body.push_str(&crate::i18n::translate(
-            language,
-            "payroll_report_email_provisional_note",
-            &[
-                ("included", notice.included.to_string()),
-                ("total", notice.total.to_string()),
-                (
-                    "employees",
-                    notice
-                        .omitted
-                        .iter()
-                        .map(|person| {
-                            format!(
-                                "- {} ({})",
-                                person.name,
-                                crate::i18n::translate(language, person.reason_key, &[])
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                ),
-            ],
-        ));
+        // A snapshot of the running month must not reuse the partial-send
+        // wording: with nobody omitted it would claim "covers N of N people"
+        // and then print an empty list of who is missing.
+        let note = if notice.in_progress {
+            crate::i18n::translate(
+                language,
+                "payroll_report_email_snapshot_note",
+                &[("included", notice.included.to_string())],
+            )
+        } else {
+            crate::i18n::translate(
+                language,
+                "payroll_report_email_provisional_note",
+                &[
+                    ("included", notice.included.to_string()),
+                    ("total", notice.total.to_string()),
+                    (
+                        "employees",
+                        notice
+                            .omitted
+                            .iter()
+                            .map(|person| {
+                                format!(
+                                    "- {} ({})",
+                                    person.name,
+                                    crate::i18n::translate(language, person.reason_key, &[])
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    ),
+                ],
+            )
+        };
+        text.body.push_str(&note);
     }
     if manual {
         if !text.body.ends_with('\n') {
@@ -464,6 +563,7 @@ mod tests {
                     reason_key: "payroll_report_reason_not_submitted",
                 })
                 .collect(),
+            in_progress: false,
         }
     }
 
@@ -545,6 +645,50 @@ mod tests {
             );
             // Subject stays identical — only the body gains the note.
             assert_eq!(scheduled.title, manual.title);
+        }
+    }
+
+    /// A snapshot of the running month has nobody omitted, so it must not take
+    /// the partial-send wording: that would claim "covers N of N people" and
+    /// then print an empty list of who is still missing.
+    #[test]
+    fn snapshot_note_does_not_claim_people_are_missing() {
+        for code in ["en", "de"] {
+            let language = crate::i18n::Language::from_setting(code);
+            let snapshot_notice = ProvisionalNotice {
+                included: 5,
+                total: 5,
+                omitted: Vec::new(),
+                in_progress: true,
+            };
+            let snapshot = email_text(
+                &language,
+                "August 2026",
+                "Example GmbH",
+                true,
+                Some(&snapshot_notice),
+            );
+            let partial = email_text(
+                &language,
+                "August 2026",
+                "Example GmbH",
+                true,
+                Some(&notice(5, 5, &[])),
+            );
+            assert_ne!(
+                snapshot.body, partial.body,
+                "{code}: a snapshot must not reuse the partial-send wording"
+            );
+            // The partial wording is the one that spells out a "x of y" split;
+            // the snapshot only ever states how many people it covers.
+            assert!(
+                partial.body.contains("5") && snapshot.body.contains("5"),
+                "{code}: both state the count"
+            );
+            assert!(
+                !snapshot.body.contains(" 5 von 5 ") && !snapshot.body.contains(" 5 of 5 "),
+                "{code}: a snapshot never frames the count as a partial split"
+            );
         }
     }
 

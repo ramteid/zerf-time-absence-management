@@ -462,6 +462,23 @@ pub async fn update_smtp_settings(
     )
     .await?;
 
+    // The payroll report can only be delivered by email, so it cannot stay
+    // enabled once SMTP is switched off (see the mirroring check in
+    // `update_payroll_report_settings`, which blocks turning it back on
+    // until SMTP is configured again).
+    let payroll_report_disabled_by_smtp = if !body.smtp_enabled {
+        let payroll_was_enabled =
+            load_setting(&app_state.pool, settings::PAYROLL_REPORT_ENABLED_KEY, "false").await?
+                == "true";
+        if payroll_was_enabled {
+            save_setting_tx(&mut transaction, settings::PAYROLL_REPORT_ENABLED_KEY, "false")
+                .await?;
+        }
+        payroll_was_enabled
+    } else {
+        false
+    };
+
     transaction.commit().await?;
 
     audit::log(
@@ -475,6 +492,7 @@ pub async fn update_smtp_settings(
             "smtp_enabled": body.smtp_enabled,
             "smtp_host": smtp_config.host,
             "smtp_encryption": smtp_config.encryption,
+            "payroll_report_disabled_by_smtp": payroll_report_disabled_by_smtp,
         })),
     )
     .await;
@@ -735,6 +753,15 @@ pub async fn update_payroll_report_settings(
                 "Select at least one section for the payroll report.".into(),
             ));
         }
+        // The report can only ever be delivered by email, so it cannot be
+        // switched on before SMTP is configured (see the matching cascade in
+        // `update_smtp_settings`, which turns this back off if SMTP is
+        // disabled afterwards).
+        if settings::load_smtp_config(&app_state.pool).await.is_none() {
+            return Err(AppError::BadRequest(
+                "Email must be set up before the payroll report can be enabled.".into(),
+            ));
+        }
     }
 
     let mut transaction = app_state.db.settings.begin().await?;
@@ -809,6 +836,9 @@ pub async fn run_payroll_report_now(
         "ok": true,
         "sent": summary.sent,
         "pending": summary.pending,
+        // The month that was actually targeted, so the confirmation can name
+        // it rather than the one the page happened to load with.
+        "period": summary.period,
     })))
 }
 

@@ -309,6 +309,9 @@ pub async fn load_admin_settings(pool: &crate::db::DatabasePool) -> AppResult<Ad
         payroll_report_include_assistant_hours: payroll_report.include_assistant_hours,
         payroll_report_include_employee_hours: payroll_report.include_employee_hours,
         payroll_report_excluded_user_ids: payroll_report.excluded_user_ids,
+        payroll_report_send_now_period: crate::services::payroll_report::manual_send_target(pool)
+            .await?
+            .period,
     })
 }
 
@@ -478,6 +481,10 @@ pub struct AdminSettingsData {
     /// User IDs left out of the report entirely. Admins are always left out and
     /// are never listed here.
     pub payroll_report_excluded_user_ids: Vec<i64>,
+    /// Read-only: the month "Send now" would currently target, "YYYY-MM", so
+    /// the button can name it. See
+    /// `services::payroll_report::manual_send_target`.
+    pub payroll_report_send_now_period: String,
 }
 
 #[cfg(test)]

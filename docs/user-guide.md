@@ -1818,7 +1818,9 @@ configured under Settings → Email, so email must be set up first.
 
 At least one recipient is required before the report can be switched on, and
 the report must have at least one section with content (an absence category
-that qualifies, or working hours).
+that qualifies, or working hours). Email must be set up under Settings → Email
+first — the report has no other way of reaching anyone. If email is switched
+off again later, automatic delivery is switched off with it.
 
 #### Choosing who is included
 
@@ -1869,12 +1871,29 @@ team leads and admins how far the month is, and who is still missing. If the
 feature was switched off for a while, or the server missed a month boundary,
 all intervening months are prepared as soon as it is switched on again.
 
-**Send now** sends the previous month immediately, without waiting for everyone.
-It includes everybody who has already finished their month and marks the report
-clearly as **provisional**: the PDF and the email both state how many of the
-people it covers and name those who are missing, together with the reason. This
-way an early copy can never be mistaken for the final figures. If nobody has
-finished the month yet, nothing is sent — an empty report helps nobody.
+#### Sending a report right away
+
+The button names the month it will send, for example **Send August 2026 now**.
+Which month that is follows what is still owed:
+
+- As long as a past month still owes its report, the button sends the **oldest**
+  of those — usually the previous month during the first days of a month,
+  before the send day, but also a month that has been waiting longer for a late
+  submitter. It includes everybody who has already finished their month and
+  marks the report clearly as **provisional**: the PDF and the email both state
+  how many of the people it covers and name those who are missing, together
+  with the reason. If nobody has finished the month yet, nothing is sent — an
+  empty report helps nobody.
+- Once no past month is outstanding any more, the button moves on to the
+  **month currently running** and sends its state so far, up to today. It covers everyone who has
+  booked time in the month, with the hours and absences approved up to that
+  day. Nobody holds this up: people who have not submitted everything yet are
+  simply reported with what is already approved, and people who have not booked
+  anything at all are left out. The PDF and the email say clearly that this is
+  an interim status and that the figures will still change.
+
+Either way you get a message telling you whether the report went out, that
+there was nothing to send, or why sending failed.
 
 **Send now** does not replace the scheduled monthly run: the month is not marked
 as delivered, so the complete report still goes out automatically on the

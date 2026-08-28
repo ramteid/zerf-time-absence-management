@@ -116,6 +116,13 @@ pub async fn load_config(pool: &crate::db::DatabasePool) -> AppResult<PayrollRep
 ///     definition. Any recorded entry makes the assistant relevant, regardless
 ///     of whether it is still a draft, submitted, approved, or rejected.
 ///
+/// `everyone_needs_recorded_time` widens that last rule from assistants to
+/// everybody. It is only set for an interim snapshot of the *running* month,
+/// where somebody who simply has not got round to booking yet is not missing
+/// anything — the month is not over. For a finished month the opposite is
+/// true: an employee with an empty month still owes a declaration, so they
+/// stay in and the default (`false`) keeps them.
+///
 /// Report content, the readiness gate and the dashboard tile all go through
 /// this one filter, so what the tile counts is exactly what the PDF contains.
 pub async fn payroll_members(
@@ -123,6 +130,7 @@ pub async fn payroll_members(
     from: NaiveDate,
     to: NaiveDate,
     excluded_user_ids: &[i64],
+    everyone_needs_recorded_time: bool,
 ) -> AppResult<Vec<User>> {
     let assistants_with_entries = app_state
         .db
@@ -144,13 +152,97 @@ pub async fn payroll_members(
     Ok(members
         .into_iter()
         .filter(|member| {
+            let needs_recorded_time =
+                everyone_needs_recorded_time || is_assistant_role(&member.role);
             !crate::roles::is_admin_role(&member.role)
                 && !excluded_user_ids.contains(&member.id)
-                && (!is_assistant_role(&member.role)
+                && (!needs_recorded_time
                     || assistants_with_entries.contains(&member.id)
                     || assistants_with_payroll_absences.contains(&member.id))
         })
         .collect())
+}
+
+/// Whether this period's report has already gone out in full.
+///
+/// Derived from the queue instead of a stored "last sent" marker: a period is
+/// queued when its turn comes and removed only once the SMTP server accepted a
+/// *complete* report, so a period that reached the queue and is no longer in it
+/// is genuinely done. An admin's interim "Send now" copy deliberately leaves
+/// the entry in place, so an early partial send never makes a month look
+/// finished. Deriving it this way is also what makes the answer correct on
+/// installations that predate the queue-period marker.
+pub async fn period_delivered(pool: &crate::db::DatabasePool, period: &str) -> AppResult<bool> {
+    let queued_through =
+        settings::load_setting(pool, settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY, "").await?;
+    let reached_the_queue = !queued_through.is_empty()
+        && (queued_through == period
+            || crate::background::schedule::period_is_after(&queued_through, period));
+    if !reached_the_queue {
+        return Ok(false);
+    }
+    let still_queued = crate::repository::PayrollReportQueueDb::new(pool.clone())
+        .list_pending()
+        .await?
+        .iter()
+        .any(|queued| queued == period);
+    Ok(!still_queued)
+}
+
+/// The month an admin's "Send now" targets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManualSendTarget {
+    /// Period to send, "YYYY-MM".
+    pub period: String,
+    /// True when `period` is the month currently running. Nobody's month can
+    /// be final yet in that case, so the send is an interim snapshot of what
+    /// is approved so far rather than a partial copy of a month that is owed.
+    pub in_progress: bool,
+}
+
+/// Pick the month an admin's "Send now" should target.
+///
+/// The previous month is what is actually owed, so it keeps priority for as
+/// long as its report has not gone out in full — in practice only the first
+/// days of a month, before the configured send day. Once it is delivered there
+/// is nothing left to send for it, and the button moves on to the month now
+/// running, where it sends a snapshot of everything approved to date.
+pub async fn manual_send_target(pool: &crate::db::DatabasePool) -> AppResult<ManualSendTarget> {
+    let today = settings::app_today(pool).await;
+
+    // A month is owed either because it is already queued, or because it has
+    // not been queued yet but will be the moment a run starts — the send path
+    // backfills the queue before it picks anything up. Both lists have to be
+    // considered here, or the button would name one month and send another:
+    // with the queue empty and the marker several months behind, the naive
+    // answer is "the previous month" while the run would actually reach for
+    // the oldest backfilled one.
+    let queued = crate::repository::PayrollReportQueueDb::new(pool.clone())
+        .list_pending()
+        .await?;
+    let pending_backfill = crate::background::schedule::periods_to_backfill(
+        &settings::load_setting(pool, settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY, "").await?,
+        &crate::background::schedule::previous_period(today),
+    );
+
+    // "YYYY-MM" sorts chronologically, so the lexicographic minimum across
+    // both lists is the oldest month still owed. It wins over the running
+    // month: a month stuck behind a late submitter must not be skipped in
+    // favour of a newer one, or the button could never push it out at all.
+    let oldest_owed = queued.iter().chain(pending_backfill.iter()).min();
+    if let Some(period) = oldest_owed {
+        return Ok(ManualSendTarget {
+            period: period.clone(),
+            in_progress: false,
+        });
+    }
+
+    // Nothing is owed any more, so the button moves on to the month now
+    // running and sends its state so far.
+    Ok(ManualSendTarget {
+        period: crate::background::schedule::current_period(today),
+        in_progress: true,
+    })
 }
 
 /// Traffic-light status of one person's month, as shown on the dashboard tile.
@@ -252,37 +344,15 @@ pub async fn build_status(
         });
     }
 
-    // "Already delivered" is read straight off the queue, which is the same
-    // state the scheduler acts on: a period is queued when its turn comes and
-    // deleted only once the SMTP server accepted the message.
-    //
-    // Deriving it rather than storing a separate "last sent" marker matters —
-    // a stored marker would start out empty on an existing installation and
-    // wrongly show months that went out long ago as still outstanding.
-    //
     // Before the send day the period has not been queued yet; that counts as
-    // outstanding, so the card is already live from the 1st. A manual "Send
-    // now" copy never deletes the queue entry, so it correctly leaves the card
-    // active — the regular delivery is still to come.
-    let queued_through = settings::load_setting(
-        &app_state.pool,
-        settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
-        "",
-    )
-    .await?;
-    let reached_the_queue = !queued_through.is_empty()
-        && (queued_through == period
-            || crate::background::schedule::period_is_after(&queued_through, &period));
-    let still_queued = app_state
-        .db
-        .payroll_queue
-        .list_pending()
-        .await?
-        .iter()
-        .any(|queued| queued == &period);
-    let sent = reached_the_queue && !still_queued;
+    // outstanding, so the card is already live from the 1st. See
+    // [`period_delivered`] for why this is derived from the queue.
+    let sent = period_delivered(&app_state.pool, &period).await?;
 
-    let members = payroll_members(app_state, from, to, &config.excluded_user_ids).await?;
+    // The tile counts everybody the month covers, including people who have
+    // not booked anything yet — showing who still owes something is the whole
+    // point of the card, so it never uses the snapshot's narrower filter.
+    let members = payroll_members(app_state, from, to, &config.excluded_user_ids, false).await?;
     // The tile's colours always require full approval, for every person —
     // see the doc comment on `evaluate_members` for why this must not reuse
     // the send path's role-conditional rule.

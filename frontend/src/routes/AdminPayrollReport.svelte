@@ -3,6 +3,7 @@
   import { api } from "../api.js";
   import { toast } from "../stores.js";
   import { t, roleLabel } from "../i18n.js";
+  import { fmtMonthLabel } from "../format.js";
   import { sortUsersByRoleThenName } from "../lib/domain/users.js";
 
   let settings = {};
@@ -79,6 +80,14 @@
     (settings.payroll_report_absence_categories || []).includes(category.slug),
   );
 
+  // The month "Send now" will actually send, named on the button so the admin
+  // knows before clicking. The backend decides which one it is (the previous
+  // month while its report is still owed, otherwise the running month), so
+  // this only formats what it reports back.
+  $: sendNowMonth = settings.payroll_report_send_now_period
+    ? fmtMonthLabel(settings.payroll_report_send_now_period)
+    : "";
+
   // The report must have a recipient and at least one section before it can be
   // switched on — the backend rejects anything else, so mirror it here for a
   // direct error message instead of a round-trip.
@@ -100,6 +109,13 @@
       if (!hasContent) {
         toast(
           $t("Select at least one section for the payroll report."),
+          "error",
+        );
+        return;
+      }
+      if (!settings.smtp_enabled) {
+        toast(
+          $t("Email must be set up before the payroll report can be enabled."),
           "error",
         );
         return;
@@ -141,15 +157,39 @@
       const result = await api("/settings/payroll-report/send-now", {
         method: "POST",
       });
-      // Nothing sent means every month already went out, or nobody has
-      // finished the month yet — a report with no people in it is not useful.
+      const month = result?.period
+        ? fmtMonthLabel(result.period)
+        : sendNowMonth;
+      // Always give visible feedback. A click that sends nothing looked
+      // exactly like a click that failed before, which is what made a
+      // seemingly-successful send impossible to verify. The backend now sends
+      // exactly one month, so this is a simple sent/not-sent split; a real
+      // failure throws and lands in the catch below.
       if (result?.sent > 0) {
-        toast($t("Report sent."), "ok");
+        toast($t("{month} sent.").replace("{month}", month), "ok");
+      } else {
+        toast(
+          $t("Nothing to send for {month} — no approved times yet.").replace(
+            "{month}",
+            month,
+          ),
+          "info",
+        );
       }
     } catch (e) {
       toast(e?.message || $t("Error"), "error");
     } finally {
       sending = false;
+    }
+    // The target month moves on once a month's report is fully delivered, so
+    // refresh what the button label is derived from. Deliberately outside the
+    // block above: the send result has already been reported, and a failure to
+    // re-read the settings must not contradict it with a second, opposite
+    // toast. A stale label until the next page load is the lesser problem.
+    try {
+      settings = await api("/settings");
+    } catch {
+      // Keep the label as it was.
     }
   }
 </script>
@@ -327,7 +367,7 @@ buchhaltung@example.com"
     <div class="form-actions">
       <div class="field-hint form-actions-hint">
         {$t(
-          "Sends the previous month's report right away, covering everyone who has finished their month. Anyone still open is named in the report as missing. It does not replace the automatic delivery — the complete report is still sent on the selected day.",
+          "Sends the current state of the named month right away, with the times approved so far. It does not replace the automatic delivery — the complete report is still sent on the selected day.",
         )}
       </div>
       <div class="form-actions-buttons">
@@ -338,6 +378,8 @@ buchhaltung@example.com"
         >
           {#if sending}
             {$t("Sending...")}
+          {:else if sendNowMonth}
+            {$t("Send {month} now").replace("{month}", sendNowMonth)}
           {:else}
             {$t("Send now")}
           {/if}

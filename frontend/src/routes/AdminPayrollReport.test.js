@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount, unmount } from "svelte";
 import AdminPayrollReport from "./AdminPayrollReport.svelte";
-import { setLanguage } from "../i18n.js";
+import { localizeErrorMessage, setLanguage } from "../i18n.js";
 
 const mockState = vi.hoisted(() => ({
   settings: {
@@ -12,6 +12,11 @@ const mockState = vi.hoisted(() => ({
     payroll_report_absence_categories: ["sick"],
     payroll_report_include_assistant_hours: true,
     payroll_report_include_employee_hours: false,
+    // The report requires email to be set up; on by default here so the
+    // existing save tests aren't all about this one precondition.
+    smtp_enabled: true,
+    // The month "Send now" targets, as picked by the backend.
+    payroll_report_send_now_period: "2026-08",
   },
   categories: [
     { id: 1, slug: "sick", name: "Sick", color: "#ef4444", active: true },
@@ -61,7 +66,12 @@ const mockState = vi.hoisted(() => ({
 const toastMock = vi.hoisted(() => vi.fn());
 
 // What POST /settings/payroll-report/send-now reports back for the next call.
-const sendNowResult = vi.hoisted(() => ({ value: { sent: 0, pending: 1 } }));
+const sendNowResult = vi.hoisted(() => ({
+  value: { sent: 0, pending: 1, period: "2026-08" },
+}));
+
+// Makes the next send-now call reject the way the real API does on a failure.
+const sendNowFails = vi.hoisted(() => ({ value: false }));
 
 const apiMock = vi.hoisted(() =>
   vi.fn(async (path, opts = {}) => {
@@ -82,6 +92,11 @@ const apiMock = vi.hoisted(() =>
       path === "/settings/payroll-report/send-now" &&
       opts.method === "POST"
     ) {
+      if (sendNowFails.value) {
+        throw new Error(
+          localizeErrorMessage("PAYROLL_SEND_FAILED:connection refused"),
+        );
+      }
       return sendNowResult.value;
     }
     throw new Error(`Unhandled API path: ${path}`);
@@ -134,6 +149,8 @@ describe("AdminPayrollReport", () => {
       payroll_report_include_assistant_hours: true,
       payroll_report_include_employee_hours: false,
       payroll_report_excluded_user_ids: [],
+      smtp_enabled: true,
+      payroll_report_send_now_period: "2026-08",
     };
   });
 
@@ -298,12 +315,19 @@ describe("AdminPayrollReport", () => {
     );
   });
 
-  it("confirms a send only when a report actually went out", async () => {
-    sendNowResult.value = { sent: 1, pending: 0 };
+  it("names the targeted month on the send button", async () => {
     component = mount(AdminPayrollReport, { target });
     await settle();
 
-    clickButton(target, "Send now");
+    expect(target.textContent).toContain("Send August 2026 now");
+  });
+
+  it("confirms a send, naming the month that went out", async () => {
+    sendNowResult.value = { sent: 1, pending: 0, period: "2026-08" };
+    component = mount(AdminPayrollReport, { target });
+    await settle();
+
+    clickButton(target, "Send August 2026 now");
     await settle();
 
     expect(
@@ -313,28 +337,55 @@ describe("AdminPayrollReport", () => {
           opts?.method === "POST",
       ),
     ).toBe(true);
-    expect(toastMock).toHaveBeenCalledWith("Report sent.", "ok");
+    expect(toastMock).toHaveBeenCalledWith("August 2026 sent.", "ok");
   });
 
-  it("explains when nothing was sent because nobody has finished the month", async () => {
-    sendNowResult.value = { sent: 0, pending: 1 };
+  it("says so when the month had nothing to send", async () => {
+    sendNowResult.value = { sent: 0, pending: 1, period: "2026-08" };
     component = mount(AdminPayrollReport, { target });
     await settle();
 
-    clickButton(target, "Send now");
+    clickButton(target, "Send August 2026 now");
     await settle();
 
-    expect(toastMock).not.toHaveBeenCalled();
+    expect(toastMock).toHaveBeenCalledWith(
+      "Nothing to send for August 2026 — no approved times yet.",
+      "info",
+    );
   });
 
-  it("stays quiet when the report was already sent", async () => {
-    sendNowResult.value = { sent: 0, pending: 0 };
+  it("reports a failed send as an error", async () => {
     component = mount(AdminPayrollReport, { target });
     await settle();
 
-    clickButton(target, "Send now");
+    sendNowFails.value = true;
+    clickButton(target, "Send August 2026 now");
     await settle();
 
-    expect(toastMock).not.toHaveBeenCalled();
+    expect(toastMock).toHaveBeenCalledWith(
+      "The payroll report could not be sent: connection refused",
+      "error",
+    );
+    sendNowFails.value = false;
+  });
+
+  it("refuses to enable the report before email is set up", async () => {
+    mockState.settings = { ...mockState.settings, smtp_enabled: false };
+    component = mount(AdminPayrollReport, { target });
+    await settle();
+
+    clickButton(target, "Save");
+    await settle();
+
+    expect(
+      apiMock.mock.calls.some(
+        ([path, opts]) =>
+          path === "/settings/payroll-report" && opts?.method === "PUT",
+      ),
+    ).toBe(false);
+    expect(toastMock).toHaveBeenCalledWith(
+      "Set up email before turning this on.",
+      "error",
+    );
   });
 });

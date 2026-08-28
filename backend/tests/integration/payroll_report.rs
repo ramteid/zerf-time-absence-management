@@ -114,6 +114,24 @@ async fn payroll_report_settings_are_validated_and_persisted() {
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "day must be 1-28");
 
+    // The report is delivered by email only, so it cannot be switched on while
+    // SMTP is unconfigured — even with everything else filled in correctly.
+    let (status, _) = admin
+        .put(
+            "/api/v1/settings/payroll-report",
+            &json!({
+                "payroll_report_enabled": true,
+                "payroll_report_recipients": ["payroll@example.com"],
+            }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "email must be set up before enabling"
+    );
+    configure_unreachable_smtp(&app).await;
+
     // A complete, valid configuration round-trips through the admin settings.
     // Recipients are equal, order-preserving, and folded case-insensitively.
     let (status, body) = admin
@@ -678,6 +696,8 @@ async fn payroll_report_never_reports_missing_submissions_as_a_technical_error()
 async fn payroll_status_tracks_only_assistants_with_month_activity() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
+    // The report cannot be switched on before email is set up.
+    configure_unreachable_smtp(&app).await;
     let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
         bootstrap_team_with_suffix(&app, &admin, false, "payroll-assistant-status").await;
     let lead = login_change_pw(&app, "lead-payroll-assistant-status@example.com", &lead_pw).await;
@@ -783,7 +803,7 @@ async fn payroll_members_drops_inactive_assistants_and_excluded_people() {
         "create draft assistant entry: {body}"
     );
 
-    let covered = payroll_report::payroll_members(&app.state, from, to, &[])
+    let covered = payroll_report::payroll_members(&app.state, from, to, &[], false)
         .await
         .expect("covered payroll members");
     assert!(
@@ -804,15 +824,34 @@ async fn payroll_members_drops_inactive_assistants_and_excluded_people() {
     );
 
     // Excluding an employee and an assistant removes exactly those two.
-    let narrowed = payroll_report::payroll_members(&app.state, from, to, &[emp_id, assistant_id])
-        .await
-        .expect("narrowed payroll members");
+    let narrowed =
+        payroll_report::payroll_members(&app.state, from, to, &[emp_id, assistant_id], false)
+            .await
+            .expect("narrowed payroll members");
     assert!(!narrowed.iter().any(|member| member.id == emp_id));
     assert!(!narrowed.iter().any(|member| member.id == assistant_id));
     assert!(
         narrowed.iter().any(|member| member.id == lead_id),
         "people who were not excluded stay in"
     );
+
+    // An interim snapshot of the running month widens the "must have booked
+    // something" rule from assistants to everybody: only the assistant who
+    // actually recorded time survives, while the lead and employee — who have
+    // an empty month but owe nothing yet — drop out.
+    let snapshot = payroll_report::payroll_members(&app.state, from, to, &[], true)
+        .await
+        .expect("snapshot payroll members");
+    assert!(
+        snapshot.iter().any(|member| member.id == assistant_id),
+        "somebody who booked time is in the snapshot"
+    );
+    for absent in [lead_id, emp_id] {
+        assert!(
+            !snapshot.iter().any(|member| member.id == absent),
+            "user {absent} booked nothing this month and is not in the snapshot"
+        );
+    }
 
     app.cleanup().await;
 }
@@ -871,6 +910,8 @@ async fn payroll_report_settings_persist_the_exclusion_list() {
 async fn payroll_status_counts_everyone_but_anonymizes_outside_a_leads_team() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
+    // The report cannot be switched on before email is set up.
+    configure_unreachable_smtp(&app).await;
     let (lead_id, lead_pw, emp_id, emp_pw, _monday, _cat_id) =
         bootstrap_team_with_suffix(&app, &admin, false, "payroll-status").await;
     let lead = login_change_pw(&app, "lead-payroll-status@example.com", &lead_pw).await;
@@ -1064,6 +1105,8 @@ async fn payroll_report_settles_a_month_that_covers_nobody() {
 async fn payroll_status_reports_an_already_delivered_month_as_sent() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
+    // The report cannot be switched on before email is set up.
+    configure_unreachable_smtp(&app).await;
     let (_lead_id, _lead_pw, _emp_id, _emp_pw, _monday, _cat_id) =
         bootstrap_team_with_suffix(&app, &admin, false, "payroll-sent").await;
 
@@ -1129,6 +1172,104 @@ async fn payroll_status_reports_an_already_delivered_month_as_sent() {
     app.cleanup().await;
 }
 
+/// "Send now" names the month it will actually send, and that month follows
+/// the same "already delivered" rule the dashboard tile uses: the previous
+/// month while its report is still owed, the running month once it is done.
+#[tokio::test]
+async fn payroll_send_now_targets_the_running_month_once_the_previous_one_is_delivered() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    configure_unreachable_smtp(&app).await;
+
+    let (status, _) = admin
+        .put(
+            "/api/v1/settings/payroll-report",
+            &json!({
+                "payroll_report_enabled": true,
+                "payroll_report_recipients": ["payroll@example.com"],
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "enable payroll report");
+
+    let today = zerf::services::settings::app_today(&app.state.pool).await;
+    let previous = zerf::background::schedule::previous_period(today);
+    let current = zerf::background::schedule::current_period(today);
+
+    // Nothing delivered yet: the owed month wins, even before the send day.
+    let (_, settings) = admin.get("/api/v1/settings").await;
+    assert_eq!(
+        settings["payroll_report_send_now_period"],
+        json!(previous),
+        "an undelivered previous month is what Send now targets"
+    );
+
+    // Mark the previous month delivered the way the scheduler does: it reached
+    // the queue and was removed again once SMTP accepted it.
+    app.state
+        .db
+        .settings
+        .save_setting(
+            zerf::services::settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+            &previous,
+        )
+        .await
+        .expect("record queue period");
+
+    let (_, settings) = admin.get("/api/v1/settings").await;
+    assert_eq!(
+        settings["payroll_report_send_now_period"],
+        json!(current),
+        "with the previous month done, Send now moves to the running month"
+    );
+
+    // A month stuck in the queue behind a late submitter is still owed, even
+    // though newer months went out. It must win over the running month, or the
+    // button could never push it out: the run sends only the month it names.
+    let stuck = zerf::background::schedule::period_before(&previous).expect("older period");
+    app.state
+        .db
+        .payroll_queue
+        .enqueue(&stuck)
+        .await
+        .expect("enqueue stuck period");
+    let (_, settings) = admin.get("/api/v1/settings").await;
+    assert_eq!(
+        settings["payroll_report_send_now_period"],
+        json!(stuck),
+        "an older undelivered month takes priority over the running month"
+    );
+
+    // A month that is owed but has not reached the queue yet counts too: the
+    // send path backfills the queue before picking anything up, so the button
+    // has to name what that backfill would produce. Rewinding the marker two
+    // months makes the run reach for the older of them, not the previous one.
+    app.state
+        .db
+        .payroll_queue
+        .delete_entry(&stuck)
+        .await
+        .expect("clear stuck period");
+    let two_back = zerf::background::schedule::period_before(&stuck).expect("older period");
+    app.state
+        .db
+        .settings
+        .save_setting(
+            zerf::services::settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+            &two_back,
+        )
+        .await
+        .expect("rewind queue period");
+    let (_, settings) = admin.get("/api/v1/settings").await;
+    assert_eq!(
+        settings["payroll_report_send_now_period"],
+        json!(stuck),
+        "the oldest month the backfill would queue is what Send now names"
+    );
+
+    app.cleanup().await;
+}
+
 /// The dashboard tile's "show this month" peek (`?current=true`) must report
 /// the current, in-progress calendar month instead of the tracked previous
 /// period — and must never claim that month as already sent, since a period
@@ -1137,6 +1278,8 @@ async fn payroll_status_reports_an_already_delivered_month_as_sent() {
 async fn payroll_status_current_flag_reports_the_in_progress_month() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
+    // The report cannot be switched on before email is set up.
+    configure_unreachable_smtp(&app).await;
     let (_lead_id, _lead_pw, _emp_id, _emp_pw, _monday, _cat_id) =
         bootstrap_team_with_suffix(&app, &admin, false, "payroll-current").await;
 
@@ -1213,6 +1356,8 @@ async fn payroll_status_current_flag_reports_the_in_progress_month() {
 async fn payroll_status_requires_approval_even_when_hours_are_not_in_the_report() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
+    // The report cannot be switched on before email is set up.
+    configure_unreachable_smtp(&app).await;
     let (lead_id, _lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
         bootstrap_team_with_suffix(&app, &admin, false, "payroll-approval-gate").await;
 
