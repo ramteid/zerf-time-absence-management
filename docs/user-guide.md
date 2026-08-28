@@ -1904,8 +1904,11 @@ the report as a whole is ready. People outside their own team are shown as
 not revealed.
 
 Once the report has been sent, the card greys out and reads e.g. *"June sent"*
-for the rest of the month. The card is hidden entirely when the payroll report
-is switched off.
+for the rest of the month. A small **"Show [current month]"** link appears
+underneath — click it to see progress for the month that is currently running
+instead. This is just a quick look, not a setting: it is not saved, and going
+back to the dashboard later shows the sent month again. The card is hidden
+entirely when the payroll report is switched off.
 
 ### Managing categories
 

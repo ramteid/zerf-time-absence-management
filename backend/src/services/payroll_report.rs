@@ -182,7 +182,10 @@ pub struct PayrollStatusMember {
 pub struct PayrollStatus {
     /// False when the payroll report is switched off; the tile stays hidden.
     pub enabled: bool,
-    /// Tracked period, "YYYY-MM" — always the previous month.
+    /// Tracked period, "YYYY-MM" — the previous month by default, or the
+    /// current in-progress month when the dashboard tile's transient "show
+    /// this month" peek was requested (see `build_status`'s
+    /// `show_current_month` parameter).
     pub period: String,
     /// Localized month name, e.g. "Juli 2026".
     pub period_label: String,
@@ -204,14 +207,29 @@ pub struct PayrollStatus {
 /// Covers exactly the people the report itself covers (see [`payroll_members`])
 /// and judges them with the same gate the send path uses, so "12 of 12 done"
 /// on the tile means the next scheduled run will actually deliver.
+///
+/// `show_current_month` switches the tracked period from the previous month
+/// (the default, and the only period that is ever actually delivered) to the
+/// current, still in-progress one. It exists solely for the dashboard tile's
+/// transient "show this month" peek, offered once the previous month's report
+/// has already gone out and the tile would otherwise sit idle for the rest of
+/// the month; the peek is a client-side, non-persistent choice, not a setting
+/// stored anywhere. A current-month period can never be `sent` — it cannot
+/// have reached the delivery queue yet — so the tile always shows live counts
+/// while peeking.
 pub async fn build_status(
     app_state: &AppState,
     requester: &crate::middleware::auth::User,
     language: &Language,
+    show_current_month: bool,
 ) -> AppResult<PayrollStatus> {
     let config = load_config(&app_state.pool).await?;
     let today = settings::app_today(&app_state.pool).await;
-    let period = crate::background::schedule::previous_period(today);
+    let period = if show_current_month {
+        crate::background::schedule::current_period(today)
+    } else {
+        crate::background::schedule::previous_period(today)
+    };
     let (from, to) = crate::background::schedule::period_bounds(&period)?;
 
     let period_label = crate::i18n::format_month(language, from.year(), from.month());

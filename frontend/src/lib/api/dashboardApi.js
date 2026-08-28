@@ -95,6 +95,8 @@ export function rejectReopen(id, reason) {
 }
 
 // Payroll report progress for the dashboard tile (team leads and admins).
-export function getPayrollStatus() {
-  return api("/reports/payroll-status");
+// `current` is the tile's transient, non-persistent "show this month" peek —
+// it reports the in-progress month instead of the tracked previous period.
+export function getPayrollStatus(current = false) {
+  return api(`/reports/payroll-status${current ? "?current=true" : ""}`);
 }

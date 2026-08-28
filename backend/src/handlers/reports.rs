@@ -627,19 +627,38 @@ pub async fn flextime(
     }))
 }
 
+/// Query parameters for [`payroll_status`].
+#[derive(Deserialize)]
+pub struct PayrollStatusQuery {
+    /// Dashboard tile's transient "show this month" peek: report the current,
+    /// in-progress month instead of the previous (default) period. Never
+    /// stored and never affects what actually gets delivered, which always
+    /// tracks the previous month regardless of this flag.
+    #[serde(default)]
+    pub current: bool,
+}
+
 /// Payroll report status for the dashboard tile: how far the previous month is
-/// from being deliverable. Leads only — team leads see the full counts but only
-/// their own team members by name (see `services::payroll_report::build_status`).
+/// from being deliverable — or, with `?current=true`, the current in-progress
+/// month instead. Leads only — team leads see the full counts but only their
+/// own team members by name (see `services::payroll_report::build_status`).
 pub async fn payroll_status(
     State(app_state): State<AppState>,
     requester: User,
+    Query(query): Query<PayrollStatusQuery>,
 ) -> AppResult<Json<crate::services::payroll_report::PayrollStatus>> {
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
     let language = crate::i18n::load_ui_language(&app_state.pool).await?;
     Ok(Json(
-        crate::services::payroll_report::build_status(&app_state, &requester, &language).await?,
+        crate::services::payroll_report::build_status(
+            &app_state,
+            &requester,
+            &language,
+            query.current,
+        )
+        .await?,
     ))
 }
 

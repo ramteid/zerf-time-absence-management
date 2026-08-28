@@ -9,6 +9,7 @@ import { mount, unmount } from "svelte";
 import PayrollStatus from "./PayrollStatus.svelte";
 import PayrollStatusDialog from "../../dialogs/PayrollStatusDialog.svelte";
 import { setLanguage } from "../../i18n.js";
+import { appTodayDate, fmtMonthName } from "../../format.js";
 
 vi.mock("svelte", async () => {
   return await import("../../../node_modules/svelte/src/index-client.js");
@@ -124,6 +125,35 @@ describe("PayrollStatus tile", () => {
     expect(target.querySelector(".donut-segment")).toBeNull();
     // Nothing to drill into any more.
     expect(target.querySelector(".payroll-card-button")).toBeNull();
+  });
+
+  it("offers a peek at the current month once the previous one has been sent", async () => {
+    const onShowCurrentMonth = vi.fn();
+    component = mount(PayrollStatus, {
+      target,
+      props: { status: status({ sent: true }), onShowCurrentMonth },
+    });
+    await settle();
+
+    const label = `Show ${fmtMonthName(appTodayDate())}`;
+    const peekButton = [...target.querySelectorAll("button")].find(
+      (button) => button.textContent.trim() === label,
+    );
+    expect(peekButton).toBeTruthy();
+
+    peekButton.click();
+    expect(onShowCurrentMonth).toHaveBeenCalled();
+  });
+
+  it("does not offer the peek button while the month is still outstanding", async () => {
+    component = mount(PayrollStatus, {
+      target,
+      props: { status: status({ sent: false }) },
+    });
+    await settle();
+
+    const label = `Show ${fmtMonthName(appTodayDate())}`;
+    expect(target.textContent).not.toContain(label);
   });
 
   it("names the send day in the help text", async () => {

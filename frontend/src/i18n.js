@@ -381,6 +381,7 @@ const TRANSLATIONS = {
     "{ready} of {total} done": "{ready} of {total} done",
     "{month} sent": "{month} sent",
     "Nothing left to do this month.": "Nothing left to do this month.",
+    "Show {month}": "Show {month}",
     "Not visible to you": "Not visible to you",
     "No people in this month.": "No people in this month.",
     Done: "Done",
@@ -400,6 +401,8 @@ const TRANSLATIONS = {
       "The send day must be between 1 and 28.",
     "Select at least one section for the payroll report.":
       "Select at least one type of content.",
+    "Email must be set up before the payroll report can be enabled.":
+      "Set up email before turning this on.",
     "Category not available for you.": "Category not available for you.",
     "Absence category not available for you.":
       "Absence category not available for you.",
@@ -1518,6 +1521,7 @@ const TRANSLATIONS = {
     "{ready} of {total} done": "{ready} von {total} fertig",
     "{month} sent": "{month} versendet",
     "Nothing left to do this month.": "Diesen Monat ist nichts mehr zu tun.",
+    "Show {month}": "{month} anzeigen",
     "Not visible to you": "Für Sie nicht sichtbar",
     "No people in this month.": "Keine Personen in diesem Monat.",
     Done: "Fertig",
@@ -1537,6 +1541,8 @@ const TRANSLATIONS = {
       "Der Versandtag muss zwischen 1 und 28 liegen.",
     "Select at least one section for the payroll report.":
       "Bitte mindestens einen Inhalt auswählen.",
+    "Email must be set up before the payroll report can be enabled.":
+      "Vor dem Einschalten muss der E-Mail-Versand eingerichtet werden.",
     "Category not available for you.":
       "Diese Kategorie ist für Sie nicht verfügbar.",
     "Absence category not available for you.":

@@ -61,6 +61,15 @@ pub fn previous_period(today: NaiveDate) -> String {
     format!("{year:04}-{month:02}")
 }
 
+/// The `YYYY-MM` period of `today`'s own, still in-progress month.
+///
+/// Only used for the payroll dashboard tile's transient "show this month"
+/// peek — the scheduled jobs always run against [`previous_period`], since a
+/// month in progress is by definition never final.
+pub fn current_period(today: NaiveDate) -> String {
+    format!("{:04}-{:02}", today.year(), today.month())
+}
+
 /// The `YYYY-MM` period immediately before `period`.
 pub fn period_before(period: &str) -> AppResult<String> {
     let (year, month) = parse_year_month(period)?;
@@ -250,6 +259,12 @@ mod tests {
     #[test]
     fn previous_period_wraps_january_to_december() {
         assert_eq!(previous_period(date(2026, 1, 5)), "2025-12");
+    }
+
+    #[test]
+    fn current_period_returns_todays_month() {
+        assert_eq!(current_period(date(2026, 6, 10)), "2026-06");
+        assert_eq!(current_period(date(2026, 1, 5)), "2026-01");
     }
 
     #[test]

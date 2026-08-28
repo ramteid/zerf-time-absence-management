@@ -4,6 +4,7 @@ import Dashboard from "./Dashboard.svelte";
 import { api } from "../api.js";
 import { categories, currentUser, path } from "../stores.js";
 import { setLanguage } from "../i18n.js";
+import { appTodayDate, fmtMonthName } from "../format.js";
 
 const mockState = vi.hoisted(() => ({
   monthReport: null,
@@ -417,7 +418,9 @@ describe("Dashboard", () => {
     function approverApi(overrides = {}) {
       return async (urlPath, opts = {}) => {
         if (urlPath === "/reports/payroll-status")
-          return mockState.payrollStatus;
+          return overrides.payrollStatus ?? mockState.payrollStatus;
+        if (urlPath === "/reports/payroll-status?current=true")
+          return overrides.payrollStatusCurrent ?? mockState.payrollStatus;
         if (urlPath === "/time-entries/all?status=submitted")
           return overrides.submitted ?? [submittedEntry];
         if (urlPath === "/absences/all?status=pending_review") return [];
@@ -442,9 +445,10 @@ describe("Dashboard", () => {
       };
     }
 
-    function payrollCalls() {
-      return api.mock.calls.filter(([p]) => p === "/reports/payroll-status")
-        .length;
+    function payrollCalls(suffix = "") {
+      return api.mock.calls.filter(
+        ([p]) => p === `/reports/payroll-status${suffix}`,
+      ).length;
     }
 
     function queueCalls() {
@@ -505,6 +509,56 @@ describe("Dashboard", () => {
 
       expect(payrollCalls()).toBeGreaterThan(before);
       expect(payrollCalls()).toBe(queueCalls());
+    });
+
+    it("peeking at the current month sticks across later dashboard refreshes", async () => {
+      api.mockImplementation(
+        approverApi({
+          payrollStatus: { ...mockState.payrollStatus, sent: true },
+          payrollStatusCurrent: {
+            ...mockState.payrollStatus,
+            period: "2026-08",
+            period_label: "August 2026",
+            sent: false,
+            ready: 0,
+            awaiting_approval: 1,
+            not_submitted: 1,
+          },
+        }),
+      );
+
+      component = mount(Dashboard, { target });
+      await settle();
+      await settle();
+      await waitForText(target, "July 2026 sent");
+      expect(payrollCalls("?current=true")).toBe(0);
+
+      const label = `Show ${fmtMonthName(appTodayDate())}`;
+      const peekButton = [...target.querySelectorAll("button")].find(
+        (button) => button.textContent.trim() === label,
+      );
+      expect(peekButton, "peek button not found").toBeTruthy();
+      peekButton.click();
+      await settle();
+      await settle();
+
+      // The tile switched to the current month's own donut, not the sent one.
+      await waitForText(target, "0 of 2 done");
+      expect(payrollCalls("?current=true")).toBe(1);
+
+      // Approving re-runs the dashboard load; the peek must not reset.
+      const approveAll = [...target.querySelectorAll("button")].find(
+        (button) => button.textContent.trim() === "Approve All",
+      );
+      expect(approveAll, "Approve All button not found").toBeTruthy();
+      approveAll.click();
+      await settle();
+      await settle();
+
+      expect(payrollCalls("?current=true")).toBeGreaterThan(1);
+      // The bare endpoint was only ever hit once, by the very first load —
+      // every refresh since the peek keeps asking for the current month.
+      expect(payrollCalls()).toBe(1);
     });
 
     it("is not requested at all for someone who cannot approve", async () => {

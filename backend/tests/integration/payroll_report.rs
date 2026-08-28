@@ -1129,6 +1129,81 @@ async fn payroll_status_reports_an_already_delivered_month_as_sent() {
     app.cleanup().await;
 }
 
+/// The dashboard tile's "show this month" peek (`?current=true`) must report
+/// the current, in-progress calendar month instead of the tracked previous
+/// period — and must never claim that month as already sent, since a period
+/// still in progress can never have reached the delivery queue.
+#[tokio::test]
+async fn payroll_status_current_flag_reports_the_in_progress_month() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, _lead_pw, _emp_id, _emp_pw, _monday, _cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "payroll-current").await;
+
+    let (status, _) = admin
+        .put(
+            "/api/v1/settings/payroll-report",
+            &json!({
+                "payroll_report_enabled": true,
+                "payroll_report_recipients": ["payroll@example.com"],
+                "payroll_report_day_of_month": 1,
+                "payroll_report_include_assistant_hours": true,
+                "payroll_report_include_employee_hours": false,
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "enable payroll report");
+
+    let today = zerf::services::settings::app_today(&app.state.pool).await;
+    let previous = zerf::background::schedule::previous_period(today);
+    let current = zerf::background::schedule::current_period(today);
+
+    // Mark the previous period as already delivered — the state the tile is
+    // normally in for the rest of the month, which is exactly when the peek
+    // button appears.
+    app.state
+        .db
+        .payroll_queue
+        .enqueue(&previous)
+        .await
+        .expect("enqueue");
+    app.state
+        .db
+        .settings
+        .save_setting(
+            zerf::services::settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+            &previous,
+        )
+        .await
+        .expect("record queue period");
+    app.state
+        .db
+        .payroll_queue
+        .delete_entry(&previous)
+        .await
+        .expect("delete entry");
+
+    let (_, default_card) = admin.get("/api/v1/reports/payroll-status").await;
+    assert_eq!(default_card["period"], json!(previous));
+    assert_eq!(
+        default_card["sent"],
+        json!(true),
+        "the default view keeps tracking the delivered previous month"
+    );
+
+    let (_, current_card) = admin
+        .get("/api/v1/reports/payroll-status?current=true")
+        .await;
+    assert_eq!(current_card["period"], json!(current));
+    assert_eq!(
+        current_card["sent"],
+        json!(false),
+        "a month still in progress can never have been delivered yet"
+    );
+
+    app.cleanup().await;
+}
+
 /// The card's colours must not reuse the send gate's relaxed rule, which only
 /// requires approval when a person's hours literally appear in the PDF. With
 /// employee hours excluded by default, a regular employee's submitted-but-

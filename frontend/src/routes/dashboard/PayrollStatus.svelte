@@ -2,16 +2,23 @@
   import { t } from "../../i18n.js";
   import Icon from "../../Icons.svelte";
   import StatusDonut from "../../lib/ui/StatusDonut.svelte";
+  import { appTodayDate, fmtMonthName } from "../../format.js";
 
   // Payload of GET /reports/payroll-status, or null while it loads.
   export let status = null;
   export let activeHelp = null;
   export let onHelpToggle = () => {};
   export let onOpen = () => {};
+  // Transient peek at the current, in-progress month — see Dashboard.svelte.
+  export let onShowCurrentMonth = () => {};
 
   // Once the month's report has gone out there is nothing left to chase, so
-  // the tile steps back: dimmed, no donut, and not clickable.
+  // the tile steps back: dimmed, no donut, and not clickable. The peek button
+  // only ever appears here: asking for the current month always comes back
+  // with `sent: false` (it can never have reached the delivery queue yet),
+  // so a successful peek naturally drops out of this branch on its own.
   $: done = !!status?.sent;
+  const currentMonthName = fmtMonthName(appTodayDate());
 </script>
 
 <div class="zf-card payroll-card" class:is-dimmed={done}>
@@ -40,6 +47,12 @@
           {$t("{month} sent").replace("{month}", status?.period_label ?? "")}
         </div>
         <div class="payroll-sub">{$t("Nothing left to do this month.")}</div>
+        <button
+          class="zf-btn zf-btn-ghost zf-btn-sm payroll-peek-btn"
+          on:click={onShowCurrentMonth}
+        >
+          {$t("Show {month}").replace("{month}", currentMonthName)}
+        </button>
       </div>
     </div>
   {:else}
@@ -121,5 +134,12 @@
   .payroll-sub {
     font-size: 0.8125rem;
     color: var(--text-tertiary);
+  }
+
+  .payroll-peek-btn {
+    margin-top: 6px;
+    padding-left: 0;
+    padding-right: 0;
+    height: auto;
   }
 </style>

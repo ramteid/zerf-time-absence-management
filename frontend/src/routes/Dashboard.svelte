@@ -229,16 +229,25 @@
   // case the tile stays hidden rather than showing an empty circle.
   let payrollStatus = null;
   let payrollDetailOpen = false;
+  // The tile's "show this month" peek: a transient, in-memory choice (never
+  // persisted) that survives the reloads other dashboard actions trigger but
+  // resets to the tracked previous month on the next page load.
+  let payrollShowCurrentMonth = false;
 
   async function loadPayrollStatus() {
     try {
-      const status = await getPayrollStatus();
+      const status = await getPayrollStatus(payrollShowCurrentMonth);
       payrollStatus = status?.enabled ? status : null;
     } catch {
       // A missing payroll status must not break the rest of the dashboard —
       // the tile simply stays hidden.
       payrollStatus = null;
     }
+  }
+
+  function showCurrentPayrollMonth() {
+    payrollShowCurrentMonth = true;
+    loadPayrollStatus();
   }
 
   load();
@@ -536,6 +545,7 @@
           {activeHelp}
           onHelpToggle={toggleHelp}
           onOpen={() => (payrollDetailOpen = true)}
+          onShowCurrentMonth={showCurrentPayrollMonth}
         />
       {/if}
     </div>

@@ -125,6 +125,12 @@ export function fmtMonthYear(d) {
 export function fmtMonthLabel(yearMonth) {
   return fmtMonthYear(yearMonth + "-01");
 }
+
+// Just the localized month name, no year, e.g. "August" — used where the
+// year is implied (the current month, in a small dashboard control).
+export function fmtMonthName(d) {
+  return parseDate(d).toLocaleDateString(getLocale(), { month: "long" });
+}
 export function fmtDateTime(d) {
   // Unlike parseDate(), this must preserve the real time-of-day: parseDate's
   // UTC-ISO-datetime branch anchors to local noon to keep pure calendar-date
