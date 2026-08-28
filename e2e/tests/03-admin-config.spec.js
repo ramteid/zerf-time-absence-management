@@ -7,7 +7,12 @@
 // is actually usable end-to-end, not just creatable).
 
 import { test, expect } from "@playwright/test";
-import { freeHolidayDate, setDate, storageStatePath } from "./helpers.js";
+import {
+  fillSmtpSettings,
+  freeHolidayDate,
+  setDate,
+  storageStatePath,
+} from "./helpers.js";
 // 05-employee-workflows.spec.js selects this exact category by name when
 // requesting an absence — proving a category created through the admin UI
 // is immediately available in the employee-facing dropdown. Defined in
@@ -176,35 +181,15 @@ test("admin: view an audit log entry's detail", async ({ page }) => {
 });
 
 test("admin: configure and test SMTP settings", async ({ page }) => {
-  // AdminEmail.svelte's load() fetches the current settings asynchronously
-  // and then *replaces* the whole local `smtpSettings` object once it
-  // resolves — exactly like AdminSettings.svelte in 01-bootstrap.spec.js.
-  // Filling the form before that replacement lands would have our input
-  // silently wiped out. Waiting for the GET /settings response that load()
-  // triggers is a reliable way to know the replacement has already happened.
-  // `.endsWith` (not `.includes`) matters here: App.svelte's own boot
-  // sequence also calls GET /api/v1/settings/public, which would otherwise
-  // false-match and resolve this promise too early.
-  const settingsLoaded = page.waitForResponse(
-    (response) =>
-      response.url().endsWith("/api/v1/settings") &&
-      response.request().method() === "GET",
-  );
-  await page.goto("/settings/email");
-  await settingsLoaded;
-
-  // Three checkboxes exist on this page in DOM order: Enable SMTP, Enable
-  // reminders, Enable approval reminders. The latter two start disabled
-  // until SMTP is enabled, so ".first()" unambiguously targets "Enable SMTP"
-  // regardless of their disabled state.
-  await page.locator('input[type="checkbox"]').first().check();
-  // A deliberately unresolvable host — the goal isn't to prove email
-  // actually sends (this stack has no SMTP server), it's to prove the "Test
-  // Connection" button triggers a real network attempt against the backend
-  // rather than a client-side mock, by observing it fail.
-  await page.locator("#smtp-host").fill("smtp.invalid.e2e-test");
-  await page.locator("#smtp-port").fill("587");
-  await page.locator("#smtp-from").fill("Zerf <noreply@e2e.test>");
+  // A deliberately unresolvable host — the goal isn't to prove email actually
+  // sends (the stack's own mail server covers that in 13-payroll-report), it's
+  // to prove the "Test Connection" button triggers a real network attempt
+  // against the backend rather than a client-side mock, by observing it fail.
+  await fillSmtpSettings(page, {
+    host: "smtp.invalid.e2e-test",
+    from: "Zerf <noreply@e2e.test>",
+    enabled: true,
+  });
 
   await page.getByRole("button", { name: "Test Connection" }).click();
   // Waiting for the "Testing..." button label to disappear is NOT a valid
@@ -229,6 +214,11 @@ test("admin: configure and test SMTP settings", async ({ page }) => {
   // persisted in the enabled state, only tested. Disabling first sidesteps
   // that re-validation (an admin turning SMTP off doesn't need a working
   // host) and proves the plain save path succeeds.
+  //
+  // Email therefore stays OFF for the rest of the suite, which is what the
+  // later files assert against (the "deliver this password in person" notice
+  // in 12-admin-user-lifecycle). 13-payroll-report turns it on for real, and
+  // runs last precisely so that switch cannot affect anything before it.
   await page.locator('input[type="checkbox"]').first().uncheck();
   await page.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText("SMTP settings saved.")).toBeVisible();

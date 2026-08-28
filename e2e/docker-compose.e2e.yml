@@ -14,6 +14,37 @@ services:
   backup:
     container_name: zerf-e2e-backup
 
+  # A real SMTP server for the e2e stack only — never part of a deployment.
+  #
+  # Some behaviour simply cannot be reached without one. Saving SMTP in the
+  # enabled state re-validates the connection server-side, so an unreachable
+  # host can only ever be *tested*, never persisted as enabled; and the
+  # payroll report refuses to be switched on until email is configured. Both
+  # paths were therefore untestable through the UI until the stack could
+  # actually accept a message.
+  #
+  # It sits on the internal `private` network next to postgres: the app
+  # reaches it as `mailpit:1025`, and nothing is published to the host.
+  mailpit:
+    image: axllent/mailpit:v1.21
+    container_name: zerf-e2e-mailpit
+    restart: unless-stopped
+    environment:
+      # Accept anything: the point is a reachable, message-accepting server,
+      # not credential handling. Plain SMTP, so the app's "None" encryption
+      # setting matches.
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+    networks:
+      - private
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    security_opt:
+      - no-new-privileges:true
+
 volumes:
   postgres_data:
     name: zerf_e2e_postgres_data

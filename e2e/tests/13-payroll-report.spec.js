@@ -16,6 +16,7 @@ import { test, expect } from "@playwright/test";
 import {
   changeTempPassword,
   createUserViaAdminUi,
+  enableSmtpForE2E,
   readCredentials,
   signIn,
   storageStatePath,
@@ -51,6 +52,16 @@ test.describe("payroll report configuration", () => {
       startDateOffsetDays: PAYROLL_START_OFFSET_DAYS,
     });
     writeCredential("payroll_employee", PAYROLL_EMPLOYEE.email, password);
+  });
+
+  // The payroll report is delivered by email and nothing else, so it refuses
+  // to be switched on until email works. Everything before this file runs with
+  // email off (see 03-admin-config), which is why this switch lives here, in
+  // the file that already runs last.
+  test("admin: switch email on so the report can be enabled", async ({
+    page,
+  }) => {
+    await enableSmtpForE2E(page);
   });
 
   test("admin: turn the payroll report on", async ({ page }) => {

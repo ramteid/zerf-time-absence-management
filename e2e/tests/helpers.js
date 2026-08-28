@@ -443,3 +443,65 @@ export async function createUserViaAdminUi(
   await expect(page.getByText(`${firstName} ${lastName}`)).toBeVisible();
   return password;
 }
+
+// Hostname and port of the SMTP server the e2e stack runs (see
+// docker-compose.e2e.yml). The app reaches it over the internal `private`
+// network, so this is a container name, not a host address.
+export const E2E_SMTP_HOST = "mailpit";
+export const E2E_SMTP_PORT = "1025";
+
+// Fills the Settings -> Email form. Does not save — callers decide whether to
+// press Save, because saving in the enabled state makes the backend re-verify
+// the connection and reject a host it cannot reach.
+//
+// AdminEmail.svelte's load() replaces the whole local settings object once
+// GET /settings resolves, so anything typed before that lands is silently
+// wiped. Waiting for that response first is what makes the fill stick.
+// `.endsWith` (not `.includes`) matters: App.svelte's boot also requests
+// /api/v1/settings/public, which would otherwise resolve this too early.
+export async function fillSmtpSettings(
+  page,
+  { host, port = "587", from, encryption = "starttls", enabled },
+) {
+  const settingsLoaded = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/v1/settings") &&
+      response.request().method() === "GET",
+  );
+  await page.goto("/settings/email");
+  await settingsLoaded;
+
+  // Three checkboxes exist on this page in DOM order: Enable SMTP, Enable
+  // reminders, Enable approval reminders. The latter two start disabled until
+  // SMTP is enabled, so ".first()" unambiguously targets "Enable SMTP"
+  // regardless of their disabled state.
+  const enableSmtp = page.locator('input[type="checkbox"]').first();
+  if (enabled) {
+    await enableSmtp.check();
+  } else {
+    await enableSmtp.uncheck();
+  }
+  await page.locator("#smtp-host").fill(host);
+  await page.locator("#smtp-port").fill(port);
+  await page.locator("#smtp-from").fill(from);
+  await page.locator("#smtp-encryption").selectOption(encryption);
+}
+
+// Switches email delivery on against the stack's own SMTP server and saves it.
+// Saving with SMTP enabled only succeeds because that server is reachable —
+// the backend re-runs its connection test on every enabled save.
+//
+// Features that require working email (currently the payroll report) cannot be
+// configured until this has run.
+export async function enableSmtpForE2E(page) {
+  await fillSmtpSettings(page, {
+    host: E2E_SMTP_HOST,
+    port: E2E_SMTP_PORT,
+    from: "Zerf <noreply@e2e.test>",
+    // Plain SMTP: the stack's mail server is not configured for TLS.
+    encryption: "none",
+    enabled: true,
+  });
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("SMTP settings saved.")).toBeVisible();
+}
