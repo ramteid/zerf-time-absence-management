@@ -167,6 +167,14 @@ pub struct MonthReport {
     pub weeks_all_submitted: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub weeks_all_approved: Option<bool>,
+    /// Weeks of the reported period the user has handed in, and how many weeks
+    /// the period covers at all — the "x of y" on the Submissions tile. `None`
+    /// for people without a submission obligation and on the PDF/CSV paths,
+    /// which do not show the tile. See [`weeks_submission_counts`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub weeks_submitted: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub weeks_total: Option<i64>,
     /// Status of the calendar week containing `today`, but only when `today`
     /// falls inside this month. One of `draft | partial | submitted | approved
     /// | rejected`, mirroring the frontend `weekStatus` helper exactly. `None`
@@ -487,6 +495,8 @@ async fn build_range_with_user_core(
         category_totals: category_minutes_by_name,
         weeks_all_submitted: None,
         weeks_all_approved: None,
+        weeks_submitted: None,
+        weeks_total: None,
         current_week_status: None,
     })
 }
@@ -763,23 +773,83 @@ pub async fn build_range(
     build_range_with_user(pool, &user, from, to, label).await
 }
 
+/// Range report for the Reports page: [`build_range`] plus the Submissions
+/// tile's week counts. The CSV and PDF paths keep using the plain
+/// [`build_range`] — they do not show the tile and would pay for the extra
+/// week scan on every rendered person.
+pub async fn build_range_for_page(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    from: NaiveDate,
+    to: NaiveDate,
+    label: &str,
+) -> AppResult<MonthReport> {
+    let repo_user = crate::repository::UserDb::new(pool.clone())
+        .find_by_id(user_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let user = crate::services::users::repo_user_to_auth_user(repo_user);
+    let mut report = build_range_with_user(pool, &user, from, to, label).await?;
+    attach_week_submission_counts(pool, &user, from, to, &mut report).await?;
+    Ok(report)
+}
+
 /// Collects the Monday of every fully elapsed week (Sunday < today) that overlaps the given month.
 pub fn complete_weeks_in_month(
     month_start: NaiveDate,
     month_end: NaiveDate,
     today: NaiveDate,
 ) -> Vec<NaiveDate> {
+    weeks_in_month_to_judge(month_start, month_end, today, false)
+}
+
+/// Weeks of the month a completeness check looks at.
+///
+/// Without `include_running_week` only fully elapsed weeks count — the view an
+/// employee gets, where the week they are working can obviously not be held
+/// against them ([`complete_weeks_in_month`]).
+///
+/// With it, the week currently being worked counts too, and counts as *not*
+/// handed in until it actually is. The payroll month-finality gate needs this
+/// for the month that is still running: a week can be submitted the moment the
+/// employee knows they will not work its remaining days, so "not submitted yet"
+/// is the honest state of the running week — and reading its drafts as
+/// "waiting for approval" pointed approvers at work that was never handed to
+/// them. Weeks that have not started at all are never judged.
+pub fn weeks_in_month_to_judge(
+    month_start: NaiveDate,
+    month_end: NaiveDate,
+    today: NaiveDate,
+    include_running_week: bool,
+) -> Vec<NaiveDate> {
     let first_monday = crate::time_calc::week_monday(month_start);
     let last_monday = crate::time_calc::week_monday(month_end);
     let mut mondays = Vec::new();
     let mut current = first_monday;
     while current <= last_monday {
-        if current + Duration::days(6) < today {
+        let has_elapsed = current + Duration::days(6) < today;
+        let is_running = !has_elapsed && current <= today;
+        if has_elapsed || (include_running_week && is_running) {
             mondays.push(current);
         }
         current += Duration::days(7);
     }
     mondays
+}
+
+/// Last day of a period that time evaluation is allowed to judge.
+///
+/// Time is judged in whole weeks, so the cut runs along a week boundary: a
+/// period that is still running is judged up to the Sunday of the week being
+/// worked — that week counts, but nothing beyond it, because a week that has
+/// not started cannot be missing. A period that is already over is judged in
+/// full; everything in it was due long ago.
+pub fn judged_period_end(to: NaiveDate, today: NaiveDate) -> NaiveDate {
+    if to < today {
+        return to;
+    }
+    let running_week_sunday = crate::time_calc::week_monday(today) + Duration::days(6);
+    to.min(running_week_sunday)
 }
 
 /// Fetches holidays, absent days, submitted dates, and incomplete dates for the
@@ -865,13 +935,28 @@ async fn load_export_week_check_data(
     Ok((holiday_set, absent_days, submitted_dates, incomplete_dates))
 }
 
-/// Check whether a single week (given by its Monday) is fully covered.
-/// A week is covered when every required workday is either before the user's start,
-/// a holiday, covered by an absence, or has an entry with the given status_check.
+/// Check whether a single week (given by its Monday) is accounted for.
+///
+/// Zerf judges recorded time in whole weeks, never in single days. Employees
+/// hand in a week as one unit, so a single day carrying the required status
+/// (submitted/approved) is proof that the whole week was handed in — no matter
+/// how many days the person actually worked in it, and no matter how many
+/// workdays per week their contract has. Counting days here would punish
+/// everyone whose real working pattern is shorter than their contract's day
+/// quota: a part-timer who does their whole week in two long days had every
+/// week rejected as "incomplete" even though nothing was missing.
+///
+/// A week without any such day is only accounted for when there was nothing to
+/// hand in at all: every potential workday is a public holiday, covered by an
+/// absence, or lies before the user's start date.
+///
+/// `workdays_per_week` therefore no longer acts as a quota. It only says which
+/// days of the week can be workdays at all (Mon-Fri for regular contracts,
+/// the full week for irregular ones), which the "nothing was due" branch needs.
 ///
 /// Used by both `check_weeks_all_submitted` (checks for submitted/approved) and
 /// the flextime balance cutoff (checks for fully approved entries).
-fn week_is_fully_covered(
+fn week_is_accounted_for(
     week_monday: NaiveDate,
     holiday_set: &std::collections::HashSet<NaiveDate>,
     absent_days: &std::collections::HashSet<NaiveDate>,
@@ -879,26 +964,20 @@ fn week_is_fully_covered(
     user_start_date: NaiveDate,
     workdays_per_week: i16,
 ) -> bool {
-    let mut potential_days = 0i64;
-    let mut covered_days = 0i64;
-    for d in 0..7i64 {
-        let day = week_monday + Duration::days(d);
-        if !crate::time_calc::is_potential_workday(day, workdays_per_week) {
-            continue;
-        }
-        potential_days += 1;
+    let week_days = || (0..7i64).map(|d| week_monday + Duration::days(d));
 
-        if day < user_start_date
-            || holiday_set.contains(&day)
-            || absent_days.contains(&day)
-            || status_check_dates.contains(&day)
-        {
-            covered_days += 1;
-        }
+    // One day with the required status carries the entire week.
+    if week_days().any(|day| status_check_dates.contains(&day)) {
+        return true;
     }
 
-    let required_days = i64::from(workdays_per_week.max(0)).min(potential_days);
-    covered_days >= required_days
+    // Nothing was handed in — that is only fine if nothing was due.
+    week_days().all(|day| {
+        !crate::time_calc::is_potential_workday(day, workdays_per_week)
+            || day < user_start_date
+            || holiday_set.contains(&day)
+            || absent_days.contains(&day)
+    })
 }
 
 /// The set of weeks (identified by their Monday) that are "fully approved" —
@@ -994,7 +1073,7 @@ pub async fn approved_weeks(
     // Walk every elapsed week from the user's first week through the most
     // recent one, deciding approval independently for each. (`history_from`
     // may land a few days before `user_start_date` when the start date isn't
-    // a Monday; `week_is_fully_covered` already treats days before the start
+    // a Monday; `week_is_accounted_for` already treats days before the start
     // date as trivially covered, so that partial first week is judged
     // correctly too.)
     let mut mondays = std::collections::HashSet::new();
@@ -1006,7 +1085,7 @@ pub async fn approved_weeks(
             unapproved_dates.contains(&day)
         });
         if !week_has_unapproved
-            && week_is_fully_covered(
+            && week_is_accounted_for(
                 current_monday,
                 &holiday_set,
                 &absent_days,
@@ -1065,7 +1144,7 @@ pub fn check_weeks_all_submitted(
             return false;
         }
 
-        if !week_is_fully_covered(
+        if !week_is_accounted_for(
             week_monday,
             holiday_set,
             absent_days,
@@ -1210,6 +1289,7 @@ pub async fn build_month(
     .await?;
     report.weeks_all_submitted = Some(all_submitted);
     report.weeks_all_approved = Some(all_approved);
+    attach_week_submission_counts(pool, &user, from, to, &mut report).await?;
     // Pass the same submission_exempt flag used for month-level checks, so
     // zero-weekly-hours users are exempted from the current-week status nag
     // just as they are exempt from submission reminders and month-level checks.
@@ -1604,6 +1684,8 @@ async fn month_contribution_up_to_cutoff(
             category_totals: HashMap::new(),
             weeks_all_submitted: None,
             weeks_all_approved: None,
+            weeks_submitted: None,
+            weeks_total: None,
             current_week_status: None,
         });
     }
@@ -1800,8 +1882,10 @@ fn month_end_date(year: i32, month: u32) -> AppResult<NaiveDate> {
         .ok_or_else(|| AppError::BadRequest("date".into()))
 }
 
-/// Checks whether all fully elapsed working weeks overlapping the given month
-/// have been submitted for the user.
+/// Checks whether the working weeks overlapping the given month have been
+/// submitted for the user. `include_running_week` decides whether the week
+/// currently being worked is one of them — see [`weeks_in_month_to_judge`].
+#[allow(clippy::too_many_arguments)]
 pub async fn all_weeks_submitted_for_month(
     pool: &crate::db::DatabasePool,
     user_id: i64,
@@ -1810,9 +1894,11 @@ pub async fn all_weeks_submitted_for_month(
     user_start_date: NaiveDate,
     submission_exempt: bool,
     workdays_per_week: i16,
+    include_running_week: bool,
 ) -> AppResult<bool> {
     let today = crate::services::settings::app_today(pool).await;
-    let complete_week_mondays = complete_weeks_in_month(month_start, month_end, today);
+    let complete_week_mondays =
+        weeks_in_month_to_judge(month_start, month_end, today, include_running_week);
     if complete_week_mondays.is_empty() {
         return Ok(true);
     }
@@ -1835,9 +1921,92 @@ pub async fn all_weeks_submitted_for_month(
     ))
 }
 
+/// How many weeks of `[from, to]` the user has handed in, and how many weeks
+/// the period covers at all.
+///
+/// Weeks are counted whole. A period that starts on a Wednesday still stands or
+/// falls with that entire calendar week — the employee submits weeks, not days,
+/// so half a week is not a thing that can be handed in. Weeks that have not
+/// started yet are not counted at all: they cannot be missing. The week
+/// currently being worked *is* counted and stays "not handed in" until it is
+/// submitted, which an employee can do as soon as they know they will not book
+/// anything else in it.
+pub async fn weeks_submission_counts(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    from: NaiveDate,
+    to: NaiveDate,
+    user_start_date: NaiveDate,
+    workdays_per_week: i16,
+) -> AppResult<(i64, i64)> {
+    let today = crate::services::settings::app_today(pool).await;
+    // Weeks that ended before the user was employed are nobody's business —
+    // counting them would inflate both numbers with weeks that never existed
+    // for this person.
+    let week_mondays: Vec<NaiveDate> = weeks_in_month_to_judge(from, to, today, true)
+        .into_iter()
+        .filter(|monday| *monday + Duration::days(6) >= user_start_date)
+        .collect();
+    if week_mondays.is_empty() {
+        return Ok((0, 0));
+    }
+    // Requested absences are excused here, like everywhere the employee's own
+    // completeness is shown: they cannot book on a day a pending request covers.
+    let (holiday_set, absent_days, submitted_dates, incomplete_dates) =
+        load_week_check_data(pool, user_id, &week_mondays, true).await?;
+    let submitted = week_mondays
+        .iter()
+        .filter(|monday| {
+            check_weeks_all_submitted(
+                std::slice::from_ref(monday),
+                &holiday_set,
+                &absent_days,
+                &submitted_dates,
+                &incomplete_dates,
+                user_start_date,
+                workdays_per_week,
+            )
+        })
+        .count();
+    Ok((submitted as i64, week_mondays.len() as i64))
+}
+
+/// Fills the report's Submissions tile counts, unless the user has no
+/// submission obligation (assistants, zero-hour users) — the tile is hidden
+/// for them, and every week would count as handed in anyway.
+async fn attach_week_submission_counts(
+    pool: &crate::db::DatabasePool,
+    user: &crate::middleware::auth::User,
+    from: NaiveDate,
+    to: NaiveDate,
+    report: &mut MonthReport,
+) -> AppResult<()> {
+    if !crate::roles::has_submission_obligation(&user.role, user.weekly_hours) {
+        return Ok(());
+    }
+    let (submitted, total) = weeks_submission_counts(
+        pool,
+        user.id,
+        from,
+        to,
+        user.start_date,
+        user.workdays_per_week,
+    )
+    .await?;
+    report.weeks_submitted = Some(submitted);
+    report.weeks_total = Some(total);
+    Ok(())
+}
+
 /// Checks whether a month is settled enough for the immutable timesheet PDF archive.
 /// Pending absence requests hold this gate because PDF content only includes
 /// finalized absences.
+///
+/// `include_running_week` is set for a month that is still running: the week
+/// being worked is then judged too, and counts as not handed in until it is
+/// submitted (see [`weeks_in_month_to_judge`]). A month that is already over
+/// never has a running week of its own to judge.
+#[allow(clippy::too_many_arguments)]
 pub async fn all_weeks_ready_for_timesheet_export(
     pool: &crate::db::DatabasePool,
     user_id: i64,
@@ -1846,9 +2015,11 @@ pub async fn all_weeks_ready_for_timesheet_export(
     user_start_date: NaiveDate,
     submission_exempt: bool,
     workdays_per_week: i16,
+    include_running_week: bool,
 ) -> AppResult<bool> {
     let today = crate::services::settings::app_today(pool).await;
-    let complete_week_mondays = complete_weeks_in_month(month_start, month_end, today);
+    let complete_week_mondays =
+        weeks_in_month_to_judge(month_start, month_end, today, include_running_week);
     if complete_week_mondays.is_empty() {
         return Ok(true);
     }
@@ -1856,9 +2027,12 @@ pub async fn all_weeks_ready_for_timesheet_export(
         return Ok(true);
     }
 
+    // Same window the weeks above cover: an undecided request for a week that
+    // has not started yet cannot make the month unsettled (see
+    // [`judged_period_end`]).
     let reports_db = crate::repository::ReportDb::new(pool.clone());
     if reports_db
-        .has_requested_absences_in_period(user_id, month_start, month_end)
+        .has_requested_absences_in_period(user_id, month_start, judged_period_end(month_end, today))
         .await?
     {
         return Ok(false);
@@ -1926,6 +2100,12 @@ impl MonthExportReadiness {
 /// else must have all elapsed weeks submitted and no pending absence request in
 /// the period, because both would change the exported content afterwards.
 ///
+/// Weeks are judged as a whole, never single days. For a month that is already
+/// over that means every week of it; for the month currently running the week
+/// being worked is judged too and counts as not handed in until it is
+/// submitted, while weeks that have not started yet are ignored (see
+/// [`judged_period_end`] and [`weeks_in_month_to_judge`]).
+///
 /// `require_full_approval` additionally requires every time entry in the
 /// period to be approved, not merely submitted. The timesheet PDF export and
 /// the payroll report both need this — the PDF Total row and the payroll
@@ -1949,10 +2129,25 @@ pub async fn month_export_readiness(
         return Ok(MonthExportReadiness::PreStartContent);
     }
 
+    // Everything below asks "is this settled yet?", so it may only look at
+    // days that were actually due — see [`judged_period_end`]. For a finished
+    // month that is the whole month; for the month currently running it stops
+    // at the end of the week being worked.
+    let today = crate::services::settings::app_today(pool).await;
+    let judged_to = judged_period_end(to, today);
+    // A period that has not ended yet carries the week currently being worked,
+    // and that week has to be handed in like any other before the month can be
+    // called final.
+    let period_is_running = to >= today;
+    if judged_to < from {
+        // The period has not started at all: nothing in it can be missing yet.
+        return Ok(MonthExportReadiness::Ready);
+    }
+
     let is_historical_only = user.archived_at.is_some() || !user.active || !user.tracks_time;
     if is_historical_only {
         if reports_db
-            .has_unresolved_time_entries_in_range(user.id, from, to)
+            .has_unresolved_time_entries_in_range(user.id, from, judged_to)
             .await?
         {
             return Ok(MonthExportReadiness::UnresolvedTimeEntries);
@@ -1963,7 +2158,7 @@ pub async fn month_export_readiness(
     // Pending absences block export regardless of submission obligation – a payroll-relevant
     // requested absence means the month is not settled, even for assistants/zero-hour users.
     if reports_db
-        .has_requested_absences_in_period(user.id, from, to)
+        .has_requested_absences_in_period(user.id, from, judged_to)
         .await?
     {
         return Ok(MonthExportReadiness::PendingAbsenceRequests);
@@ -1978,6 +2173,7 @@ pub async fn month_export_readiness(
         user.start_date,
         submission_exempt,
         user.workdays_per_week,
+        period_is_running,
     )
     .await?;
     if !submitted {
@@ -1986,7 +2182,7 @@ pub async fn month_export_readiness(
 
     if require_full_approval
         && reports_db
-            .has_unresolved_time_entries_in_range(user.id, from, to)
+            .has_unresolved_time_entries_in_range(user.id, from, judged_to)
             .await?
     {
         return Ok(MonthExportReadiness::UnapprovedTimeEntries);
@@ -2392,53 +2588,82 @@ mod tests {
         );
     }
 
-    /// The flextime cutoff scan reuses `week_is_fully_covered` with the set of
-    /// *approved* days. These cases pin the rules it depends on: a week only
-    /// counts when every required workday is approved, excused by a holiday or
-    /// an absence, or predates employment.
+    /// The flextime cutoff scan reuses `week_is_accounted_for` with the set of
+    /// *approved* days. A week is judged as a whole: one approved day carries
+    /// it, whatever the rest of the week looks like.
     #[test]
-    fn week_is_fully_covered_requires_every_required_workday() {
+    fn week_is_accounted_for_accepts_a_week_with_a_single_status_day() {
         let monday = NaiveDate::from_ymd_opt(2026, 5, 4).unwrap();
         let long_ago = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
-        let approved: HashSet<NaiveDate> =
+        let full_week: HashSet<NaiveDate> =
             (0..5).map(|offset| monday + Duration::days(offset)).collect();
 
-        assert!(week_is_fully_covered(
+        assert!(week_is_accounted_for(
             monday,
             &HashSet::new(),
             &HashSet::new(),
-            &approved,
+            &full_week,
             long_ago,
             5,
         ));
 
-        // One unapproved workday is enough to disqualify the week.
-        let mut missing_friday = approved.clone();
-        missing_friday.remove(&(monday + Duration::days(4)));
-        assert!(!week_is_fully_covered(
+        // Only Monday approved — the week still counts, because the employee
+        // handed the week in and simply did not work the other days.
+        let monday_only: HashSet<NaiveDate> = [monday].into_iter().collect();
+        assert!(week_is_accounted_for(
             monday,
             &HashSet::new(),
             &HashSet::new(),
-            &missing_friday,
+            &monday_only,
+            long_ago,
+            5,
+        ));
+    }
+
+    /// A week with nothing handed in is only accounted for when nothing was
+    /// due: every potential workday excused by a holiday or an absence.
+    #[test]
+    fn week_is_accounted_for_requires_something_when_days_were_due() {
+        let monday = NaiveDate::from_ymd_opt(2026, 5, 4).unwrap();
+        let long_ago = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
+
+        assert!(!week_is_accounted_for(
+            monday,
+            &HashSet::new(),
+            &HashSet::new(),
+            &HashSet::new(),
             long_ago,
             5,
         ));
 
-        // ... unless that day is excused by a holiday or an approved absence.
-        let friday: HashSet<NaiveDate> = [monday + Duration::days(4)].into_iter().collect();
-        assert!(week_is_fully_covered(
+        // Mon-Fri excused by holidays: nothing was due, so the week is fine.
+        let workweek: HashSet<NaiveDate> =
+            (0..5).map(|offset| monday + Duration::days(offset)).collect();
+        assert!(week_is_accounted_for(
             monday,
-            &friday,
+            &workweek,
             &HashSet::new(),
-            &missing_friday,
+            &HashSet::new(),
             long_ago,
             5,
         ));
-        assert!(week_is_fully_covered(
+        // ... the same via an absence.
+        assert!(week_is_accounted_for(
             monday,
             &HashSet::new(),
-            &friday,
-            &missing_friday,
+            &workweek,
+            &HashSet::new(),
+            long_ago,
+            5,
+        ));
+        // One unexcused workday left over is enough to fail again.
+        let mut without_friday = workweek.clone();
+        without_friday.remove(&(monday + Duration::days(4)));
+        assert!(!week_is_accounted_for(
+            monday,
+            &HashSet::new(),
+            &without_friday,
+            &HashSet::new(),
             long_ago,
             5,
         ));
@@ -2447,9 +2672,9 @@ mod tests {
     /// A week that lies entirely before the user's first day counts as covered,
     /// so the cutoff scan does not stall on pre-employment weeks.
     #[test]
-    fn week_is_fully_covered_excuses_weeks_before_the_user_started() {
+    fn week_is_accounted_for_excuses_weeks_before_the_user_started() {
         let monday = NaiveDate::from_ymd_opt(2026, 5, 4).unwrap();
-        assert!(week_is_fully_covered(
+        assert!(week_is_accounted_for(
             monday,
             &HashSet::new(),
             &HashSet::new(),
@@ -2459,31 +2684,25 @@ mod tests {
         ));
     }
 
-    /// Part-time contracts owe fewer days than the calendar offers, so the week
-    /// is covered as soon as the contracted number of days is accounted for.
+    /// The contract's day count must not change the verdict: the same two
+    /// handed-in days are enough for a 3-day and for a 5-day contract.
     #[test]
-    fn week_is_fully_covered_honours_a_part_time_day_quota() {
+    fn week_is_accounted_for_ignores_the_contracted_day_count() {
         let monday = NaiveDate::from_ymd_opt(2026, 5, 4).unwrap();
         let long_ago = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
-        let three_days: HashSet<NaiveDate> =
-            (0..3).map(|offset| monday + Duration::days(offset)).collect();
+        let two_days: HashSet<NaiveDate> =
+            (0..2).map(|offset| monday + Duration::days(offset)).collect();
 
-        assert!(week_is_fully_covered(
-            monday,
-            &HashSet::new(),
-            &HashSet::new(),
-            &three_days,
-            long_ago,
-            3,
-        ));
-        assert!(!week_is_fully_covered(
-            monday,
-            &HashSet::new(),
-            &HashSet::new(),
-            &three_days,
-            long_ago,
-            5,
-        ));
+        for workdays_per_week in [3, 5] {
+            assert!(week_is_accounted_for(
+                monday,
+                &HashSet::new(),
+                &HashSet::new(),
+                &two_days,
+                long_ago,
+                workdays_per_week,
+            ));
+        }
     }
 
     #[test]
@@ -2505,8 +2724,10 @@ mod tests {
             5,
         ));
 
-        submitted_dates.remove(&(monday + Duration::days(4)));
-        assert!(!check_weeks_all_submitted(
+        // Only Monday booked: the employee handed the week in as a unit, so it
+        // counts as submitted — days are never counted against a quota.
+        submitted_dates.retain(|day| *day == monday);
+        assert!(check_weeks_all_submitted(
             &complete_week_mondays,
             &HashSet::new(),
             &HashSet::new(),
@@ -2673,6 +2894,46 @@ mod tests {
         assert_eq!(categories[2].category, "C");
     }
 
+    /// With `include_running_week` the week being worked joins the list, but a
+    /// week that has not started yet never does.
+    #[test]
+    fn weeks_in_month_to_judge_adds_the_running_week_only() {
+        let month_start = NaiveDate::from_ymd_opt(2026, 8, 1).unwrap();
+        let month_end = NaiveDate::from_ymd_opt(2026, 8, 31).unwrap();
+        // Saturday of the week starting Aug 24; Aug 31 starts a week that has
+        // not begun yet.
+        let today = NaiveDate::from_ymd_opt(2026, 8, 29).unwrap();
+
+        let elapsed_only = weeks_in_month_to_judge(month_start, month_end, today, false);
+        assert_eq!(
+            elapsed_only.last(),
+            Some(&NaiveDate::from_ymd_opt(2026, 8, 17).unwrap())
+        );
+
+        let with_running = weeks_in_month_to_judge(month_start, month_end, today, true);
+        assert_eq!(
+            with_running.last(),
+            Some(&NaiveDate::from_ymd_opt(2026, 8, 24).unwrap()),
+            "the week being worked has to be judged too"
+        );
+        assert_eq!(with_running.len(), elapsed_only.len() + 1);
+    }
+
+    /// The judged window ends with the week being worked while the period is
+    /// still running, and covers a finished period completely.
+    #[test]
+    fn judged_period_end_stops_after_the_running_week() {
+        let month_end = NaiveDate::from_ymd_opt(2026, 8, 31).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 8, 29).unwrap();
+        assert_eq!(
+            judged_period_end(month_end, today),
+            NaiveDate::from_ymd_opt(2026, 8, 30).unwrap()
+        );
+
+        let july_end = NaiveDate::from_ymd_opt(2026, 7, 31).unwrap();
+        assert_eq!(judged_period_end(july_end, today), july_end);
+    }
+
     /// `complete_weeks_in_month` returns an empty vec when today is the very
     /// first day of the month (no week can have elapsed yet).
     #[test]
@@ -2833,6 +3094,8 @@ mod tests {
             category_totals: HashMap::new(),
             weeks_all_submitted: Some(true),
             weeks_all_approved: Some(true),
+            weeks_submitted: None,
+            weeks_total: None,
             current_week_status: None,
         };
 

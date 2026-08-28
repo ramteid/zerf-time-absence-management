@@ -561,6 +561,32 @@ describe("Dashboard", () => {
       expect(payrollCalls()).toBe(1);
     });
 
+    it("re-reads the status when the detail list is opened", async () => {
+      // The overrides object is read on every call, so changing it here is
+      // what "somebody approved something in the meantime" looks like.
+      const overrides = { payrollStatus: { ...mockState.payrollStatus } };
+      api.mockImplementation(approverApi(overrides));
+
+      component = mount(Dashboard, { target });
+      await settle();
+      await settle();
+      await waitForText(target, "1 of 2 done");
+
+      const before = payrollCalls();
+      overrides.payrollStatus = {
+        ...mockState.payrollStatus,
+        ready: 2,
+        not_submitted: 0,
+      };
+
+      target.querySelector(".payroll-card-button").click();
+      await settle();
+      await settle();
+
+      expect(payrollCalls()).toBe(before + 1);
+      await waitForText(target, "2 of 2 done");
+    });
+
     it("is not requested at all for someone who cannot approve", async () => {
       currentUser.set({
         id: 3,

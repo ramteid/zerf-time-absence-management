@@ -302,6 +302,36 @@ impl ReportDb {
             .await?)
     }
 
+    /// Returns true when the period contains time entries the employee has not
+    /// handed in: drafts, or rejected rows nobody has corrected. Unlike
+    /// [`Self::has_unresolved_time_entries_in_range`] this deliberately
+    /// excludes `submitted` — those *are* waiting for an approver, and telling
+    /// the two apart is what keeps "not submitted" from being reported as
+    /// "waiting for approval" on the payroll dashboard card.
+    pub async fn has_unsubmitted_time_entries_in_range(
+        &self,
+        user_id: i64,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<bool> {
+        let sql = format!(
+            "SELECT EXISTS ( \
+                SELECT 1 FROM time_entries te \
+                WHERE te.user_id=$1 \
+                AND te.entry_date BETWEEN $2 AND $3 \
+                AND (te.status = 'draft' \
+                     OR ({EFFECTIVE_REJECTED_TIME_ENTRY_CONDITION})) \
+             )"
+        );
+        // AssertSqlSafe: the formatted fragment is a compile-time status predicate.
+        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+            .bind(user_id)
+            .bind(from)
+            .bind(to)
+            .fetch_one(&self.pool)
+            .await?)
+    }
+
     /// User IDs with at least one time entry in the period, regardless of its
     /// workflow status. Payroll uses this to ignore assistants who did not
     /// work at all in a given month while retaining every assistant who has

@@ -481,9 +481,11 @@ Flextime (positive or negative balance) is calculated as:
 Only **crediting entries** count as actual work hours in this calculation. Non-crediting entries are recorded and approved like all others, but they do not contribute to your flextime.
 
 **Only fully approved weeks count toward the flextime balance.** A week
-counts once every workday in it is either approved, a public holiday, or
-covered by an approved absence — and nothing in that week is still waiting for
-approval or was rejected. A week that does not meet this bar adds neither
+counts once its entries are approved and nothing in it is still waiting for
+approval or was rejected. Here too the week is judged as a whole: how many days
+you worked in it makes no difference. A week you booked nothing in only counts
+when nothing was due — every working day a public holiday or covered by an
+approved absence. A week that does not meet this bar adds neither
 hours nor targets, so it can never pull your balance down or up — whether it
 is the most recent week, or an older one still waiting to be corrected and
 resubmitted while a later week has already been approved. The balance is
@@ -632,25 +634,25 @@ The `Submissions` tile shows whether all required past weeks have been submitted
 
 ### How completeness is determined
 
-Completeness is checked per fully elapsed week against your configured
-`workdays per week` value. It does not matter whether you reached your weekly
-target hours; what counts is that the required number of days is covered.
+Zerf always looks at whole weeks, never at single days. You hand a week in as
+one piece, so once it is submitted it counts as submitted everywhere — no
+matter how many days you worked in it, and no matter how many working days per
+week your contract has. It also does not matter whether you reached your weekly
+target hours.
 
-Important: Zerf does **not** pin you to fixed weekdays (for example, not
-automatically "Mon-Thu" for 4-day schedules). For 1-5 day schedules, days are
-treated as flexible within Monday-Friday.
+You are free to spread your working days across the week as you like; Zerf does
+not expect you on fixed weekdays.
 
 A week is considered **complete** when:
 
 - No entry anywhere in the week is still in draft state, and no rejected entry
   remains without an overlapping approved correction, **and**
-- The week has enough covered days for your configured day quota
-  (`workdays per week`). A day is covered when it has at least one submitted or
-  approved entry (crediting or non-crediting), or is excused by an approved,
-  cancellation-pending, or requested absence, a public holiday, or falling
-  before your contract start date.
-  (A week with no entries at all is complete when enough days are excused,
-  for example a full-vacation week.)
+- You handed the week in: at least one day of it has a submitted or approved
+  entry (crediting or non-crediting).
+  (A week without any entry is complete when there was nothing to hand in:
+  every working day is excused by an approved, cancellation-pending, or
+  requested absence, a public holiday, or falls before your contract start
+  date — a full-vacation week, for example.)
 
 For users with role `assistant`, past-week completeness is always treated as
 complete.
@@ -660,12 +662,20 @@ A week is considered **incomplete** when:
 - Any entry anywhere in the week is still in draft state, or a rejected entry
   has not yet been closed by an overlapping approved correction,
   **or**
-- Covered days in the week are fewer than your configured weekly day quota.
-  Submitting only some days can still be incomplete if the quota is not met.
+- You booked nothing at all in a week that still had working days to account
+  for.
 
 The same rule drives the Submissions tile, the month report, the team
-report's submission column, the monthly submission reminder, and the
-scheduled timesheet PDF upload. They can never disagree with each other.
+report's submission column, the monthly submission reminder, the payroll
+report, and the scheduled timesheet PDF upload. They can never disagree with
+each other.
+
+The week you are currently working is not part of this check — it is not over
+yet. Two places do look at it: the **Payroll Report** card on the dashboard,
+because a month can only be called final once the running week has been handed
+in too, and the **Submissions** tile in the report, which counts every week of
+the shown period. In both, the running week stays "not submitted" until you
+submit it.
 
 ### Important: non-crediting entries affect completeness
 
@@ -960,6 +970,17 @@ Zerf distinguishes between workflow coverage and work-credit math.
 - The entries table includes a **Comment** column showing any note attached to
   an entry. Long comments are shortened with an ellipsis; hover over one to read
   the full text. Entries without a comment show a dash.
+- Rows whose hours are not final yet are shown in grey: entries still in draft,
+  and entries that have been submitted but not approved. Rejected entries are
+  struck through.
+- Next to **Logged** a **Submissions** tile shows how many weeks of the shown
+  period you have handed in, for example *3 of 4 weeks*. Weeks are counted
+  whole: a week that reaches beyond the start or the end of the period is
+  counted completely, and it makes no difference on how many days of it you
+  booked. The week you are currently working counts too and stays open until
+  you submit it — you can submit a week as soon as you know you will not book
+  anything else in it. The tile is not shown for assistants or for users
+  without weekly hours, who have no submission duty.
 - Team leads and admins additionally see an **Employee** / **Team** switch at
   the top of the page. The Employee tab shows one person's report at a time
   (with a dropdown to pick who); the Team tab shows the whole team side by
@@ -1934,8 +1955,16 @@ without any time entry are omitted:
 | Red | Weeks are still missing, or the data needs an administrator's attention. |
 
 Clicking the card opens the full list, with the people who are still missing at
-the top. Clicking a person opens their report for that month, so you can go
-straight to what needs approving.
+the top. The list is re-read every time you open it, so approvals you just
+granted on the dashboard are already reflected. Clicking a person opens their
+report for that month, so you can go straight to what needs approving.
+
+When you look at the month that is currently running, the running week counts
+too: as long as somebody has not submitted it, they are listed as *Not
+submitted*. A week can be submitted as soon as you know you will not book
+anything else in it, so this is never a dead end. Entries that are still drafts
+are therefore never reported as waiting for approval — nobody has handed them
+in yet.
 
 Team leads see the counts and colours for **everyone**, so they can tell whether
 the report as a whole is ready. People outside their own team are shown as

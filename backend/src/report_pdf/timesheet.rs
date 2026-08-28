@@ -410,6 +410,8 @@ mod tests {
             category_totals: Default::default(),
             weeks_all_submitted: Some(true),
             weeks_all_approved: Some(true),
+            weeks_submitted: None,
+            weeks_total: None,
             current_week_status: None,
         };
         assert_eq!(range_total_minutes(&report), 450);
@@ -430,6 +432,8 @@ mod tests {
             category_totals: Default::default(),
             weeks_all_submitted: None,
             weeks_all_approved: None,
+            weeks_submitted: None,
+            weeks_total: None,
             current_week_status: None,
         };
         let sections = vec![TimesheetSection {

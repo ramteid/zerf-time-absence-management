@@ -415,18 +415,23 @@ pub async fn build_status(
 
 /// Colour for the readiness values that decide themselves.
 ///
-/// [`MonthExportReadiness::PendingAbsenceRequests`] is deliberately missing: the
-/// shared gate reports it *before* it ever looks at week submission, so on its
-/// own it cannot tell "handed everything in, waiting for a decision" (amber)
-/// from "also still owes weeks" (red). [`status_for_member`] resolves it.
+/// Two variants are deliberately missing, because neither can be coloured
+/// without asking a second question, which [`status_for_member`] does:
+///
+/// * `PendingAbsenceRequests` — the shared gate reports it *before* it ever
+///   looks at week submission, so on its own it cannot tell "handed everything
+///   in, waiting for a decision" (amber) from "also still owes weeks" (red).
+/// * `UnapprovedTimeEntries` — it covers drafts and submitted rows alike. A
+///   draft is not waiting for anybody: nobody handed it in. Painting it amber
+///   sent approvers looking for work that was never submitted to them.
 fn unambiguous_status(readiness: MonthExportReadiness) -> Option<&'static str> {
     match readiness {
         MonthExportReadiness::Ready => Some(status_value::READY),
-        MonthExportReadiness::UnapprovedTimeEntries => Some(status_value::AWAITING_APPROVAL),
         MonthExportReadiness::WeeksNotSubmitted
         | MonthExportReadiness::UnresolvedTimeEntries
         | MonthExportReadiness::PreStartContent => Some(status_value::NOT_SUBMITTED),
-        MonthExportReadiness::PendingAbsenceRequests => None,
+        MonthExportReadiness::UnapprovedTimeEntries
+        | MonthExportReadiness::PendingAbsenceRequests => None,
     }
 }
 
@@ -446,10 +451,30 @@ async fn status_for_member(
     if let Some(status) = unambiguous_status(readiness) {
         return Ok(status);
     }
+    if readiness == MonthExportReadiness::UnapprovedTimeEntries {
+        // Drafts and rejected leftovers are the employee's move, not an
+        // approver's: report them as not submitted. Only genuinely submitted
+        // rows are "waiting for approval".
+        let today = crate::services::settings::app_today(&app_state.pool).await;
+        let judged_to = crate::services::reports::judged_period_end(to, today);
+        let unsubmitted = app_state
+            .db
+            .reports
+            .has_unsubmitted_time_entries_in_range(user.id, from, judged_to)
+            .await?;
+        return Ok(if unsubmitted {
+            status_value::NOT_SUBMITTED
+        } else {
+            status_value::AWAITING_APPROVAL
+        });
+    }
     // Only `PendingAbsenceRequests` reaches here. Ask the week question the
     // gate skipped: an open request is "submitted, awaiting approval" (amber),
     // but missing weeks outrank it (red).
     let submission_exempt = !crate::roles::has_submission_obligation(&user.role, user.weekly_hours);
+    // Same window the readiness gate used: while the month is still running,
+    // the week being worked counts and is not handed in until it is submitted.
+    let today = crate::services::settings::app_today(&app_state.pool).await;
     let weeks_in = crate::services::reports::all_weeks_submitted_for_month(
         &app_state.pool,
         user.id,
@@ -458,6 +483,7 @@ async fn status_for_member(
         user.start_date,
         submission_exempt,
         user.workdays_per_week,
+        to >= today,
     )
     .await?;
     Ok(if weeks_in {
@@ -986,10 +1012,6 @@ mod tests {
         use status_value::*;
         assert_eq!(unambiguous_status(MonthExportReadiness::Ready), Some(READY));
         assert_eq!(
-            unambiguous_status(MonthExportReadiness::UnapprovedTimeEntries),
-            Some(AWAITING_APPROVAL)
-        );
-        assert_eq!(
             unambiguous_status(MonthExportReadiness::WeeksNotSubmitted),
             Some(NOT_SUBMITTED)
         );
@@ -1003,14 +1025,22 @@ mod tests {
         );
     }
 
-    /// A pending absence request cannot pick its own colour: the shared gate
-    /// returns it before it checks week submission, so somebody who *also*
-    /// owes weeks would be painted amber instead of red. `status_for_member`
-    /// has to resolve it with an extra lookup — guard that it stays that way.
+    /// Two readiness values cannot pick their own colour and must stay in
+    /// `status_for_member`'s hands:
+    ///
+    /// * a pending absence request is returned before week submission is
+    ///   checked, so somebody who *also* owes weeks would be painted amber
+    ///   instead of red;
+    /// * unapproved entries cover drafts as well as submitted rows, and a
+    ///   draft was never handed to an approver.
     #[test]
-    fn pending_absence_requests_need_the_extra_week_lookup() {
+    fn ambiguous_readiness_needs_the_extra_lookup() {
         assert_eq!(
             unambiguous_status(MonthExportReadiness::PendingAbsenceRequests),
+            None
+        );
+        assert_eq!(
+            unambiguous_status(MonthExportReadiness::UnapprovedTimeEntries),
             None
         );
     }

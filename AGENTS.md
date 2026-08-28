@@ -123,6 +123,35 @@ math, queue backfill through the previous month, day-of-month deferral) and the
 `services::reports::month_export_readiness` gate, so they judge "this month is
 final" by the same rules.
 
+**Weeks, never days.** Every completeness/finality judgement in the app works on
+whole ISO weeks. `reports::week_is_accounted_for` is the single implementation:
+one day carrying the required status (submitted/approved) hands in the whole
+week, regardless of how many days the person worked and regardless of
+`workdays_per_week`; a week with nothing booked passes only when nothing was
+due (every potential workday a holiday, an absence, or before the start date).
+`workdays_per_week` survives in that function purely as the potential-day pool
+(Mon-Fri vs. the full week) — it is no longer a quota, because counting days
+punished part-timers whose real pattern is shorter than their contract's day
+count. Target hours and leave-day maths are a different question and still cap
+per week at `workdays_per_week` (`time_calc::count_workdays`).
+`reports::weeks_in_month_to_judge` decides *which* weeks a completeness check
+sees. The employee-facing views (Submissions tile, team report column,
+submission reminders) keep looking at fully elapsed weeks only. The month-export
+gate additionally judges the week being worked, but only while the period
+itself is still running (`month_export_readiness`'s `period_is_running`, i.e.
+the payroll tile's current-month peek): that week counts as *not* handed in
+until it is submitted, which is legitimate because a week can be submitted the
+moment the employee knows they will not book anything else in it. The flag must
+stay off for a finished month — on the 5th, August's trailing week (Aug 31-Sep 6)
+is still running, and judging it would block every month-end report for days.
+`reports::judged_period_end` matches that window: a running period is judged
+through the Sunday of the current week, a finished one in full.
+`reports::weeks_submission_counts` counts the same weeks for the personal
+report's Submissions tile ("x of y weeks", month *and* custom range) — it hangs
+off `build_month` and `build_range_for_page` only, never the plain
+`build_range` the CSV and PDF paths use, so a team PDF does not pay for a week
+scan per person.
+
 **Email delivery** (`email.rs`, `background/email_queue.rs`): almost every
 outbound email (password resets, absence decisions, reminders, error alerts)
 goes through `services::notifications::deliver` → `email::queue_email`, which
@@ -462,7 +491,7 @@ only for a finished month. Enabling the report at all requires
 (`update_smtp_settings`). `GET /reports/payroll-status` (leads only) backs the
 dashboard tile and reuses the scheduled path's member filter and readiness
 gate, so tile and *delivered* document can never disagree; names of people
-outside a team lead's own team are stripped server-side. "Already delivered" is derived from the queue (period reached `payroll_report_queue_period` **and** no longer in `payroll_report_queue`) rather than a stored marker, so it is correct on installations that predate the card. The tile's amber/red split cannot be read off `MonthExportReadiness` alone: the gate returns `PendingAbsenceRequests` before it checks week submission, so `status_for_member` re-checks `all_weeks_submitted_for_month` to keep "still owes weeks" red.
+outside a team lead's own team are stripped server-side. "Already delivered" is derived from the queue (period reached `payroll_report_queue_period` **and** no longer in `payroll_report_queue`) rather than a stored marker, so it is correct on installations that predate the card. The tile's amber/red split cannot be read off `MonthExportReadiness` alone: the gate returns `PendingAbsenceRequests` before it checks week submission, so `status_for_member` re-checks `all_weeks_submitted_for_month` to keep "still owes weeks" red. The dashboard re-fetches the status when the detail dialog is opened (`Dashboard.svelte`'s `openPayrollDetail`), because approvals granted on that page are exactly what the reader opens the list to verify.
 
 ### Integration tests
 

@@ -151,6 +151,13 @@ tr.entry-rejected > td {
   color: var(--text-tertiary);
 }
 
+/* Entries that are not approved yet (draft or submitted): greyed out, so a row
+   whose hours are not final is recognizable at a glance instead of only by its
+   status chip. */
+tr.entry-unapproved > td {
+  color: var(--text-tertiary);
+}
+
 /* ── Dialog (native <dialog>) ── */
 dialog {
   border: none;

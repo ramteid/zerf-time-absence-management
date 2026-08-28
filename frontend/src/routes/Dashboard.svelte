@@ -240,9 +240,20 @@
       payrollStatus = status?.enabled ? status : null;
     } catch {
       // A missing payroll status must not break the rest of the dashboard —
-      // the tile simply stays hidden.
-      payrollStatus = null;
+      // the tile simply stays hidden. While the detail list is open, the last
+      // known data stays on screen instead of the popup vanishing under the
+      // reader's hands.
+      if (!payrollDetailOpen) payrollStatus = null;
     }
+  }
+
+  // Opening the detail list always re-reads the status. Approvals granted on
+  // this page change who is still outstanding, and the reader opens the list
+  // precisely to check that — it must never answer with what was loaded when
+  // the page was opened.
+  function openPayrollDetail() {
+    payrollDetailOpen = true;
+    loadPayrollStatus();
   }
 
   function showCurrentPayrollMonth() {
@@ -544,7 +555,7 @@
           status={payrollStatus}
           {activeHelp}
           onHelpToggle={toggleHelp}
-          onOpen={() => (payrollDetailOpen = true)}
+          onOpen={openPayrollDetail}
           onShowCurrentMonth={showCurrentPayrollMonth}
         />
       {/if}

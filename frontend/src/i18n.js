@@ -95,7 +95,7 @@ const TRANSLATIONS = {
       "Used to calculate the prorated leave-account entitlement for employees who already worked before they started using the application. Leave empty to use the start date.",
     "Counts as work": "Counts as work",
     help_submission_status:
-      "Whether all required weeks in the selected month have been submitted.",
+      "How many weeks of the selected period you have submitted. A week counts as submitted no matter how many days you booked in it; a week that overlaps the start or end of the period counts as a whole week. The week currently running counts too and stays open until you submit it.",
     Approvals: "Approvals",
     "All approved": "All approved",
     Incomplete: "Incomplete",
@@ -103,6 +103,7 @@ const TRANSLATIONS = {
     "All submitted and approved": "All submitted and approved",
     "All submitted (approvals pending)": "All submitted (approvals pending)",
     "Weeks missing": "Weeks missing",
+    "{submitted} of {total} weeks": "{submitted} of {total} weeks",
     "Current week: still open": "Current week: still open",
     "Current week: draft": "Current week: draft",
     "Current week: partially submitted": "Current week: partially submitted",
@@ -1283,7 +1284,7 @@ const TRANSLATIONS = {
     help_medical_certificate_relevant:
       "Abwesenheiten dieser Kategorie zählen für die Schwelle durchgehender Krankheitstage, die in den Admin-Einstellungen konfiguriert ist. Sobald ein durchgehender Krankheitszeitraum diese Schwelle erreicht, werden die betroffenen Anträge als eAU-pflichtig markiert. Unabhängig von den obigen Optionen — eine Kategorie kann sich wie eine Krankmeldung verhalten, ohne dies zu zählen, oder umgekehrt.",
     help_submission_status:
-      "Zeigt an, ob alle erforderlichen Wochen im gewählten Monat eingereicht wurden.",
+      "Zeigt, wie viele Wochen des gewählten Zeitraums du eingereicht hast. Eine Woche zählt als eingereicht, egal an wie vielen Tagen du gebucht hast; eine Woche, die über Anfang oder Ende des Zeitraums hinausragt, zählt als ganze Woche. Die laufende Woche zählt mit und bleibt offen, bis du sie einreichst.",
     Approvals: "Genehmigungen",
     "All approved": "Alle genehmigt",
     Incomplete: "Unvollständig",
@@ -1292,6 +1293,7 @@ const TRANSLATIONS = {
     "All submitted (approvals pending)":
       "Alles eingereicht (Genehmigungen ausstehend)",
     "Weeks missing": "Wochen fehlen",
+    "{submitted} of {total} weeks": "{submitted} von {total} Wochen",
     "Current week: still open": "Aktuelle Woche: noch offen",
     "Current week: draft": "Aktuelle Woche: Entwurf",
     "Current week: partially submitted":

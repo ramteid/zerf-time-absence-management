@@ -5,7 +5,8 @@ use crate::roles::is_assistant_role;
 use crate::services::reports::{
     active_reportable_team_members, all_weeks_submitted_for_month, assert_can_access_user,
     build_flextime_for_user, build_month, build_month_without_submission_status,
-    build_overtime_rows_for_year, build_range, build_team_timesheet_sections,
+    build_overtime_rows_for_year, build_range, build_range_for_page,
+    build_team_timesheet_sections,
     build_timesheet_section, csv_response, flextime_adjustments_in_range,
     flextime_adjustments_through, month_bounds, parse_report_time, pdf_response,
     sort_categories_desc, validate_range, CategoryTotal, FlextimeDay, LeaveAccountCategory,
@@ -97,7 +98,9 @@ pub async fn range(
     assert_can_access_user(&app_state, &requester, target_user_id).await?;
     validate_range(query.from, query.to)?;
     let label = format!("{}_to_{}", query.from, query.to);
-    let report = build_range(
+    // The page variant: the Reports page shows the Submissions tile for a
+    // custom range too, so the week counts have to come along.
+    let report = build_range_for_page(
         &app_state.pool,
         target_user_id,
         query.from,
@@ -361,6 +364,9 @@ pub async fn team(
                     (Some(balance_min), Some(month_end.min(cutoff_date)))
                 };
 
+                // The team report's submission column is the employee's own
+                // view of "what do I still owe": the week they are working is
+                // not owed yet, so it stays out of the verdict.
                 let weeks_all_submitted = all_weeks_submitted_for_month(
                     &pool,
                     team_member.id,
@@ -369,6 +375,7 @@ pub async fn team(
                     team_member.start_date,
                     team_member_submission_exempt,
                     team_member.workdays_per_week,
+                    false,
                 )
                 .await?;
 

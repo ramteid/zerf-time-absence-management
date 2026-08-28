@@ -1,7 +1,7 @@
 //! End-to-end reports workflow tests running in a single container for efficiency.
 //! All test cases run sequentially within the same app instance.
 
-use chrono::{Datelike, NaiveDate};
+use chrono::{Datelike, Duration, NaiveDate};
 use reqwest::StatusCode;
 use serde_json::json;
 
@@ -698,6 +698,7 @@ async fn report_export_gate_waits_for_pending_absence_decision() {
         user_start_date,
         false,
         1,
+        false,
     )
     .await
     .expect("check user-facing completeness while absence pending");
@@ -730,6 +731,7 @@ async fn report_export_gate_waits_for_pending_absence_decision() {
         user_start_date,
         false,
         1,
+        false,
     )
     .await
     .expect("check export gate while absence pending");
@@ -753,6 +755,7 @@ async fn report_export_gate_waits_for_pending_absence_decision() {
         user_start_date,
         false,
         1,
+        false,
     )
     .await
     .expect("check export gate after absence rejection");
@@ -817,6 +820,7 @@ async fn report_export_gate_ignores_pending_absence_outside_export_month() {
         user_start_date,
         false,
         5,
+        false,
     )
     .await
     .expect("check export gate with adjacent pending absence");
@@ -1174,12 +1178,14 @@ async fn reports_full_workflow() {
             "flextime report with flextime reduction"
         );
         let rows = body["days"].as_array().unwrap();
-        // The week is incomplete, so the balance cutoff precedes both rows.
-        // Flextime data beyond that cutoff remains present for display but
-        // contributes neither target nor actual minutes to the balance.
-        assert_eq!(rows[0]["target_min"], 0);
+        // Weeks are judged as a whole: Tuesday's approved entry hands the week
+        // in, so the week counts toward the balance even though Wednesday to
+        // Friday hold nothing. Both days keep their target — a flextime
+        // reduction day is paid out of the flextime account, so it keeps its
+        // target too — while neither books crediting minutes.
+        assert_eq!(rows[0]["target_min"], per_day_target_minutes(39));
         assert_eq!(rows[0]["actual_min"], 0);
-        assert_eq!(rows[1]["target_min"], 0);
+        assert_eq!(rows[1]["target_min"], per_day_target_minutes(39));
         assert_eq!(rows[1]["actual_min"], 0);
 
         let (st, _body) = emp
@@ -1300,9 +1306,10 @@ async fn reports_full_workflow() {
         assert_eq!(st, StatusCode::OK, "flextime report");
         let rows = body["days"].as_array().unwrap();
         assert_eq!(rows[0]["target_min"], 0);
-        // The flextime balance stops at its cutoff, which precedes this
-        // incomplete week. The month report above covers the worked minutes.
-        assert_eq!(rows[0]["actual_min"], 0);
+        // The approved Monday hands the whole week in, so the week counts
+        // toward the balance: the sick day carries no target, and the hours
+        // worked on it still count as worked.
+        assert_eq!(rows[0]["actual_min"], 240);
     }
 
     // -- Reports include current day in hours and categories --
@@ -2231,6 +2238,62 @@ async fn a_rejected_week_behind_the_cutoff_does_not_pull_the_balance_down() {
         days[0]["cumulative_min"], 0,
         "week A and week C both net to zero; the rejected week B in between \
          must contribute nothing at all, not a full week's deficit: {body}"
+    );
+
+    app.cleanup().await;
+}
+
+/// The Submissions tile counts whole weeks of the shown period. Submitting a
+/// single day hands its week in, and a period that only covers part of a week
+/// still counts that week as a whole — the employee submits weeks, not days.
+#[tokio::test]
+async fn report_counts_submitted_weeks_of_the_shown_period() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, _lead_pw, _emp_id, emp_pw, monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "week-counts").await;
+    let emp = login_change_pw(&app, "emp-week-counts@example.com", &emp_pw).await;
+
+    create_and_submit_entry(&emp, &monday, cat_id).await;
+
+    let monday_date = NaiveDate::parse_from_str(&monday, "%Y-%m-%d").expect("monday");
+    let wednesday = (monday_date + Duration::days(2))
+        .format("%Y-%m-%d")
+        .to_string();
+
+    // A range that starts on the Wednesday of the booked week: one week, in.
+    let (st, report) = emp
+        .get(&format!(
+            "/api/v1/reports/range?from={wednesday}&to={wednesday}"
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK, "range report for a single day");
+    assert_eq!(
+        report["weeks_total"], 1,
+        "a period inside one week counts that whole week"
+    );
+    assert_eq!(
+        report["weeks_submitted"], 1,
+        "one submitted day hands the whole week in"
+    );
+
+    // The following week has nothing booked at all, so it is still owed.
+    let next_week_monday = (monday_date + Duration::days(7))
+        .format("%Y-%m-%d")
+        .to_string();
+    let next_week_tuesday = (monday_date + Duration::days(8))
+        .format("%Y-%m-%d")
+        .to_string();
+    let (st, report) = emp
+        .get(&format!(
+            "/api/v1/reports/range?from={next_week_monday}&to={next_week_tuesday}"
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK, "range report for the unbooked week");
+    assert_eq!(report["weeks_total"], 1);
+    assert_eq!(
+        report["weeks_submitted"], 0,
+        "a week with nothing booked is not handed in"
     );
 
     app.cleanup().await;

@@ -653,7 +653,15 @@
           </StatCard>
         {/if}
 
-        {#if periodMode === "month" && !reportData.isAssistant}
+        <!-- The Submissions tile counts whole weeks of the shown period, so it
+             works for a custom range as well. `weeks_total` is absent for
+             people without a submission obligation (assistants, zero-hour
+             users) and zero for a period whose weeks have not started yet —
+             both are cases where the tile has nothing to say. -->
+        {#if reportData.monthReport.weeks_total}
+          {@const weeksSubmitted = reportData.monthReport.weeks_submitted ?? 0}
+          {@const weeksTotal = reportData.monthReport.weeks_total}
+          {@const allWeeksIn = weeksSubmitted >= weeksTotal}
           {@const currentWeekStatus =
             reportData.monthReport.current_week_status}
           {@const currentWeekSub =
@@ -665,10 +673,9 @@
                   ? $t("Current week: needs revision")
                   : ""}
           <StatCard
-            color={reportData.monthReport.weeks_all_submitted
-              ? "var(--success-text)"
-              : "var(--warning-text)"}
-            sub={currentWeekSub}
+            color={allWeeksIn ? "var(--success-text)" : "var(--warning-text)"}
+            sub={currentWeekSub ||
+              (allWeeksIn ? $t("All submitted") : $t("Weeks missing"))}
           >
             <span slot="label" class="stat-card-label-help">
               <span>{$t("Submissions")}</span>
@@ -680,9 +687,10 @@
                 <Icon name="Info" size={12} />
               </button>
             </span>
-            {reportData.monthReport.weeks_all_submitted
-              ? $t("All submitted")
-              : $t("Weeks missing")}
+            {$t("{submitted} of {total} weeks", {
+              submitted: weeksSubmitted,
+              total: weeksTotal,
+            })}
           </StatCard>
         {/if}
       </div>
@@ -690,7 +698,7 @@
       {#if activeHelp === "logged"}
         <div class="report-note">{$t("help_logged")}</div>
       {/if}
-      {#if activeHelp === "approvals" && periodMode === "month" && !reportData.isAssistant}
+      {#if activeHelp === "approvals" && reportData.monthReport.weeks_total}
         <div class="report-note">{$t("help_submission_status")}</div>
       {/if}
     {/if}
@@ -780,7 +788,11 @@
             </thead>
             <tbody>
               {#each reportData.monthReport.entries as e, i (`${e.entry_date}-${e.start_time}-${e.end_time}-${i}`)}
-                <tr class:entry-rejected={e.status === "rejected"}>
+                <tr
+                  class:entry-rejected={e.status === "rejected"}
+                  class:entry-unapproved={e.status === "draft" ||
+                    e.status === "submitted"}
+                >
                   <td class="tab-num">{fmtDate(e.entry_date)}</td>
                   <td class="tab-num">{e.start_time?.slice(0, 5)}</td>
                   <td class="tab-num">{e.end_time?.slice(0, 5)}</td>

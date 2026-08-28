@@ -414,6 +414,31 @@ describe("PersonReport", () => {
     expect(target.textContent).toContain("25%");
   });
 
+  it("shows how many weeks of the period were submitted", async () => {
+    getMonthReport.mockResolvedValue(
+      monthReportFixture({ weeks_submitted: 3, weeks_total: 4 }),
+    );
+    component = mount(PersonReport, {
+      target,
+      props: { userId: 1, users, periodMode: "month", month: "2026-06" },
+    });
+    await waitForText(target, "3 of 4 weeks");
+    // Not all weeks are in, so the tile keeps the "still missing" wording.
+    await waitForText(target, "Weeks missing");
+  });
+
+  it("hides the submissions tile when the person has no submission duty", async () => {
+    // No week counts in the payload — the backend leaves them out for
+    // assistants and zero-hour users.
+    getMonthReport.mockResolvedValue(monthReportFixture());
+    component = mount(PersonReport, {
+      target,
+      props: { userId: 1, users, periodMode: "month", month: "2026-06" },
+    });
+    await waitForText(target, "Development");
+    expect(target.textContent).not.toContain("Submissions");
+  });
+
   it("renders the entries table with a status chip", async () => {
     component = mount(PersonReport, {
       target,
@@ -421,6 +446,77 @@ describe("PersonReport", () => {
     });
     await waitForText(target, "Development");
     expect(target.querySelector(".zf-chip-approved")).not.toBeNull();
+  });
+
+  it("greys out entry rows that are not approved yet", async () => {
+    getMonthReport.mockResolvedValue(
+      monthReportFixture({
+        days: [
+          {
+            date: "2026-06-01",
+            weekday: "Monday",
+            entries: [
+              {
+                start_time: "08:00",
+                end_time: "16:00",
+                category: "Development",
+                minutes: 480,
+                status: "draft",
+                comment: "",
+              },
+            ],
+            actual_min: 480,
+            target_min: 480,
+            absence: null,
+            holiday: null,
+          },
+        ],
+      }),
+    );
+    component = mount(PersonReport, {
+      target,
+      props: { userId: 1, users, periodMode: "month", month: "2026-06" },
+    });
+    await waitForText(target, "Development");
+
+    const row = target.querySelector("#report-entries tbody tr");
+    expect(row).not.toBeNull();
+    expect(row.classList.contains("entry-unapproved")).toBe(true);
+  });
+
+  it("keeps submitted-but-unapproved entry rows greyed out too", async () => {
+    getMonthReport.mockResolvedValue(
+      monthReportFixture({
+        days: [
+          {
+            date: "2026-06-01",
+            weekday: "Monday",
+            entries: [
+              {
+                start_time: "08:00",
+                end_time: "16:00",
+                category: "Development",
+                minutes: 480,
+                status: "submitted",
+                comment: "",
+              },
+            ],
+            actual_min: 480,
+            target_min: 480,
+            absence: null,
+            holiday: null,
+          },
+        ],
+      }),
+    );
+    component = mount(PersonReport, {
+      target,
+      props: { userId: 1, users, periodMode: "month", month: "2026-06" },
+    });
+    await waitForText(target, "Development");
+
+    const row = target.querySelector("#report-entries tbody tr");
+    expect(row.classList.contains("entry-unapproved")).toBe(true);
   });
 
   it("scrolls and focuses the linked entries section after loading the report", async () => {
