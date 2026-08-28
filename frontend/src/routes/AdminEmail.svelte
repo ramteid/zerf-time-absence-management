@@ -39,12 +39,23 @@
         approval_reminders_enabled:
           smtpSettings.approval_reminders_enabled !== false,
       };
+      // The payroll report can only be delivered by email, so switching email
+      // off switches it off too. That happens server-side, and silently
+      // stopping a report the tax office is waiting for is not something the
+      // admin should have to discover later — so compare and say it.
+      const payrollWasEnabled = !!smtpSettings.payroll_report_enabled;
       const saved = await api("/settings/smtp", { method: "PUT", body });
       // Use assignment (not Object.assign) so Svelte's reactivity detects the change.
       smtpSettings = saved;
       smtpPassword = "";
       clearStoredPassword = false;
       toast($t("SMTP settings saved."), "ok");
+      if (payrollWasEnabled && !saved.payroll_report_enabled) {
+        toast(
+          $t("Automatic sending of the payroll report is now off."),
+          "info",
+        );
+      }
       if (body.smtp_enabled) {
         testConnection(true);
       } else {

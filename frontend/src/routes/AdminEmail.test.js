@@ -14,8 +14,11 @@ const mockState = vi.hoisted(() => ({
     smtp_password_set: true,
     submission_reminders_enabled: true,
     approval_reminders_enabled: true,
+    payroll_report_enabled: true,
   },
 }));
+
+const toastMock = vi.hoisted(() => vi.fn());
 
 const apiMock = vi.hoisted(() =>
   vi.fn(async (path, opts = {}) => {
@@ -26,6 +29,11 @@ const apiMock = vi.hoisted(() =>
       mockState.settings = {
         ...mockState.settings,
         ...opts.body,
+        // Mirrors update_smtp_settings: the payroll report is delivered by
+        // email only, so disabling SMTP disables it too.
+        payroll_report_enabled: opts.body.smtp_enabled
+          ? mockState.settings.payroll_report_enabled
+          : false,
         smtp_password_set:
           opts.body.smtp_password !== undefined
             ? opts.body.smtp_password !== ""
@@ -48,6 +56,11 @@ vi.mock("../api.js", () => ({
   api: apiMock,
 }));
 
+vi.mock("../stores.js", async () => {
+  const actual = await vi.importActual("../stores.js");
+  return { ...actual, toast: toastMock };
+});
+
 async function settle() {
   await Promise.resolve();
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -63,6 +76,7 @@ describe("AdminEmail", () => {
     document.body.appendChild(target);
     setLanguage("en");
     apiMock.mockClear();
+    toastMock.mockClear();
   });
 
   afterEach(() => {
@@ -173,5 +187,26 @@ describe("AdminEmail", () => {
     );
     expect(saveCall).toBeTruthy();
     expect(saveCall[1].body.smtp_password).toBe("");
+  });
+
+  // Switching email off silently stops the payroll report the tax office is
+  // waiting for. The admin has to learn that here, not weeks later.
+  it("says when disabling email switches the payroll report off", async () => {
+    component = mount(AdminEmail, { target });
+    await settle();
+
+    target.querySelector('input[type="checkbox"]').click();
+    await settle();
+
+    const save = [...target.querySelectorAll("button")].find(
+      (button) => button.textContent.trim() === "Save",
+    );
+    save.click();
+    await settle();
+
+    expect(toastMock).toHaveBeenCalledWith(
+      "Automatic sending of the payroll report is now off.",
+      "info",
+    );
   });
 });

@@ -781,7 +781,12 @@ async fn build_hours_rows(
         .await?;
         let work_days = report.days.iter().filter(|day| day.actual_min > 0).count() as i64;
         let minutes = report.actual_min;
-        // Skip assistants/employees with zero worked time (e.g., only rejected entries) – avoids 0-hour rows.
+        // Assistants only: with nothing worked there is nothing to pay them
+        // for, so an empty month is simply not their row (this also drops a
+        // month that holds only rejected entries). Employees keep their zero
+        // row deliberately — they are salaried, and "worked no days this
+        // month" is itself something payroll needs to see. `people_in_report`
+        // knows about this asymmetry and does not treat a zero row as content.
         if assistants && work_days == 0 && minutes == 0 {
             continue;
         }
@@ -811,11 +816,23 @@ fn employee_name(user: &User) -> String {
 /// a document that would go out empty.
 pub fn people_in_report(data: &PayrollReportData) -> usize {
     let mut names: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    // Absence rows are content by construction — `build_absence_rows` drops
+    // any period that works out to zero days.
     if let Some(rows) = &data.absence_rows {
         names.extend(rows.iter().map(|row| row.employee.as_str()));
     }
+    // Hours rows are not: only the assistants' table drops its zero rows (see
+    // `build_hours_rows`), so an employees' table can be a full page of
+    // "0 days, 0:00". Those state nothing, and counting them would let a
+    // document with no actual figures in it pass the caller's emptiness check.
     for section in &data.hours_sections {
-        names.extend(section.rows.iter().map(|row| row.employee.as_str()));
+        names.extend(
+            section
+                .rows
+                .iter()
+                .filter(|row| row.work_days > 0 || row.minutes > 0)
+                .map(|row| row.employee.as_str()),
+        );
     }
     names.len()
 }
@@ -980,6 +997,40 @@ mod tests {
             people_in_report(&empty),
             0,
             "an empty document covers nobody and must not be sent"
+        );
+
+        // Only the assistants' table drops its zero rows, so an employees'
+        // table can be a full page of "0 days, 0:00". That is not content:
+        // counting it would let a report with no figures in it pass the
+        // emptiness check purely because `include_employee_hours` is on.
+        let all_zero_rows = PayrollReportData {
+            hours_sections: vec![PayrollHoursSection {
+                heading_key: EMPLOYEE_HOURS_HEADING_KEY,
+                rows: vec![
+                    PayrollHoursRow {
+                        employee: "Doe, Jane".into(),
+                        work_days: 0,
+                        minutes: 0,
+                    },
+                    PayrollHoursRow {
+                        employee: "Roe, Sam".into(),
+                        work_days: 0,
+                        minutes: 0,
+                    },
+                ],
+            }],
+            ..PayrollReportData {
+                period_label: "August 2026".into(),
+                organization_name: String::new(),
+                absence_rows: Some(vec![]),
+                hours_sections: vec![],
+                provisional: None,
+            }
+        };
+        assert_eq!(
+            people_in_report(&all_zero_rows),
+            0,
+            "a table of zeros says nothing and must not count as content"
         );
 
         let populated = PayrollReportData {

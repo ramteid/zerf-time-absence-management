@@ -376,6 +376,8 @@ const TRANSLATIONS = {
       "Nothing sent for {month} — nobody has finished the month.",
     "Email is not set up, so nothing could be sent.":
       "Email is not set up, so nothing could be sent.",
+    "Automatic sending of the payroll report is now off.":
+      "Automatic sending of the payroll report is now off.",
     // --- Payroll report: people included ---
     "People included": "People included",
     "All employees and assistants": "All employees and assistants",
@@ -1528,6 +1530,8 @@ const TRANSLATIONS = {
       "Für {month} wurde nichts versendet — noch niemand hat den Monat abgeschlossen.",
     "Email is not set up, so nothing could be sent.":
       "Der E-Mail-Versand ist nicht eingerichtet, es konnte nichts gesendet werden.",
+    "Automatic sending of the payroll report is now off.":
+      "Der automatische Versand der Lohnmeldung ist jetzt ausgeschaltet.",
     // --- Lohnmeldung: einbezogene Personen ---
     "People included": "Einbezogene Personen",
     "All employees and assistants": "Alle Mitarbeitenden und Aushilfen",
