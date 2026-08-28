@@ -261,19 +261,15 @@ async fn process_period(
         // A running month has no finality to test: every figure in it is
         // approved-to-date by construction (worked hours come from approved
         // entries, absence rows from approved absences), so everyone who
-        // booked something is reported and nobody is a blocker.
+        // booked something is reported and nobody is a blocker. The notice is
+        // filled in below, once the assembled document says how many people it
+        // really covers.
         SendMode::ManualSnapshot => {
             if members.is_empty() {
                 tracing::info!("Payroll report: period {period} has no booked time yet");
                 return Ok(false);
             }
-            let notice = ProvisionalNotice {
-                included: members.len(),
-                total: members.len(),
-                omitted: Vec::new(),
-                in_progress: true,
-            };
-            (members, Some(notice))
+            (members, None)
         }
         SendMode::Scheduled | SendMode::ManualPartial => {
             // Full approval is only required when this person's hours literally
@@ -343,7 +339,7 @@ async fn process_period(
             (included, notice)
         }
     };
-    let data = payroll_report::build_report_data(
+    let mut data = payroll_report::build_report_data(
         state,
         from,
         to,
@@ -353,6 +349,29 @@ async fn process_period(
         provisional,
     )
     .await?;
+
+    if mode == SendMode::ManualSnapshot {
+        // Having booked time is not the same as having anything to report:
+        // only approved entries and approved absences reach the tables, and
+        // mid-month the current week is usually still unapproved. Without this
+        // guard the tax office would receive a document with nothing but
+        // headings in it, announced as covering N people. The partial send
+        // refuses an empty report for the same reason.
+        let covered = payroll_report::people_in_report(&data);
+        if covered == 0 {
+            tracing::info!("Payroll report: period {period} has nothing approved yet");
+            return Ok(false);
+        }
+        // Count the people the document actually names, not everyone who
+        // happens to have booked something this month.
+        data.provisional = Some(ProvisionalNotice {
+            included: covered,
+            total: covered,
+            omitted: Vec::new(),
+            in_progress: true,
+        });
+    }
+
     let bytes = crate::report_pdf::render_payroll_report_pdf(&data, language);
     if bytes.is_empty() {
         return Err(AppError::Internal(format!(

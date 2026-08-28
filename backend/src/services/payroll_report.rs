@@ -132,13 +132,17 @@ pub async fn payroll_members(
     excluded_user_ids: &[i64],
     everyone_needs_recorded_time: bool,
 ) -> AppResult<Vec<User>> {
-    let assistants_with_entries = app_state
+    // Neither set is role-filtered — they cover every user with activity in
+    // the period, which is what lets the same lookup serve the assistant-only
+    // rule and the snapshot's everyone rule.
+    let users_with_entries = app_state
         .db
         .reports
         .user_ids_with_time_entries_in_range(from, to)
         .await?;
-    // Also include assistants who have only payroll-relevant absences (e.g., sick whole month) – otherwise sick days vanish.
-    let assistants_with_payroll_absences = app_state
+    // Also include people who have only payroll-relevant absences (e.g. sick
+    // for the whole month) – otherwise their sick days vanish.
+    let users_with_payroll_absences = app_state
         .db
         .reports
         .user_ids_with_payroll_absences_in_range(from, to)
@@ -157,8 +161,8 @@ pub async fn payroll_members(
             !crate::roles::is_admin_role(&member.role)
                 && !excluded_user_ids.contains(&member.id)
                 && (!needs_recorded_time
-                    || assistants_with_entries.contains(&member.id)
-                    || assistants_with_payroll_absences.contains(&member.id))
+                    || users_with_entries.contains(&member.id)
+                    || users_with_payroll_absences.contains(&member.id))
         })
         .collect())
 }
@@ -798,6 +802,24 @@ fn employee_name(user: &User) -> String {
     format!("{}, {}", user.last_name, user.first_name)
 }
 
+/// How many distinct people the assembled report actually names.
+///
+/// This is deliberately read back off the finished document rather than taken
+/// from the member list: a person can be covered by the report and still not
+/// appear in it, because only approved entries and approved absences produce
+/// rows. Callers use it both to describe the report honestly and to recognise
+/// a document that would go out empty.
+pub fn people_in_report(data: &PayrollReportData) -> usize {
+    let mut names: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    if let Some(rows) = &data.absence_rows {
+        names.extend(rows.iter().map(|row| row.employee.as_str()));
+    }
+    for section in &data.hours_sections {
+        names.extend(section.rows.iter().map(|row| row.employee.as_str()));
+    }
+    names.len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -935,6 +957,59 @@ mod tests {
                 .then_some("03-31".to_string()),
             leave_account_start_year: (cost_type == "vacation").then_some(2026),
         }
+    }
+
+    /// The snapshot send refuses a document nobody appears in, and describes
+    /// itself by who it actually names — booking time is not the same as
+    /// having anything approved to report.
+    #[test]
+    fn people_in_report_counts_only_who_actually_appears() {
+        let empty = PayrollReportData {
+            period_label: "August 2026".into(),
+            organization_name: String::new(),
+            // Section present but with no rows: what a mid-month snapshot
+            // looks like before anything has been approved.
+            absence_rows: Some(vec![]),
+            hours_sections: vec![PayrollHoursSection {
+                heading_key: ASSISTANT_HOURS_HEADING_KEY,
+                rows: vec![],
+            }],
+            provisional: None,
+        };
+        assert_eq!(
+            people_in_report(&empty),
+            0,
+            "an empty document covers nobody and must not be sent"
+        );
+
+        let populated = PayrollReportData {
+            absence_rows: Some(vec![PayrollAbsenceRow {
+                employee: "Doe, Jane".into(),
+                category: "Sick".into(),
+                from: NaiveDate::from_ymd_opt(2026, 8, 3).unwrap(),
+                to: NaiveDate::from_ymd_opt(2026, 8, 4).unwrap(),
+                days: 2.0,
+                medical_certificate_required: None,
+            }]),
+            hours_sections: vec![PayrollHoursSection {
+                heading_key: ASSISTANT_HOURS_HEADING_KEY,
+                rows: vec![
+                    PayrollHoursRow {
+                        // Same person as the absence row above — counted once.
+                        employee: "Doe, Jane".into(),
+                        work_days: 3,
+                        minutes: 600,
+                    },
+                    PayrollHoursRow {
+                        employee: "Roe, Sam".into(),
+                        work_days: 2,
+                        minutes: 400,
+                    },
+                ],
+            }],
+            ..empty
+        };
+        assert_eq!(people_in_report(&populated), 2);
     }
 
     #[test]

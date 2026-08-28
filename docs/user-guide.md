@@ -1890,7 +1890,10 @@ Which month that is follows what is still owed:
   day. Nobody holds this up: people who have not submitted everything yet are
   simply reported with what is already approved, and people who have not booked
   anything at all are left out. The PDF and the email say clearly that this is
-  an interim status and that the figures will still change.
+  an interim status and that the figures will still change. If nothing has been
+  approved yet nothing is sent, because the report would be empty — early in a
+  month that is normal, as the current week is usually still waiting for
+  approval.
 
 Either way you get a message telling you whether the report went out, that
 there was nothing to send, or why sending failed.
