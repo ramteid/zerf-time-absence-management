@@ -271,6 +271,11 @@ async fn process_period(
     mode: SendMode,
 ) -> AppResult<SendOutcome> {
     let (from, month_end) = schedule::period_bounds(period)?;
+    // Read once and reuse: the clamp below, the date printed on the report and
+    // the date in its filename all have to be the same day, and asking three
+    // times leaves a window where a run crossing midnight disagrees with
+    // itself.
+    let today = settings::app_today(&state.pool).await;
     // A snapshot reports the month "up to today", so it stops at today rather
     // than the month end. Worked hours already do this on their own (a future
     // day contributes nothing), but absence days do not: an approved holiday
@@ -278,7 +283,7 @@ async fn process_period(
     // beside it stop at today, making the two halves of the same document
     // disagree. Clamping the window here keeps every section on the same date.
     let to = if mode == SendMode::ManualSnapshot {
-        month_end.min(settings::app_today(&state.pool).await)
+        month_end.min(today)
     } else {
         month_end
     };
@@ -384,6 +389,7 @@ async fn process_period(
             from,
             to,
             interim: mode == SendMode::ManualSnapshot,
+            created_on: today,
         },
         &included,
         config,
@@ -464,7 +470,14 @@ async fn process_period(
         &text.title,
         &text.body,
         crate::email::EmailAttachment {
-            filename: format!("{period}_payroll_report.pdf"),
+            // The creation date is part of the name because the same month
+            // can legitimately be sent more than once — an interim snapshot
+            // and later the final report — and the recipient must not have two
+            // identically named attachments whose contents differ.
+            filename: format!(
+                "{period}_payroll_report_{}.pdf",
+                today.format("%Y-%m-%d")
+            ),
             content_type: "application/pdf".to_string(),
             bytes,
         },

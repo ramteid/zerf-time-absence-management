@@ -1822,6 +1822,23 @@ that qualifies, or working hours). Email must be set up under Settings → Email
 first — the report has no other way of reaching anyone. If email is switched
 off again later, automatic delivery is switched off with it.
 
+#### How sick days appear
+
+An illness that was reported in more than one go appears as **one line**, not
+one line per report. If you report sick Monday and Tuesday and then again from
+Wednesday, the report shows a single absence from Monday to Wednesday with the
+total number of days.
+
+This matters for the eAU column. Whether a certificate is required depends on
+how long the illness lasted altogether, not on how it was split up — so a line
+covering two days can still say **Yes** if the illness carried straight on
+afterwards. Showing the whole period on one line is what makes that visible.
+Reports that are only separated by a weekend or a public holiday also count as
+one illness, because an illness does not pause over the weekend.
+
+Two illnesses separated by at least one working day stay separate lines and are
+judged separately.
+
 #### Choosing who is included
 
 By default the report covers every employee. An assistant is included only if

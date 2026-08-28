@@ -16,6 +16,9 @@ use crate::i18n::{self, Language};
 use chrono::NaiveDate;
 
 /// Absence table: one row per absence period, clamped to the reported month.
+/// All columns are left-aligned so data rows line up under the (always
+/// left-aligned) header labels — see [`Renderer::draw_table_header`], and the
+/// same rule in [`HOURS_COLUMNS`].
 const ABSENCE_COLUMNS: &[Column] = &[
     Column {
         header_key: "pdf_payroll_column_employee",
@@ -40,7 +43,7 @@ const ABSENCE_COLUMNS: &[Column] = &[
     Column {
         header_key: "pdf_payroll_column_days",
         width_mm: 24.0,
-        align: Align::Right,
+        align: Align::Left,
     },
     Column {
         header_key: "pdf_payroll_column_medical_certificate",
@@ -153,6 +156,11 @@ pub struct PayrollReportData {
     pub absence_rows: Option<Vec<PayrollAbsenceRow>>,
     /// Empty when neither hours section is enabled.
     pub hours_sections: Vec<PayrollHoursSection>,
+    /// The day the document was assembled. Printed under the title and used in
+    /// the attachment's filename: the same month can be sent more than once
+    /// (an interim snapshot, then the final report), so the recipient needs to
+    /// tell the copies apart and know how current the figures are.
+    pub created_on: NaiveDate,
     /// `Some` whenever the report is not a complete month: a manually
     /// triggered partial send, or an interim snapshot of the running month
     /// (`in_progress`). A complete report carries no notice.
@@ -170,6 +178,11 @@ pub fn render_payroll_report_pdf(data: &PayrollReportData, language: &Language) 
         format!("{} - {}", data.organization_name.trim(), data.period_label)
     };
     renderer.draw_title_block(&title, &subtitle);
+    renderer.draw_note(&i18n::translate(
+        language,
+        "pdf_payroll_created_on",
+        &[("date", i18n::format_date(language, data.created_on))],
+    ));
 
     if let Some(notice) = &data.provisional {
         render_provisional_notice(&mut renderer, language, notice);
@@ -398,6 +411,7 @@ mod tests {
                     minutes: 930,
                 }],
             }],
+            created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
             provisional: None,
         };
         let bytes = render_payroll_report_pdf(&data, &language);
@@ -415,6 +429,7 @@ mod tests {
                 organization_name: "Example GmbH".into(),
                 absence_rows: Some(vec![]),
                 hours_sections: vec![],
+                created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
                 provisional: Some(ProvisionalNotice {
                     included: 8,
                     total: 12,
@@ -441,6 +456,7 @@ mod tests {
                 organization_name: "Example GmbH".into(),
                 absence_rows: Some(vec![]),
                 hours_sections: vec![],
+                created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
                 provisional: Some(ProvisionalNotice {
                     included: 5,
                     total: 5,
@@ -464,6 +480,7 @@ mod tests {
                 heading_key: "pdf_payroll_assistant_hours_heading",
                 rows: vec![],
             }],
+            created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
             provisional: None,
         };
         let bytes = render_payroll_report_pdf(&data, &language);

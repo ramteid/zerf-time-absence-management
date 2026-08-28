@@ -38,14 +38,19 @@ pub async fn load_threshold_days(pool: &crate::db::DatabasePool) -> AppResult<i6
 
 /// True for a calendar day that does not interrupt an illness period even
 /// without a covering absence: weekends and public holidays.
-fn is_bridgeable_day(date: NaiveDate, holidays: &HashSet<NaiveDate>) -> bool {
+pub(crate) fn is_bridgeable_day(date: NaiveDate, holidays: &HashSet<NaiveDate>) -> bool {
     matches!(date.weekday(), Weekday::Sat | Weekday::Sun) || holidays.contains(&date)
 }
 
 /// True when every calendar day strictly between two absence ranges is
 /// bridgeable (or there is no gap at all), i.e. the two ranges belong to the
 /// same continuous illness period.
-fn bridges(previous_end: NaiveDate, next_start: NaiveDate, holidays: &HashSet<NaiveDate>) -> bool {
+///
+/// Shared with the payroll report, which merges absences this joins into one
+/// row: the row a certificate verdict is printed on must be the same period
+/// the verdict was computed over, or the document contradicts itself (a two-day
+/// row marked "certificate required" under a four-day threshold).
+pub(crate) fn bridges(previous_end: NaiveDate, next_start: NaiveDate, holidays: &HashSet<NaiveDate>) -> bool {
     if next_start <= previous_end {
         return true; // adjacent/overlapping
     }

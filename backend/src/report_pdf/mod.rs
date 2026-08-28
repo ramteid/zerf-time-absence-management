@@ -57,11 +57,16 @@ const ROW_DIVIDER: (u8, u8, u8) = (220, 220, 220);
 const SUMMARY_TEXT: (u8, u8, u8) = (90, 90, 90);
 const TOTAL_FILL: (u8, u8, u8) = (235, 235, 235);
 
+/// How a column's cell values sit within its width.
+///
+/// There is deliberately no right-aligned variant: table headers are always
+/// drawn left-aligned (see [`Renderer::draw_table_header`]), so a
+/// right-aligned data column can never line up with its own heading — which
+/// is exactly how the payroll report's "Days" column ended up looking wrong.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Align {
     Left,
     Center,
-    Right,
 }
 
 /// One table column: its translated header key, width in millimetres, and how
@@ -276,14 +281,13 @@ impl<'a> Renderer<'a> {
 
     /// X position to start drawing `text` in `column_index` so it appears
     /// aligned the way [`Column::align`] specifies, using [`text_width_mm`]
-    /// to measure right-/center-aligned text (see the module docs for why
-    /// this only works for the limited numeric charset used in those columns).
+    /// to measure centered text (see the module docs for why this only works
+    /// for the limited numeric charset used in those columns).
     fn aligned_x(&self, column_index: usize, text: &str, size_pt: f32) -> f32 {
         let column = &self.columns[column_index];
         let left = self.column_x(column_index);
         match column.align {
             Align::Left => left + 1.0,
-            Align::Right => left + column.width_mm - 1.0 - text_width_mm(text, size_pt),
             Align::Center => left + (column.width_mm - text_width_mm(text, size_pt)) / 2.0,
         }
     }

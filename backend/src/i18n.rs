@@ -208,6 +208,7 @@ static LANGUAGES: &[LangDef] = &[
             ("pdf_status_other",       ""),
             // Payroll report PDF
             ("pdf_payroll_title", "Payroll report"),
+            ("pdf_payroll_created_on", "Created on {date}"),
             ("pdf_payroll_provisional_heading", "Provisional - not all people included"),
             ("pdf_payroll_provisional_summary", "This report covers {included} of {total} people. The figures below are therefore incomplete."),
             ("pdf_payroll_provisional_missing", "Not included yet:"),
@@ -385,6 +386,7 @@ static LANGUAGES: &[LangDef] = &[
             ("pdf_status_other",       ""),
             // Lohnmeldungs-PDF
             ("pdf_payroll_title", "Lohnmeldung"),
+            ("pdf_payroll_created_on", "Erstellt am {date}"),
             ("pdf_payroll_provisional_heading", "Vorl\u{00e4}ufig - nicht alle Personen enthalten"),
             ("pdf_payroll_provisional_summary", "Diese Meldung enth\u{00e4}lt {included} von {total} Personen. Die Zahlen unten sind daher unvollst\u{00e4}ndig."),
             ("pdf_payroll_provisional_missing", "Noch nicht enthalten:"),

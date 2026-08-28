@@ -59,6 +59,9 @@ async fn medical_certificate_category_flag_round_trips_through_the_api() {
 /// requests on consecutive workdays must be treated as one continuous
 /// three-day illness period once all three exist, while a fourth, isolated
 /// sick day elsewhere in the same month must not be swept into that chain.
+///
+/// The connected days also have to arrive as a single row, so the period the
+/// reader sees is the period the verdict was computed over.
 #[tokio::test]
 async fn payroll_report_marks_absences_required_once_a_connected_chain_crosses_the_threshold() {
     let app = TestApp::spawn().await;
@@ -113,6 +116,7 @@ async fn payroll_report_marks_absences_required_once_a_connected_chain_crosses_t
             from,
             to,
             interim: false,
+            created_on: to,
         },
         &members,
         &payroll_report_config(),
@@ -122,40 +126,45 @@ async fn payroll_report_marks_absences_required_once_a_connected_chain_crosses_t
     .await
     .expect("build report data");
 
+    // One row per continuous illness, not per sick note: the three connected
+    // days were filed separately but are one illness, and the certificate
+    // verdict was computed over exactly that period. Printing them apart is
+    // what made a short row carrying a "required" verdict look wrong.
     let rows = data.absence_rows.as_ref().expect("absence section enabled");
     assert_eq!(
         rows.len(),
-        4,
-        "one row per sick day: {}",
+        2,
+        "the connected days are one row, the isolated day another: {}",
         row_summaries(rows)
     );
 
-    let required_for = |day: chrono::NaiveDate| {
-        rows.iter()
-            .find(|row| row.from == day)
-            .unwrap_or_else(|| panic!("no row for {day}"))
-            .medical_certificate_required
-    };
+    assert_eq!(rows[0].from, monday, "the chain row starts on Monday");
+    assert_eq!(
+        rows[0].to, wednesday,
+        "and runs to Wednesday, the span the verdict was judged on"
+    );
+    assert_eq!(rows[0].days, 3.0, "carrying the whole chain's days");
+    assert_eq!(
+        rows[0].medical_certificate_required,
+        Some(true),
+        "3 connected days reaches the threshold"
+    );
+    // Tuesday is inside that row rather than being one of its own.
+    assert!(
+        !rows.iter().any(|row| row.from == tuesday),
+        "no separate row starts mid-chain: {}",
+        row_summaries(rows)
+    );
 
     assert_eq!(
-        required_for(monday),
-        Some(true),
-        "Monday is part of the 3-day chain"
+        rows[1].from, friday,
+        "Thursday's real gap breaks the chain, so Friday stands alone"
     );
+    assert_eq!(rows[1].to, friday);
     assert_eq!(
-        required_for(tuesday),
-        Some(true),
-        "Tuesday is part of the 3-day chain"
-    );
-    assert_eq!(
-        required_for(wednesday),
-        Some(true),
-        "Wednesday is part of the 3-day chain"
-    );
-    assert_eq!(
-        required_for(friday),
+        rows[1].medical_certificate_required,
         Some(false),
-        "Friday is isolated by Thursday's real gap and stays below the threshold alone"
+        "one day on its own stays below the threshold"
     );
 
     app.cleanup().await;

@@ -586,6 +586,11 @@ pub struct ReportWindow {
     /// The month is still running, so rows that only mean something once it is
     /// over — a salaried employee's "worked 0 days" — are left out.
     pub interim: bool,
+    /// The day the document is being assembled, in the app's timezone. Printed
+    /// on the report and used in its filename. Passed in rather than read here
+    /// so every part of one document agrees on the date — for an interim look
+    /// `to` is derived from this very day.
+    pub created_on: NaiveDate,
 }
 
 /// Absence categories the payroll report includes automatically — sick-like
@@ -639,7 +644,12 @@ pub async fn build_report_data(
     language: &Language,
     provisional: Option<crate::report_pdf::ProvisionalNotice>,
 ) -> AppResult<PayrollReportData> {
-    let ReportWindow { from, to, interim } = window;
+    let ReportWindow {
+        from,
+        to,
+        interim,
+        created_on,
+    } = window;
     let organization_name =
         settings::load_setting(&app_state.pool, settings::ORGANIZATION_NAME_KEY, "").await?;
 
@@ -682,6 +692,7 @@ pub async fn build_report_data(
         organization_name,
         absence_rows,
         hours_sections,
+        created_on,
         provisional,
     })
 }
@@ -717,7 +728,9 @@ async fn build_absence_rows(
 
     let holidays = app_state.db.reports.holiday_set(from, to).await?;
 
-    let mut rows: Vec<(usize, String, PayrollAbsenceRow)> = Vec::new();
+    // (category rank, display name, user id, row) — the id is carried so
+    // merging can group by person rather than by a name two people may share.
+    let mut rows: Vec<(usize, String, i64, PayrollAbsenceRow)> = Vec::new();
     for member in members {
         let medical_certificate_required = if any_medical_certificate_category {
             crate::services::medical_certificate::required_map_for_user(app_state, member.id)
@@ -754,6 +767,7 @@ async fn build_absence_rows(
             rows.push((
                 *category_rank,
                 employee_name(member),
+                member.id,
                 PayrollAbsenceRow {
                     employee: employee_name(member),
                     category: i18n::absence_kind_label(language, &slug, category_name),
@@ -767,14 +781,79 @@ async fn build_absence_rows(
         }
     }
 
-    // Category, then employee, then chronological within one employee.
+    // Category, then employee, then chronological within one employee. The
+    // chronological part is what lets the merge below look only at neighbours.
+    // Sorting by id before date keeps one person's rows contiguous even when
+    // somebody else shares their name, which is what lets the merge below look
+    // only at its immediate neighbour.
     rows.sort_by(|left, right| {
         left.0
             .cmp(&right.0)
             .then_with(|| left.1.cmp(&right.1))
-            .then_with(|| left.2.from.cmp(&right.2.from))
+            .then_with(|| left.2.cmp(&right.2))
+            .then_with(|| left.3.from.cmp(&right.3.from))
     });
-    Ok(rows.into_iter().map(|(_, _, row)| row).collect())
+    Ok(merge_continuous_illness_rows(rows, &holidays))
+}
+
+/// Fold absences that are one continuous illness period into a single row.
+///
+/// A certificate is required for the *illness*, not for each request it was
+/// filed in, so two sick notes with only a weekend between them produce one
+/// verdict. Printed as separate rows that verdict looks wrong — a two-day row
+/// marked "required" under a four-day threshold — because the span the reader
+/// sees is not the span it was judged on. Merging makes the row the period.
+///
+/// Only categories that track certificates are merged, using the very rule
+/// that built the verdict (`medical_certificate::bridges`), so the two can
+/// never disagree. Days are summed rather than recomputed: the days bridged
+/// over are by definition weekends or holidays, which never counted anyway.
+///
+/// Rows merge only within one category, because a single row cannot honestly
+/// carry two category names. The verdict, however, is chain-wide across every
+/// certificate-tracking category. So an installation that flags a second such
+/// category (say "sick child") can still show a short row of one category
+/// carrying a verdict earned next to the other — the original confusion, in
+/// its last remaining corner. Merging across categories would trade a
+/// confusing row for a wrong one, so it is left alone.
+fn merge_continuous_illness_rows(
+    rows: Vec<(usize, String, i64, PayrollAbsenceRow)>,
+    holidays: &std::collections::HashSet<NaiveDate>,
+) -> Vec<PayrollAbsenceRow> {
+    let mut merged: Vec<(usize, String, i64, PayrollAbsenceRow)> = Vec::with_capacity(rows.len());
+    for (rank, employee_key, user_id, row) in rows {
+        let continues_previous = merged
+            .last()
+            .is_some_and(|(last_rank, _, last_user_id, last)| {
+                *last_rank == rank
+                    // By id, not by the display name that happens to sit
+                    // beside it. A unique index on (first name, last name)
+                    // means two people cannot share one today, so this is not
+                    // fixing a live bug — it just refuses to depend on a
+                    // guarantee made three modules away for its correctness.
+                    && *last_user_id == user_id
+                    // `Some` marks a category that tracks certificates; a
+                    // category that does not has no notion of a continuous
+                    // period.
+                    && last.medical_certificate_required.is_some()
+                    && row.medical_certificate_required.is_some()
+                    && crate::services::medical_certificate::bridges(last.to, row.from, holidays)
+            });
+        if continues_previous {
+            let (_, _, _, last) = merged.last_mut().expect("checked above");
+            last.to = last.to.max(row.to);
+            last.days += row.days;
+            // Both belong to one chain, so the verdict is the same on each;
+            // OR-ing is simply the total-safe way to combine them.
+            last.medical_certificate_required = Some(
+                last.medical_certificate_required.unwrap_or(false)
+                    || row.medical_certificate_required.unwrap_or(false),
+            );
+        } else {
+            merged.push((rank, employee_key, user_id, row));
+        }
+    }
+    merged.into_iter().map(|(_, _, _, row)| row).collect()
 }
 
 /// Working days and worked minutes per person of one group (assistants or
@@ -836,9 +915,10 @@ fn employee_name(user: &User) -> String {
 /// every row the document does contain is meaningful for the mode that built
 /// it (see `build_hours_rows`'s `drop_zero_rows`).
 ///
-/// Distinct *names*, not user ids: two people sharing a full name collapse
-/// into one. That undercounts the notice in a rare case but can never make an
-/// empty report look non-empty, which is the property the guard relies on.
+/// Counts distinct *names*, which is safe because a unique index on (first
+/// name, last name) means two people cannot share one. Were that ever relaxed
+/// this would undercount the notice — but it still could not make an empty
+/// report look non-empty, which is the property the guard relies on.
 pub fn people_in_report(data: &PayrollReportData) -> usize {
     let mut names: std::collections::HashSet<&str> = std::collections::HashSet::new();
     if let Some(rows) = &data.absence_rows {
@@ -1004,6 +1084,7 @@ mod tests {
                 heading_key: ASSISTANT_HOURS_HEADING_KEY,
                 rows: vec![],
             }],
+            created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
             provisional: None,
         };
         assert_eq!(
@@ -1033,7 +1114,8 @@ mod tests {
                 organization_name: String::new(),
                 absence_rows: Some(vec![]),
                 hours_sections: vec![],
-                provisional: None,
+                created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
+            provisional: None,
             }
         };
         assert_eq!(

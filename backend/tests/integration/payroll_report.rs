@@ -376,6 +376,7 @@ async fn payroll_report_lists_absence_days_and_assistant_hours() {
             from,
             to,
             interim: false,
+            created_on: to,
         },
         &members,
         &config(true, false),
@@ -540,6 +541,7 @@ async fn payroll_report_absence_rows_are_grouped_by_category_then_name_then_date
             from,
             to,
             interim: false,
+            created_on: to,
         },
         &members,
         &config(false, false),
@@ -1746,6 +1748,7 @@ async fn payroll_snapshot_with_employee_hours_never_reports_empty_rows() {
         from,
         to: today,
         interim: true,
+        created_on: today,
     };
     let members = payroll_report::payroll_members(&app.state, from, today, &[], true)
         .await
@@ -1777,6 +1780,13 @@ async fn payroll_snapshot_with_employee_hours_never_reports_empty_rows() {
         payroll_report::people_in_report(&data),
         listed.len(),
         "the announced count must equal the names in the tables"
+    );
+    // The document states when it was assembled: the same month can be sent
+    // again later as the final report, so the recipient has to be able to tell
+    // the two copies apart and see how current the figures are.
+    assert_eq!(
+        data.created_on, today,
+        "the report carries its creation date"
     );
     assert!(
         data.hours_sections
@@ -1887,6 +1897,133 @@ async fn scheduled_run_settles_a_month_with_nothing_to_report() {
     assert!(
         !queued.contains(&previous),
         "a month with nothing to report is settled, not retried forever: {queued:?}"
+    );
+
+    app.cleanup().await;
+}
+
+/// Two sick notes filed back to back are one illness, and the certificate
+/// verdict is computed over that whole period. Printed as separate rows the
+/// verdict reads as a contradiction — the exact report a user queried: a
+/// two-day row marked "certificate required" under a four-day threshold,
+/// because the second note ran on for another eight days.
+///
+/// The row therefore has to be the illness period, not the filing.
+#[tokio::test]
+async fn payroll_report_merges_back_to_back_sick_notes_into_one_row() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, _lead_pw, emp_id, _emp_pw, _monday, _cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "payroll-chain").await;
+
+    let monday = anchor_monday();
+    let (from, to) = month_bounds(monday);
+    let sick = absence_cat(&app.state.pool, "sick").await;
+
+    // Mon-Tue, then Wed-Thu: adjacent, so one continuous illness period.
+    app.state
+        .db
+        .absences
+        .create(emp_id, sick.id, true, monday, monday + Duration::days(1), None, "approved")
+        .await
+        .expect("first sick note");
+    app.state
+        .db
+        .absences
+        .create(
+            emp_id,
+            sick.id,
+            true,
+            monday + Duration::days(2),
+            monday + Duration::days(3),
+            None,
+            "approved",
+        )
+        .await
+        .expect("second sick note");
+
+    let members = payroll_report::payroll_members(&app.state, from, to, &[], false)
+        .await
+        .expect("members");
+    let data = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from,
+            to,
+            interim: false,
+            created_on: to,
+        },
+        &members,
+        &config(false, false),
+        &zerf::i18n::Language::default(),
+        None,
+    )
+    .await
+    .expect("report data");
+
+    let rows: Vec<_> = data
+        .absence_rows
+        .expect("absence rows")
+        .into_iter()
+        .filter(|row| row.employee.contains("payroll-chain"))
+        .collect();
+    assert_eq!(
+        rows.len(),
+        1,
+        "back-to-back sick notes are one illness, so one row: {:?}",
+        rows.iter().map(|r| (r.from, r.to, r.days)).collect::<Vec<_>>()
+    );
+    assert_eq!(rows[0].from, monday, "the row starts where the illness did");
+    assert_eq!(
+        rows[0].to,
+        monday + Duration::days(3),
+        "and ends where it did"
+    );
+    assert_eq!(rows[0].days, 4.0, "days are the whole period, not one filing");
+    assert_eq!(
+        rows[0].medical_certificate_required,
+        Some(true),
+        "4 continuous days reaches the default threshold"
+    );
+
+    // A separate illness later the same month stays its own row and, being
+    // short, keeps its own verdict — merging must not swallow unrelated
+    // absences just because they share a person and a category.
+    let later = monday + Duration::days(14);
+    app.state
+        .db
+        .absences
+        .create(emp_id, sick.id, true, later, later, None, "approved")
+        .await
+        .expect("unrelated later sick note");
+
+    let data = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from,
+            to,
+            interim: false,
+            created_on: to,
+        },
+        &members,
+        &config(false, false),
+        &zerf::i18n::Language::default(),
+        None,
+    )
+    .await
+    .expect("report data");
+    let rows: Vec<_> = data
+        .absence_rows
+        .expect("absence rows")
+        .into_iter()
+        .filter(|row| row.employee.contains("payroll-chain"))
+        .collect();
+    assert_eq!(rows.len(), 2, "a separate illness is a separate row");
+    assert_eq!(rows[1].days, 1.0);
+    assert_eq!(
+        rows[1].medical_certificate_required,
+        Some(false),
+        "one day on its own stays below the threshold"
     );
 
     app.cleanup().await;
