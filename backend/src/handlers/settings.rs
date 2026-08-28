@@ -821,9 +821,13 @@ pub async fn update_payroll_report_settings(
     Ok(Json(load_admin_settings(&app_state.pool).await?))
 }
 
-/// Trigger an immediate payroll report run: queue the previous month
-/// (idempotent) and send every queued month that is ready.
-/// Does not affect the scheduled monthly run.
+/// Trigger an immediate payroll report run.
+///
+/// Sends exactly one month, chosen by
+/// `services::payroll_report::manual_send_target`: the oldest month still
+/// owed, or — when nothing is owed — the month currently running, which is
+/// not queued at all and goes out as an interim snapshot. Never removes a
+/// queue entry, so the scheduled monthly delivery still follows.
 pub async fn run_payroll_report_now(
     State(app_state): State<AppState>,
     user: User,

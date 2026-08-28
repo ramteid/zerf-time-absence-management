@@ -109,8 +109,11 @@ async fn payroll_report_marks_absences_required_once_a_connected_chain_crosses_t
     let language = zerf::i18n::Language::from_setting("en");
     let data = payroll_report::build_report_data(
         &app.state,
-        from,
-        to,
+        payroll_report::ReportWindow {
+            from,
+            to,
+            interim: false,
+        },
         &members,
         &payroll_report_config(),
         &language,

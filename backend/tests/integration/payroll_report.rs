@@ -372,8 +372,11 @@ async fn payroll_report_lists_absence_days_and_assistant_hours() {
     let language = zerf::i18n::Language::from_setting("en");
     let data = payroll_report::build_report_data(
         &app.state,
-        from,
-        to,
+        payroll_report::ReportWindow {
+            from,
+            to,
+            interim: false,
+        },
         &members,
         &config(true, false),
         &language,
@@ -533,8 +536,11 @@ async fn payroll_report_absence_rows_are_grouped_by_category_then_name_then_date
     let language = zerf::i18n::Language::from_setting("de");
     let data = payroll_report::build_report_data(
         &app.state,
-        from,
-        to,
+        payroll_report::ReportWindow {
+            from,
+            to,
+            interim: false,
+        },
         &members,
         &config(false, false),
         &language,
@@ -1575,6 +1581,312 @@ async fn payroll_snapshot_of_the_running_month_is_never_sent_empty() {
     assert!(
         !queued.contains(&current),
         "the running month is never queued by a snapshot: {queued:?}"
+    );
+
+    app.cleanup().await;
+}
+
+/// The payroll report is delivered by email and nothing else, so the two
+/// settings are coupled in both directions. Only the frontend covered this,
+/// against a mock that simulated the cascade itself — so the server could have
+/// stopped doing it entirely without a single test noticing, leaving
+/// `payroll_report_enabled = true` with SMTP off: the exact state the nightly
+/// run then hits forever, silently sending nothing.
+#[tokio::test]
+async fn disabling_smtp_switches_the_payroll_report_off() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    configure_unreachable_smtp(&app).await;
+
+    let (status, _) = admin
+        .put(
+            "/api/v1/settings/payroll-report",
+            &json!({
+                "payroll_report_enabled": true,
+                "payroll_report_recipients": ["payroll@example.com"],
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "enable payroll report");
+
+    // Turning SMTP off must take the report with it. Saving SMTP *disabled*
+    // skips the server-side connection re-test, so the unreachable host here
+    // is not what is being exercised.
+    let (status, body) = admin
+        .put(
+            "/api/v1/settings/smtp",
+            &json!({
+                "smtp_enabled": false,
+                "smtp_host": "127.0.0.1",
+                "smtp_port": 1,
+                "smtp_from": "zerf@example.com",
+                "smtp_encryption": "none",
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "disable smtp: {body}");
+    assert_eq!(
+        body["payroll_report_enabled"],
+        json!(false),
+        "disabling email must switch automatic delivery off: {body}"
+    );
+
+    // And it stays off: re-enabling email is a deliberate decision, resuming
+    // delivery to the tax office is another.
+    configure_unreachable_smtp(&app).await;
+    let (_, settings) = admin.get("/api/v1/settings").await;
+    assert_eq!(
+        settings["payroll_report_enabled"],
+        json!(false),
+        "re-enabling email must not silently resume delivery: {settings}"
+    );
+
+    // Nothing can be sent while it is off, and the admin is told why.
+    let (status, body) = admin
+        .post("/api/v1/settings/payroll-report/send-now", &json!({}))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "send-now is refused: {body}");
+
+    app.cleanup().await;
+}
+
+/// The config combination production does not use is where both empty-report
+/// defects lived: with employees' hours switched on, every employee who merely
+/// *booked* something produces a row, and for a month still running that row
+/// reads "0 days, 0:00".
+///
+/// Two things must hold. A document made only of such rows is not sent at all,
+/// and once something is approved the notice's headline count must match the
+/// number of people the tables actually list — a report claiming to cover one
+/// person above a table naming ten would misrepresent itself to the tax office.
+#[tokio::test]
+async fn payroll_snapshot_with_employee_hours_never_reports_empty_rows() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    configure_unreachable_smtp(&app).await;
+    let (lead_id, lead_pw, emp_id, emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "payroll-emp-hours").await;
+    let lead = login_change_pw(&app, "lead-payroll-emp-hours@example.com", &lead_pw).await;
+    let employee = login_change_pw(&app, "emp-payroll-emp-hours@example.com", &emp_pw).await;
+
+    let (status, _) = admin
+        .put(
+            "/api/v1/settings/payroll-report",
+            &json!({
+                "payroll_report_enabled": true,
+                "payroll_report_recipients": ["payroll@example.com"],
+                "payroll_report_day_of_month": 1,
+                "payroll_report_include_assistant_hours": true,
+                // The toggle that used to defeat the emptiness guard.
+                "payroll_report_include_employee_hours": true,
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "enable payroll report");
+
+    let today = zerf::services::settings::app_today(&app.state.pool).await;
+    let previous = zerf::background::schedule::previous_period(today);
+    app.state
+        .db
+        .settings
+        .save_setting(
+            zerf::services::settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+            &previous,
+        )
+        .await
+        .expect("record queue period");
+
+    let Some(workday) = current_month_workday_up_to_today(today) else {
+        app.cleanup().await;
+        return;
+    };
+    let day = workday.format("%Y-%m-%d").to_string();
+
+    // Booked but unapproved: with employees' hours on, this produces a
+    // "0 days, 0:00" row. It is not content, so nothing may be sent.
+    let entry_id = create_and_submit_entry(&employee, &day, cat_id).await;
+    let (status, body) = admin
+        .post("/api/v1/settings/payroll-report/send-now", &json!({}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "not an error: {body}");
+    assert_eq!(
+        body["sent"],
+        json!(0),
+        "a table of zero rows is not a report: {body}"
+    );
+    assert_eq!(body["skipped"], json!("nothing_approved"), "{body}");
+
+    // Approving it turns the same person into real content.
+    let (status, _) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [entry_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the entry");
+
+    // The document now has figures, so delivery is genuinely attempted and
+    // fails only because SMTP points at a closed port.
+    let (status, body) = admin
+        .post("/api/v1/settings/payroll-report/send-now", &json!({}))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "approved time is sent for real: {body}"
+    );
+
+    // The headline count must equal the people the tables name. Assemble the
+    // same interim document the send path builds and compare the two.
+    let (from, _month_end) = zerf::background::schedule::period_bounds(
+        &zerf::background::schedule::current_period(today),
+    )
+    .expect("period bounds");
+    let window = payroll_report::ReportWindow {
+        from,
+        to: today,
+        interim: true,
+    };
+    let members = payroll_report::payroll_members(&app.state, from, today, &[], true)
+        .await
+        .expect("members");
+    let data = payroll_report::build_report_data(
+        &app.state,
+        window,
+        &members,
+        &config(true, true),
+        &zerf::i18n::Language::default(),
+        None,
+    )
+    .await
+    .expect("report data");
+
+    let listed: std::collections::HashSet<&str> = data
+        .hours_sections
+        .iter()
+        .flat_map(|section| section.rows.iter())
+        .map(|row| row.employee.as_str())
+        .chain(
+            data.absence_rows
+                .iter()
+                .flatten()
+                .map(|row| row.employee.as_str()),
+        )
+        .collect();
+    assert_eq!(
+        payroll_report::people_in_report(&data),
+        listed.len(),
+        "the announced count must equal the names in the tables"
+    );
+    assert!(
+        data.hours_sections
+            .iter()
+            .flat_map(|section| section.rows.iter())
+            .all(|row| row.work_days > 0 || row.minutes > 0),
+        "an interim report never lists somebody as having done nothing"
+    );
+    // The employee who booked and got approved is in; nobody else in the team
+    // booked anything, so the interim window leaves them out entirely.
+    assert_eq!(listed.len(), 1, "only the approved employee is listed");
+    let _ = (lead_id, emp_id);
+
+    app.cleanup().await;
+}
+
+/// A finished month whose covered people produced no rows at all must not be
+/// mailed as a document of bare headings — and must not be retried every night
+/// forever either, because the data cannot appear later: the readiness gate has
+/// already declared everyone final.
+///
+/// Reaching that state takes a person who is *final* yet contributes nothing.
+/// An employee on zero weekly hours is exactly that: exempt from the week
+/// submission gate, so their empty month is complete rather than outstanding.
+/// With only the assistants' table switched on and no assistant in the
+/// installation, the assembled document ends up with no rows at all.
+#[tokio::test]
+async fn scheduled_run_settles_a_month_with_nothing_to_report() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    configure_unreachable_smtp(&app).await;
+    let (lead_id, _lead_pw, emp_id, _emp_pw, _monday, _cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "payroll-nothing").await;
+
+    let (status, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "zero-payroll-nothing@example.com",
+                "first_name": "Zoe",
+                "last_name": "Zero",
+                "role": "employee",
+                "weekly_hours": 0,
+                "start_date": "2024-01-01",
+                "approver_ids": [lead_id],
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create zero-hours employee: {body}");
+
+    // Everyone with a submission obligation is excluded, so the only person
+    // the month covers is the one who is final by definition.
+    let (status, _) = admin
+        .put(
+            "/api/v1/settings/payroll-report",
+            &json!({
+                "payroll_report_enabled": true,
+                "payroll_report_recipients": ["payroll@example.com"],
+                "payroll_report_day_of_month": 1,
+                "payroll_report_include_assistant_hours": true,
+                "payroll_report_include_employee_hours": false,
+                "payroll_report_excluded_user_ids": [lead_id, emp_id],
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "enable payroll report");
+
+    let today = zerf::services::settings::app_today(&app.state.pool).await;
+    let previous = zerf::background::schedule::previous_period(today);
+    app.state
+        .db
+        .payroll_queue
+        .enqueue(&previous)
+        .await
+        .expect("enqueue previous");
+    app.state
+        .db
+        .settings
+        .save_setting(
+            zerf::services::settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+            &previous,
+        )
+        .await
+        .expect("record queue period");
+
+    // Guard the premise: the month must genuinely cover somebody, or this
+    // would only be re-testing the older "covers nobody" path.
+    let (from, to) = zerf::background::schedule::period_bounds(&previous).expect("bounds");
+    let covered = payroll_report::payroll_members(&app.state, from, to, &[lead_id, emp_id], false)
+        .await
+        .expect("members");
+    assert!(
+        !covered.is_empty(),
+        "the month has to cover the zero-hours employee for this test to mean anything"
+    );
+
+    zerf::background::payroll_report::run_once(&app.state)
+        .await
+        .expect("scheduled run");
+
+    let queued = app
+        .state
+        .db
+        .payroll_queue
+        .list_pending()
+        .await
+        .expect("queue");
+    assert!(
+        !queued.contains(&previous),
+        "a month with nothing to report is settled, not retried forever: {queued:?}"
     );
 
     app.cleanup().await;

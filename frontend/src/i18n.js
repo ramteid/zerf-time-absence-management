@@ -366,7 +366,6 @@ const TRANSLATIONS = {
     "Send {month} now": "Send {month} now",
     "Sends the current state of the named month right away, with the times approved so far. It does not replace the automatic delivery — the complete report is still sent on the selected day.":
       "Sends the current state of the named month right away, with the times approved so far. It does not replace the automatic delivery — the complete report is still sent on the selected day.",
-    "Report sent.": "Report sent.",
     "{month} sent.": "{month} sent.",
     "Nothing to send for {month} — no approved times yet.":
       "Nothing to send for {month} — no approved times yet.",
@@ -378,6 +377,9 @@ const TRANSLATIONS = {
       "Email is not set up, so nothing could be sent.",
     "Automatic sending of the payroll report is now off.":
       "Automatic sending of the payroll report is now off.",
+    "Nothing to send for {month} — nothing to report.":
+      "Nothing to send for {month} — nothing to report.",
+    "Nothing was sent for {month}.": "Nothing was sent for {month}.",
     // --- Payroll report: people included ---
     "People included": "People included",
     "All employees and assistants": "All employees and assistants",
@@ -1520,7 +1522,6 @@ const TRANSLATIONS = {
     "Send {month} now": "{month} jetzt senden",
     "Sends the current state of the named month right away, with the times approved so far. It does not replace the automatic delivery — the complete report is still sent on the selected day.":
       "Sendet sofort den aktuellen Stand des genannten Monats mit den bisher genehmigten Zeiten. Das ersetzt nicht den automatischen Versand — die vollständige Meldung wird am gewählten Tag trotzdem verschickt.",
-    "Report sent.": "Lohnmeldung gesendet.",
     "{month} sent.": "{month} gesendet.",
     "Nothing to send for {month} — no approved times yet.":
       "Für {month} gibt es nichts zu senden — noch keine genehmigten Zeiten.",
@@ -1532,6 +1533,9 @@ const TRANSLATIONS = {
       "Der E-Mail-Versand ist nicht eingerichtet, es konnte nichts gesendet werden.",
     "Automatic sending of the payroll report is now off.":
       "Der automatische Versand der Lohnmeldung ist jetzt ausgeschaltet.",
+    "Nothing to send for {month} — nothing to report.":
+      "Für {month} gibt es nichts zu melden.",
+    "Nothing was sent for {month}.": "Für {month} wurde nichts versendet.",
     // --- Lohnmeldung: einbezogene Personen ---
     "People included": "Einbezogene Personen",
     "All employees and assistants": "Alle Mitarbeitenden und Aushilfen",

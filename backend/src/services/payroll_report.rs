@@ -573,6 +573,21 @@ pub fn format_excluded_ids(ids: &[i64]) -> String {
     .join(",")
 }
 
+/// The slice of time a report covers, and whether that slice is finished.
+///
+/// The three travel together everywhere: `to` is the month end for a finished
+/// month but only today for an interim look, and `interim` decides which rows
+/// carry meaning at that point.
+#[derive(Debug, Clone, Copy)]
+pub struct ReportWindow {
+    pub from: NaiveDate,
+    /// Last day covered. Today rather than the month end while `interim`.
+    pub to: NaiveDate,
+    /// The month is still running, so rows that only mean something once it is
+    /// over — a salaried employee's "worked 0 days" — are left out.
+    pub interim: bool,
+}
+
 /// Absence categories the payroll report includes automatically — sick-like
 /// categories and anything that costs neither vacation nor flextime (see
 /// [`AbsenceCategory::is_payroll_relevant`]). Order follows `list_all()`
@@ -618,13 +633,13 @@ pub fn format_recipient_list(recipients: &[String]) -> String {
 /// month is final; `provisional` then describes what is missing.
 pub async fn build_report_data(
     app_state: &AppState,
-    from: NaiveDate,
-    to: NaiveDate,
+    window: ReportWindow,
     members: &[User],
     config: &PayrollReportConfig,
     language: &Language,
     provisional: Option<crate::report_pdf::ProvisionalNotice>,
 ) -> AppResult<PayrollReportData> {
+    let ReportWindow { from, to, interim } = window;
     let organization_name =
         settings::load_setting(&app_state.pool, settings::ORGANIZATION_NAME_KEY, "").await?;
 
@@ -642,13 +657,20 @@ pub async fn build_report_data(
     if config.include_assistant_hours {
         hours_sections.push(PayrollHoursSection {
             heading_key: ASSISTANT_HOURS_HEADING_KEY,
-            rows: build_hours_rows(app_state, from, to, members, true).await?,
+            // Assistants are paid by the hour, so an empty month is never
+            // their row — in any mode.
+            rows: build_hours_rows(app_state, from, to, members, true, true).await?,
         });
     }
     if config.include_employee_hours {
         hours_sections.push(PayrollHoursSection {
             heading_key: EMPLOYEE_HOURS_HEADING_KEY,
-            rows: build_hours_rows(app_state, from, to, members, false).await?,
+            // Employees are salaried, so "worked no days" is real
+            // information for a finished month and their zero row stays. In an
+            // interim look at a month still running it means nothing yet —
+            // usually just an unapproved current week — so it is dropped, which
+            // also keeps `people_in_report` equal to what the PDF prints.
+            rows: build_hours_rows(app_state, from, to, members, false, interim).await?,
         });
     }
 
@@ -764,6 +786,7 @@ async fn build_hours_rows(
     to: NaiveDate,
     members: &[User],
     assistants: bool,
+    drop_zero_rows: bool,
 ) -> AppResult<Vec<PayrollHoursRow>> {
     let mut rows = Vec::new();
     for member in members {
@@ -781,13 +804,9 @@ async fn build_hours_rows(
         .await?;
         let work_days = report.days.iter().filter(|day| day.actual_min > 0).count() as i64;
         let minutes = report.actual_min;
-        // Assistants only: with nothing worked there is nothing to pay them
-        // for, so an empty month is simply not their row (this also drops a
-        // month that holds only rejected entries). Employees keep their zero
-        // row deliberately — they are salaried, and "worked no days this
-        // month" is itself something payroll needs to see. `people_in_report`
-        // knows about this asymmetry and does not treat a zero row as content.
-        if assistants && work_days == 0 && minutes == 0 {
+        // A row stating zero days and zero hours only says something when the
+        // month it covers is over; see the call sites for who drops it.
+        if drop_zero_rows && work_days == 0 && minutes == 0 {
             continue;
         }
         rows.push(PayrollHoursRow {
@@ -807,32 +826,26 @@ fn employee_name(user: &User) -> String {
     format!("{}, {}", user.last_name, user.first_name)
 }
 
-/// How many distinct people the assembled report actually names.
+/// How many distinct people the assembled report names.
 ///
-/// This is deliberately read back off the finished document rather than taken
-/// from the member list: a person can be covered by the report and still not
-/// appear in it, because only approved entries and approved absences produce
-/// rows. Callers use it both to describe the report honestly and to recognise
-/// a document that would go out empty.
+/// Deliberately read back off the finished document rather than taken from the
+/// member list: a person can be covered by the report and still not appear in
+/// it, because only approved entries and approved absences produce rows.
+/// Callers use it both to describe the report honestly and to recognise a
+/// document that would go out with nothing in it — which is only sound because
+/// every row the document does contain is meaningful for the mode that built
+/// it (see `build_hours_rows`'s `drop_zero_rows`).
+///
+/// Distinct *names*, not user ids: two people sharing a full name collapse
+/// into one. That undercounts the notice in a rare case but can never make an
+/// empty report look non-empty, which is the property the guard relies on.
 pub fn people_in_report(data: &PayrollReportData) -> usize {
     let mut names: std::collections::HashSet<&str> = std::collections::HashSet::new();
-    // Absence rows are content by construction — `build_absence_rows` drops
-    // any period that works out to zero days.
     if let Some(rows) = &data.absence_rows {
         names.extend(rows.iter().map(|row| row.employee.as_str()));
     }
-    // Hours rows are not: only the assistants' table drops its zero rows (see
-    // `build_hours_rows`), so an employees' table can be a full page of
-    // "0 days, 0:00". Those state nothing, and counting them would let a
-    // document with no actual figures in it pass the caller's emptiness check.
     for section in &data.hours_sections {
-        names.extend(
-            section
-                .rows
-                .iter()
-                .filter(|row| row.work_days > 0 || row.minutes > 0)
-                .map(|row| row.employee.as_str()),
-        );
+        names.extend(section.rows.iter().map(|row| row.employee.as_str()));
     }
     names.len()
 }
@@ -999,25 +1012,21 @@ mod tests {
             "an empty document covers nobody and must not be sent"
         );
 
-        // Only the assistants' table drops its zero rows, so an employees'
-        // table can be a full page of "0 days, 0:00". That is not content:
-        // counting it would let a report with no figures in it pass the
-        // emptiness check purely because `include_employee_hours` is on.
-        let all_zero_rows = PayrollReportData {
+        // Every row present is counted, zero-valued or not. That is only
+        // sound because the builder never emits a meaningless row in the mode
+        // whose emptiness is actually checked: an interim report drops
+        // employees' "0 days, 0:00" rows (`build_hours_rows`'s
+        // `drop_zero_rows`), and a finished month keeps them deliberately,
+        // where they genuinely mean "worked nothing". The end-to-end guarantee
+        // lives in `payroll_snapshot_with_employee_hours_never_reports_empty_rows`.
+        let zero_rows_for_a_finished_month = PayrollReportData {
             hours_sections: vec![PayrollHoursSection {
                 heading_key: EMPLOYEE_HOURS_HEADING_KEY,
-                rows: vec![
-                    PayrollHoursRow {
-                        employee: "Doe, Jane".into(),
-                        work_days: 0,
-                        minutes: 0,
-                    },
-                    PayrollHoursRow {
-                        employee: "Roe, Sam".into(),
-                        work_days: 0,
-                        minutes: 0,
-                    },
-                ],
+                rows: vec![PayrollHoursRow {
+                    employee: "Doe, Jane".into(),
+                    work_days: 0,
+                    minutes: 0,
+                }],
             }],
             ..PayrollReportData {
                 period_label: "August 2026".into(),
@@ -1028,9 +1037,9 @@ mod tests {
             }
         };
         assert_eq!(
-            people_in_report(&all_zero_rows),
-            0,
-            "a table of zeros says nothing and must not count as content"
+            people_in_report(&zero_rows_for_a_finished_month),
+            1,
+            "a finished month's zero row is a statement about that person"
         );
 
         let populated = PayrollReportData {

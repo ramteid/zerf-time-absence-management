@@ -153,8 +153,9 @@ pub struct PayrollReportData {
     pub absence_rows: Option<Vec<PayrollAbsenceRow>>,
     /// Empty when neither hours section is enabled.
     pub hours_sections: Vec<PayrollHoursSection>,
-    /// `Some` only for a manually triggered partial send; a complete report
-    /// carries no notice.
+    /// `Some` whenever the report is not a complete month: a manually
+    /// triggered partial send, or an interim snapshot of the running month
+    /// (`in_progress`). A complete report carries no notice.
     pub provisional: Option<ProvisionalNotice>,
 }
 

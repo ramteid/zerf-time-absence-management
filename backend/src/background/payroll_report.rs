@@ -82,6 +82,9 @@ pub enum SkipReason {
     /// People booked time in the running month, but none of it is approved
     /// yet, so the snapshot would be an empty document.
     NothingApproved,
+    /// The people covered produced no rows at all — nothing worth reporting
+    /// happened in the month.
+    NothingToReport,
     /// Email delivery stopped being configured between the check and the send.
     EmailUnavailable,
 }
@@ -253,7 +256,9 @@ async fn process_pending_periods(
     }
 }
 
-/// Build and send one period's report. Returns whether anything was sent.
+/// Build and send one period's report.
+///
+/// Returns [`SendOutcome`]: either it went out, or why it did not.
 ///
 /// What an unfinished month means depends entirely on [`SendMode`]; see its
 /// variants. Everything below that decision — assembling the data, rendering
@@ -375,8 +380,11 @@ async fn process_period(
     };
     let mut data = payroll_report::build_report_data(
         state,
-        from,
-        to,
+        payroll_report::ReportWindow {
+            from,
+            to,
+            interim: mode == SendMode::ManualSnapshot,
+        },
         &included,
         config,
         language,
@@ -384,19 +392,30 @@ async fn process_period(
     )
     .await?;
 
-    if mode == SendMode::ManualSnapshot {
-        // Having booked time is not the same as having anything to report:
-        // only approved entries and approved absences reach the tables, and
-        // mid-month the current week is usually still unapproved. Without this
-        // guard the tax office would receive a document with nothing but
-        // headings in it, announced as covering N people. The partial send
-        // refuses an empty report for the same reason.
-        let covered = payroll_report::people_in_report(&data);
-        if covered == 0 {
-            tracing::info!("Payroll report: period {period} has nothing approved yet");
-            return Ok(SendOutcome::Skipped(SkipReason::NothingApproved));
+    // Being covered by the report is not the same as appearing in it: only
+    // approved entries and approved absences produce rows. A document with
+    // nothing but headings tells the tax office nothing, so no mode sends one
+    // — mid-month that is the normal state of a snapshot, and for a finished
+    // month it means nothing reportable happened at all.
+    let covered = payroll_report::people_in_report(&data);
+    if covered == 0 {
+        let reason = if mode == SendMode::ManualSnapshot {
+            SkipReason::NothingApproved
+        } else {
+            SkipReason::NothingToReport
+        };
+        // A scheduled month with nothing in it is settled rather than retried
+        // forever, exactly like a month covering nobody: the data will not
+        // appear later, because every covered person is already final.
+        if !mode.is_manual() {
+            state.db.payroll_queue.delete_entry(period).await?;
         }
-        // Count the people the document actually names, not everyone who
+        tracing::info!("Payroll report: period {period} has nothing to report; nothing sent");
+        return Ok(SendOutcome::Skipped(reason));
+    }
+
+    if mode == SendMode::ManualSnapshot {
+        // Name the people the document actually lists, not everyone who
         // happens to have booked something this month.
         data.provisional = Some(ProvisionalNotice {
             included: covered,

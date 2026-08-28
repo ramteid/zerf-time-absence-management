@@ -30,6 +30,7 @@
     nobody_final: "Nothing sent for {month} — nobody has finished the month.",
     nothing_approved: "Nothing to send for {month} — no approved times yet.",
     email_unavailable: "Email is not set up, so nothing could be sent.",
+    nothing_to_report: "Nothing to send for {month} — nothing to report.",
   };
 
   // Grows the textarea to fit its content instead of scrolling internally.
@@ -178,9 +179,12 @@
       if (result?.sent > 0) {
         toast($t("{month} sent.").replace("{month}", month), "ok");
       } else {
+        // No fallback to a *specific* reason: inventing one is how the old
+        // catch-all told admins the wrong thing. An unrecognised or absent
+        // reason gets the neutral line instead.
         toast(
           $t(
-            SKIP_MESSAGES[result?.skipped] ?? SKIP_MESSAGES.nothing_approved,
+            SKIP_MESSAGES[result?.skipped] ?? "Nothing was sent for {month}.",
           ).replace("{month}", month),
           "info",
         );
@@ -191,12 +195,19 @@
       sending = false;
     }
     // The target month moves on once a month's report is fully delivered, so
-    // refresh what the button label is derived from. Deliberately outside the
-    // block above: the send result has already been reported, and a failure to
-    // re-read the settings must not contradict it with a second, opposite
-    // toast. A stale label until the next page load is the lesser problem.
+    // refresh the one value the button label is derived from — and only that
+    // one. Four inputs on this page are bound straight into `settings`, so
+    // replacing the object would throw away edits the admin has not saved yet
+    // and leave them staring at silently reverted checkboxes.
+    //
+    // Deliberately outside the block above: the send result has already been
+    // reported, and failing to re-read must not contradict it with a second,
+    // opposite toast. A stale month label until the next load is harmless.
     try {
-      settings = await api("/settings");
+      const refreshed = await api("/settings");
+      settings.payroll_report_send_now_period =
+        refreshed.payroll_report_send_now_period;
+      settings = settings;
     } catch {
       // Keep the label as it was.
     }
