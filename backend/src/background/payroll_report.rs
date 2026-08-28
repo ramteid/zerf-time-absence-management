@@ -407,6 +407,16 @@ async fn process_period(
         // A scheduled month with nothing in it is settled rather than retried
         // forever, exactly like a month covering nobody: the data will not
         // appear later, because every covered person is already final.
+        //
+        // Note the consequence: "delivered" is derived from the queue, so the
+        // dashboard tile will call this month sent even though no mail went
+        // out. That is the same trade the covers-nobody branch already makes,
+        // and it is the honest half of the choice — the alternative is a month
+        // that stays outstanding on the tile and is retried every night for
+        // ever, for a report that will never have anything in it. A plain
+        // delete (not the post-send retry helper) is right here: nothing was
+        // sent, so a failed delete costs one wasted retry tomorrow rather than
+        // risking a second copy reaching the tax office.
         if !mode.is_manual() {
             state.db.payroll_queue.delete_entry(period).await?;
         }

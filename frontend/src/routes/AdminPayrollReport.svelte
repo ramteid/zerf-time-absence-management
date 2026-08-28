@@ -205,9 +205,11 @@
     // opposite toast. A stale month label until the next load is harmless.
     try {
       const refreshed = await api("/settings");
-      settings.payroll_report_send_now_period =
-        refreshed.payroll_report_send_now_period;
-      settings = settings;
+      settings = {
+        ...settings,
+        payroll_report_send_now_period:
+          refreshed.payroll_report_send_now_period,
+      };
     } catch {
       // Keep the label as it was.
     }
