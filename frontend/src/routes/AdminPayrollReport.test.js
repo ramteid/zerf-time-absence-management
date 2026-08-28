@@ -341,7 +341,12 @@ describe("AdminPayrollReport", () => {
   });
 
   it("says so when the month had nothing to send", async () => {
-    sendNowResult.value = { sent: 0, pending: 1, period: "2026-08" };
+    sendNowResult.value = {
+      sent: 0,
+      pending: 1,
+      period: "2026-08",
+      skipped: "nothing_approved",
+    };
     component = mount(AdminPayrollReport, { target });
     await settle();
 
@@ -350,6 +355,28 @@ describe("AdminPayrollReport", () => {
 
     expect(toastMock).toHaveBeenCalledWith(
       "Nothing to send for August 2026 — no approved times yet.",
+      "info",
+    );
+  });
+
+  // "Nobody has finished the month" and "nothing is approved yet" are
+  // different problems with different fixes, so the message must not collapse
+  // them into one catch-all.
+  it("names the actual reason nothing was sent", async () => {
+    sendNowResult.value = {
+      sent: 0,
+      pending: 1,
+      period: "2026-08",
+      skipped: "nobody_final",
+    };
+    component = mount(AdminPayrollReport, { target });
+    await settle();
+
+    clickButton(target, "Send August 2026 now");
+    await settle();
+
+    expect(toastMock).toHaveBeenCalledWith(
+      "Nothing sent for August 2026 — nobody has finished the month.",
       "info",
     );
   });

@@ -1428,3 +1428,154 @@ async fn payroll_status_requires_approval_even_when_hours_are_not_in_the_report(
 
     app.cleanup().await;
 }
+
+/// A weekday in the current month on or before today — the exact window a
+/// current-month snapshot reports on. Walks backwards from today so it is
+/// stable whichever day the suite runs on. `None` only when the month has not
+/// reached a weekday yet (the 1st falling on a weekend), where a snapshot has
+/// nothing to cover by definition.
+fn current_month_workday_up_to_today(today: NaiveDate) -> Option<NaiveDate> {
+    use chrono::Datelike;
+    let first = NaiveDate::from_ymd_opt(today.year(), today.month(), 1)?;
+    let mut day = today;
+    while day >= first {
+        if day.weekday().num_days_from_monday() < 5 {
+            return Some(day);
+        }
+        day = day.pred_opt()?;
+    }
+    None
+}
+
+/// The interim snapshot of the running month must never go out empty.
+///
+/// Booking time is not the same as having something to report: only approved
+/// entries reach the tables, and mid-month the current week is normally still
+/// unapproved. Without a guard the tax office receives a document containing
+/// nothing but headings, announced as covering N people.
+///
+/// SMTP points at a closed port throughout, which is what makes the two states
+/// distinguishable: refusing to send returns 200 with `sent: 0`, while getting
+/// as far as delivery fails loudly — so a 400 proves a non-empty document was
+/// actually built and handed to the mailer.
+#[tokio::test]
+async fn payroll_snapshot_of_the_running_month_is_never_sent_empty() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    configure_unreachable_smtp(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "payroll-snapshot").await;
+    let lead = login_change_pw(&app, "lead-payroll-snapshot@example.com", &lead_pw).await;
+    let (_assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "snapshot").await;
+    let assistant = login_change_pw(&app, "aushilfe-snapshot@example.com", &assistant_pw).await;
+
+    let (status, _) = admin
+        .put(
+            "/api/v1/settings/payroll-report",
+            &json!({
+                "payroll_report_enabled": true,
+                "payroll_report_recipients": ["payroll@example.com"],
+                "payroll_report_day_of_month": 1,
+                "payroll_report_include_assistant_hours": true,
+                "payroll_report_include_employee_hours": false,
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "enable payroll report");
+
+    // Mark the previous month delivered so "Send now" moves on to the running
+    // one — that is the only way to reach the snapshot path.
+    let today = zerf::services::settings::app_today(&app.state.pool).await;
+    let previous = zerf::background::schedule::previous_period(today);
+    app.state
+        .db
+        .settings
+        .save_setting(
+            zerf::services::settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+            &previous,
+        )
+        .await
+        .expect("record queue period");
+    let current = zerf::background::schedule::current_period(today);
+    let (_, settings) = admin.get("/api/v1/settings").await;
+    assert_eq!(
+        settings["payroll_report_send_now_period"],
+        json!(current),
+        "the snapshot path is the one under test"
+    );
+
+    // Nobody has booked anything in the running month yet.
+    let (status, body) = admin
+        .post("/api/v1/settings/payroll-report/send-now", &json!({}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "nothing to send is not an error");
+    assert_eq!(body["sent"], json!(0), "an empty month sends nothing: {body}");
+
+    let Some(workday) = current_month_workday_up_to_today(today) else {
+        // The month has not reached a weekday yet; there is nothing further to
+        // assert, and the run above already covered the empty case.
+        app.cleanup().await;
+        return;
+    };
+    let day = workday.format("%Y-%m-%d").to_string();
+
+    // Booked but NOT approved: the member set is now non-empty while every
+    // table stays empty. This is the case the guard exists for — before it,
+    // this sent a document with nothing in it.
+    let entry_id = create_and_submit_entry(&assistant, &day, cat_id).await;
+    let (status, body) = admin
+        .post("/api/v1/settings/payroll-report/send-now", &json!({}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "still not an error");
+    assert_eq!(
+        body["sent"],
+        json!(0),
+        "booked but unapproved time must not produce a report: {body}"
+    );
+    assert_eq!(
+        body["skipped"],
+        json!("nothing_approved"),
+        "and the admin is told why: {body}"
+    );
+
+    // Approving it gives the document real content, so the send is attempted
+    // for real — and fails only because SMTP points nowhere.
+    let (status, _) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [entry_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the entry");
+
+    let (status, body) = admin
+        .post("/api/v1/settings/payroll-report/send-now", &json!({}))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "approved time makes a real document that is actually sent: {body}"
+    );
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|e| e.starts_with("PAYROLL_SEND_FAILED:")),
+        "the delivery failure reaches the admin verbatim: {body}"
+    );
+
+    // A snapshot must never settle the running month: it is not owed yet, so
+    // nothing may enter or leave the delivery queue on its behalf.
+    let queued = app
+        .state
+        .db
+        .payroll_queue
+        .list_pending()
+        .await
+        .expect("queue");
+    assert!(
+        !queued.contains(&current),
+        "the running month is never queued by a snapshot: {queued:?}"
+    );
+
+    app.cleanup().await;
+}

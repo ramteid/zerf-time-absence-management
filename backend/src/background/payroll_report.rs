@@ -66,6 +66,33 @@ impl SendMode {
     }
 }
 
+/// Why a run produced no email. Kept distinct rather than collapsed into a
+/// single "nothing happened" so the admin standing in front of the button is
+/// told the actual reason: "nobody has finished the month" and "nothing has
+/// been approved yet" call for completely different action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkipReason {
+    /// The month covers nobody at all — too early for this installation, or
+    /// everybody in it is on the exclusion list.
+    CoversNobody,
+    /// People are covered but none of them has a final month yet, so a
+    /// partial report would name nobody.
+    NobodyFinal,
+    /// People booked time in the running month, but none of it is approved
+    /// yet, so the snapshot would be an empty document.
+    NothingApproved,
+    /// Email delivery stopped being configured between the check and the send.
+    EmailUnavailable,
+}
+
+/// Result of building and sending one period.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SendOutcome {
+    Sent,
+    Skipped(SkipReason),
+}
+
 /// Background loop: checks once per day (midnight in app timezone).
 pub async fn run_loop(state: AppState) {
     schedule::run_daily_after_midnight(state, "Payroll report", |state| async move {
@@ -104,10 +131,12 @@ pub async fn run_once(state: &AppState) -> AppResult<()> {
 pub struct RunSummary {
     /// Periods whose report was accepted by the SMTP server.
     pub sent: usize,
-    /// Periods that produced no document (nobody final, or nobody covered).
+    /// Periods that produced no document.
     pub pending: usize,
     /// The month this run targeted, "YYYY-MM", so the UI can name it.
     pub period: String,
+    /// Why nothing was sent, when nothing was. `None` once a report went out.
+    pub skipped: Option<SkipReason>,
 }
 
 /// Triggered by the admin "Send now" button: sends one month right away.
@@ -154,11 +183,16 @@ pub async fn run_now(state: &AppState) -> AppResult<RunSummary> {
     // Unlike the nightly loop, a failure here is propagated instead of being
     // swallowed into `pending`: the admin is standing in front of the button
     // and has to be told the send did not work.
-    let sent = process_period(state, &target.period, &config, &language, mode).await?;
+    let outcome = process_period(state, &target.period, &config, &language, mode).await?;
+    let skipped = match outcome {
+        SendOutcome::Sent => None,
+        SendOutcome::Skipped(reason) => Some(reason),
+    };
     Ok(RunSummary {
-        sent: usize::from(sent),
-        pending: usize::from(!sent),
+        sent: usize::from(skipped.is_none()),
+        pending: usize::from(skipped.is_some()),
         period: target.period,
+        skipped,
     })
 }
 
@@ -230,7 +264,7 @@ async fn process_period(
     config: &PayrollReportConfig,
     language: &Language,
     mode: SendMode,
-) -> AppResult<bool> {
+) -> AppResult<SendOutcome> {
     let (from, month_end) = schedule::period_bounds(period)?;
     // A snapshot reports the month "up to today", so it stops at today rather
     // than the month end. Worked hours already do this on their own (a future
@@ -267,7 +301,7 @@ async fn process_period(
         SendMode::ManualSnapshot => {
             if members.is_empty() {
                 tracing::info!("Payroll report: period {period} has no booked time yet");
-                return Ok(false);
+                return Ok(SendOutcome::Skipped(SkipReason::NothingApproved));
             }
             (members, None)
         }
@@ -299,7 +333,7 @@ async fn process_period(
                     state.db.payroll_queue.delete_entry(period).await?;
                 }
                 tracing::info!("Payroll report: period {period} covers nobody; nothing to send");
-                return Ok(false);
+                return Ok(SendOutcome::Skipped(SkipReason::CoversNobody));
             }
             if !pending.is_empty() && !mode.is_manual() {
                 // Not an error — people just have not finished their month.
@@ -310,13 +344,13 @@ async fn process_period(
                     pending.len(),
                     ready.len() + pending.len()
                 );
-                return Ok(false);
+                return Ok(SendOutcome::Skipped(SkipReason::NobodyFinal));
             }
             if ready.is_empty() {
                 // A manual send while nobody has finished yet: an empty
                 // document helps the payroll accountant no more than none.
                 tracing::info!("Payroll report: period {period} has no finalized people yet");
-                return Ok(false);
+                return Ok(SendOutcome::Skipped(SkipReason::NobodyFinal));
             }
 
             // Only a manual send can get here with people missing, and only
@@ -360,7 +394,7 @@ async fn process_period(
         let covered = payroll_report::people_in_report(&data);
         if covered == 0 {
             tracing::info!("Payroll report: period {period} has nothing approved yet");
-            return Ok(false);
+            return Ok(SendOutcome::Skipped(SkipReason::NothingApproved));
         }
         // Count the people the document actually names, not everyone who
         // happens to have booked something this month.
@@ -383,7 +417,7 @@ async fn process_period(
         // SMTP disabled after queue listing – leave queued for next cycle
         // (mirrors email_queue worker behavior).
         tracing::info!("Payroll report: SMTP not configured at send time, deferring period {period}");
-        return Ok(false);
+        return Ok(SendOutcome::Skipped(SkipReason::EmailUnavailable));
     };
 
     let text = email_text(
@@ -446,7 +480,7 @@ async fn process_period(
             config.recipients.join(", ")
         );
     }
-    Ok(true)
+    Ok(SendOutcome::Sent)
 }
 
 /// Delay between delete attempts. Short: this only needs to ride out a

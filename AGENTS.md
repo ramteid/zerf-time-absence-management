@@ -441,7 +441,28 @@ The earlier `backup_interval_seconds`/`backup_retention_days` keys are gone: mig
 
 `payroll_report_absence_categories` is also gone: migration 036 removed it because the report now derives its categories automatically from `AbsenceCategory::is_payroll_relevant`. The key still appears read-only in `AdminSettingsData` so the UI can show which categories are currently included.
 
-**Payroll report delivery rules** (`background/payroll_report.rs`): the scheduled run sends only once every covered person's month is final — a blocked month is logged, never raised as an error notification. The admin "Send now" button sends a *provisional* report covering whoever is already final, marked as partial in both the PDF and the email, and never deletes the queue entry. `GET /reports/payroll-status` (leads only) backs the dashboard tile and reuses the same member filter and readiness gate, so tile and document can never disagree; names of people outside a team lead's own team are stripped server-side. "Already delivered" is derived from the queue (period reached `payroll_report_queue_period` **and** no longer in `payroll_report_queue`) rather than a stored marker, so it is correct on installations that predate the card. The tile's amber/red split cannot be read off `MonthExportReadiness` alone: the gate returns `PendingAbsenceRequests` before it checks week submission, so `status_for_member` re-checks `all_weeks_submitted_for_month` to keep "still owes weeks" red.
+**Payroll report delivery rules** (`background/payroll_report.rs`): three send
+modes, `SendMode`. `Scheduled` (nightly) sends only once every covered person's
+month is final — a blocked month is logged, never raised as an error
+notification — and deletes the queue entry once SMTP accepts it. The admin
+"Send now" button never deletes a queue entry and picks its month via
+`services::payroll_report::manual_send_target`: the oldest month still owed
+(already queued, *or* one the next run's backfill would queue — both lists must
+be consulted or the button names one month and sends another), else the month
+currently running. An owed month goes out as `ManualPartial`: whoever is final,
+with the rest named as missing in PDF and email. The running month goes out as
+`ManualSnapshot`: no readiness gate at all, only people who booked something,
+window clamped to today (absence rows do not self-clamp the way worked hours
+do), and refused outright unless `people_in_report` finds somebody — only
+approved data reaches the tables, so a booked-but-unapproved month would
+otherwise mail an empty document. `ManualSnapshot` therefore deliberately uses
+a *different* member filter and window from the dashboard tile; the two agree
+only for a finished month. Enabling the report at all requires
+`load_smtp_config()` to be `Some`, and disabling SMTP switches it back off
+(`update_smtp_settings`). `GET /reports/payroll-status` (leads only) backs the
+dashboard tile and reuses the scheduled path's member filter and readiness
+gate, so tile and *delivered* document can never disagree; names of people
+outside a team lead's own team are stripped server-side. "Already delivered" is derived from the queue (period reached `payroll_report_queue_period` **and** no longer in `payroll_report_queue`) rather than a stored marker, so it is correct on installations that predate the card. The tile's amber/red split cannot be read off `MonthExportReadiness` alone: the gate returns `PendingAbsenceRequests` before it checks week submission, so `status_for_member` re-checks `all_weeks_submitted_for_month` to keep "still owes weeks" red.
 
 ### Integration tests
 

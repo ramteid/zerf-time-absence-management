@@ -370,6 +370,12 @@ const TRANSLATIONS = {
     "{month} sent.": "{month} sent.",
     "Nothing to send for {month} — no approved times yet.":
       "Nothing to send for {month} — no approved times yet.",
+    "Nothing to send for {month} — nobody to report on.":
+      "Nothing to send for {month} — nobody to report on.",
+    "Nothing sent for {month} — nobody has finished the month.":
+      "Nothing sent for {month} — nobody has finished the month.",
+    "Email is not set up, so nothing could be sent.":
+      "Email is not set up, so nothing could be sent.",
     // --- Payroll report: people included ---
     "People included": "People included",
     "All employees and assistants": "All employees and assistants",
@@ -1516,6 +1522,12 @@ const TRANSLATIONS = {
     "{month} sent.": "{month} gesendet.",
     "Nothing to send for {month} — no approved times yet.":
       "Für {month} gibt es nichts zu senden — noch keine genehmigten Zeiten.",
+    "Nothing to send for {month} — nobody to report on.":
+      "Für {month} gibt es niemanden zu melden.",
+    "Nothing sent for {month} — nobody has finished the month.":
+      "Für {month} wurde nichts versendet — noch niemand hat den Monat abgeschlossen.",
+    "Email is not set up, so nothing could be sent.":
+      "Der E-Mail-Versand ist nicht eingerichtet, es konnte nichts gesendet werden.",
     // --- Lohnmeldung: einbezogene Personen ---
     "People included": "Einbezogene Personen",
     "All employees and assistants": "Alle Mitarbeitenden und Aushilfen",

@@ -23,6 +23,15 @@
   let recipientsInput = "";
   let recipientsTextarea;
 
+  // Why the backend sent nothing, mapped to what the admin should read. The
+  // keys are the `skipped` values of POST /settings/payroll-report/send-now.
+  const SKIP_MESSAGES = {
+    covers_nobody: "Nothing to send for {month} — nobody to report on.",
+    nobody_final: "Nothing sent for {month} — nobody has finished the month.",
+    nothing_approved: "Nothing to send for {month} — no approved times yet.",
+    email_unavailable: "Email is not set up, so nothing could be sent.",
+  };
+
   // Grows the textarea to fit its content instead of scrolling internally.
   function resizeRecipientsTextarea() {
     if (!recipientsTextarea) return;
@@ -160,19 +169,19 @@
       const month = result?.period
         ? fmtMonthLabel(result.period)
         : sendNowMonth;
-      // Always give visible feedback. A click that sends nothing looked
-      // exactly like a click that failed before, which is what made a
-      // seemingly-successful send impossible to verify. The backend now sends
-      // exactly one month, so this is a simple sent/not-sent split; a real
+      // Always give visible feedback. A click that sends nothing used to look
+      // exactly like a click that failed, which is what made a seemingly
+      // successful send impossible to verify. When nothing goes out the
+      // backend says why, because the reasons call for different action —
+      // chasing submissions is not the same as waiting for approvals. A real
       // failure throws and lands in the catch below.
       if (result?.sent > 0) {
         toast($t("{month} sent.").replace("{month}", month), "ok");
       } else {
         toast(
-          $t("Nothing to send for {month} — no approved times yet.").replace(
-            "{month}",
-            month,
-          ),
+          $t(
+            SKIP_MESSAGES[result?.skipped] ?? SKIP_MESSAGES.nothing_approved,
+          ).replace("{month}", month),
           "info",
         );
       }

@@ -839,6 +839,9 @@ pub async fn run_payroll_report_now(
         // The month that was actually targeted, so the confirmation can name
         // it rather than the one the page happened to load with.
         "period": summary.period,
+        // Why nothing went out, so the page can say something true instead of
+        // guessing a reason.
+        "skipped": summary.skipped,
     })))
 }
 
