@@ -187,10 +187,27 @@ pub async fn run_month_end_check(state: &crate::AppState) {
         }
     };
 
+    // An undecided absence request holds the payroll report back exactly like
+    // an undecided week does, and the same person can settle both, so this pass
+    // asks about both together.
+    let mut waiting: std::collections::HashSet<i64> = waiting_user_ids.into_iter().collect();
+    match state
+        .db
+        .reports
+        .user_ids_with_requested_absences_in_range(from, to)
+        .await
+    {
+        Ok(ids) => waiting.extend(ids),
+        Err(e) => {
+            tracing::warn!(target:"zerf::approval_reminders", "month-end absence query failed: {e}");
+            return;
+        }
+    }
+
     // One reminder per approver, carrying how many of their people are waiting.
     let mut waiting_per_approver: std::collections::HashMap<i64, usize> =
         std::collections::HashMap::new();
-    for user_id in waiting_user_ids {
+    for user_id in waiting {
         for approver_id in crate::services::auth::user_approver_ids(pool, user_id).await {
             *waiting_per_approver.entry(approver_id).or_default() += 1;
         }

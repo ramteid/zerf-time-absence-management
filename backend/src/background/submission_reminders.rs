@@ -351,10 +351,11 @@ async fn month_submission_deadline(
 /// never produces a reminder.
 ///
 /// It repeats on the same rhythm as [`run_month_weeks_reminder`] for as long as
-/// the booking is still not handed in, because that booking is also what holds
-/// the payroll report back: chasing it once would leave the report blocked by
+/// the booking is not handed in, because that booking is exactly what holds the
+/// payroll report back: an entry that exists and is not approved means hours
+/// missing from the document. Asking once would leave the report blocked by
 /// something nobody is being reminded of any more. It stops the moment they
-/// hand it in — waiting for a decision is not their move.
+/// hand it in — waiting for a decision is then the approver's move.
 pub async fn run_month_end_check(
     state: &crate::AppState,
     now_local: chrono::DateTime<chrono_tz::Tz>,
@@ -422,9 +423,8 @@ pub async fn run_month_end_check(
             "month_end_submission_reminder",
             &params,
         );
-        // Per day, not per period: the pass repeats every third day while the
-        // booking is still not handed in, and the loop re-checks every hour
-        // within the day.
+        // Per day: the pass repeats every third day while the booking is still
+        // not handed in, and the loop re-checks every hour within the day.
         let dedupe_key = format!("month_end_submission_reminder:{today}");
         crate::services::notifications::deliver(
             state,

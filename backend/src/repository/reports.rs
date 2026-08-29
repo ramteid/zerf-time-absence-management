@@ -410,6 +410,24 @@ impl ReportDb {
         Ok(rows.into_iter().map(|(id,)| id).collect())
     }
 
+    /// User IDs with an undecided absence request overlapping the period.
+    /// Their approvers are the ones who can settle it, and an undecided request
+    /// is one of the few things that genuinely holds the payroll report back.
+    pub async fn user_ids_with_requested_absences_in_range(
+        &self,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<Vec<i64>> {
+        Ok(sqlx::query_scalar(
+            "SELECT DISTINCT user_id FROM absences \
+             WHERE status='requested' AND end_date >= $1 AND start_date <= $2",
+        )
+        .bind(from)
+        .bind(to)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     /// Whether an undecided absence request in the period falls into a category
     /// the payroll report actually prints — sick-like or unpaid.
     ///
