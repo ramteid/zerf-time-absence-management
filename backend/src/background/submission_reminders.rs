@@ -294,19 +294,20 @@ fn reminder_hour_reached(now: chrono::DateTime<chrono_tz::Tz>) -> bool {
     now.hour() >= 8
 }
 
-/// True on the first day of a month, once the reminder hour is reached.
-fn month_end_reminder_is_due_now(now: chrono::DateTime<chrono_tz::Tz>) -> bool {
-    reminder_hour_reached(now) && now.date_naive().day() == 1
-}
-
-/// Days between the missing-week reminders that run through the new month:
+/// Days between the month-boundary reminders that run through the new month:
 /// the 1st, the 4th, the 7th and so on.
-const WEEK_REMINDER_INTERVAL_DAYS: u32 = 3;
+const REMINDER_INTERVAL_DAYS: u32 = 3;
 
 /// True on every third day from the 1st, once the reminder hour is reached.
-fn week_reminder_is_due_now(now: chrono::DateTime<chrono_tz::Tz>) -> bool {
+///
+/// Both month-boundary passes share this rhythm, and they have to: what they
+/// ask for is exactly what holds the monthly reports up. Asking once would
+/// leave a report blocked by something nobody is being reminded of any more —
+/// and would lose the reminder entirely for a month whose 1st the server spent
+/// restarting.
+fn month_reminder_is_due_now(now: chrono::DateTime<chrono_tz::Tz>) -> bool {
     reminder_hour_reached(now)
-        && (now.date_naive().day() - 1).is_multiple_of(WEEK_REMINDER_INTERVAL_DAYS)
+        && (now.date_naive().day() - 1).is_multiple_of(REMINDER_INTERVAL_DAYS)
 }
 
 /// The date by which the finished month's hours have to be handed in.
@@ -339,8 +340,8 @@ async fn month_submission_deadline(
     )
 }
 
-/// On the first of the month: ask the assistants who still hold days of the
-/// finished month to hand them in, and name the date it has to happen by.
+/// Every third day of the new month: ask the assistants who still hold days of
+/// the finished month to hand them in, and name the date it has to happen by.
 ///
 /// Assistants get their own pass because the week question does not apply to
 /// them — no target schedule means a week without a booking is no evidence of
@@ -349,16 +350,17 @@ async fn month_submission_deadline(
 /// submitted and merely waiting for a decision is not their move any more and
 /// never produces a reminder.
 ///
-/// Once, on the 1st: unlike a salaried employee there is no list of missing
-/// weeks to work through, so repeating it would only be pressure over work they
-/// may not owe. Everybody with a fixed contract is served by
-/// [`run_month_weeks_reminder`] instead, which names their missing weeks.
+/// It repeats on the same rhythm as [`run_month_weeks_reminder`] for as long as
+/// the booking is still not handed in, because that booking is also what holds
+/// the payroll report back: chasing it once would leave the report blocked by
+/// something nobody is being reminded of any more. It stops the moment they
+/// hand it in — waiting for a decision is not their move.
 pub async fn run_month_end_check(
     state: &crate::AppState,
     now_local: chrono::DateTime<chrono_tz::Tz>,
 ) {
     let pool = &state.pool;
-    if !month_end_reminder_is_due_now(now_local) {
+    if !month_reminder_is_due_now(now_local) {
         return;
     }
     let reminders_enabled = load_setting(pool, SUBMISSION_REMINDERS_ENABLED_KEY, "true")
@@ -420,9 +422,10 @@ pub async fn run_month_end_check(
             "month_end_submission_reminder",
             &params,
         );
-        // Once per month, not once per pass: the loop re-checks every hour
-        // while the first of the month lasts.
-        let dedupe_key = format!("month_end_submission_reminder:{period}");
+        // Per day, not per period: the pass repeats every third day while the
+        // booking is still not handed in, and the loop re-checks every hour
+        // within the day.
+        let dedupe_key = format!("month_end_submission_reminder:{today}");
         crate::services::notifications::deliver(
             state,
             &crate::services::notifications::Outgoing::new(
@@ -457,7 +460,7 @@ pub async fn run_month_weeks_reminder(
     now_local: chrono::DateTime<chrono_tz::Tz>,
 ) {
     let pool = &state.pool;
-    if !week_reminder_is_due_now(now_local) {
+    if !month_reminder_is_due_now(now_local) {
         return;
     }
     let reminders_enabled = load_setting(pool, SUBMISSION_REMINDERS_ENABLED_KEY, "true")
@@ -616,44 +619,27 @@ mod tests {
     use super::*;
     use chrono_tz::Europe::Berlin;
 
-    /// The month-end ask runs on the 1st from 08:00 and on no other day, so
-    /// nobody is chased for a month that is not over.
+    /// Both month-boundary passes share one rhythm — every third day from the
+    /// 1st, from 08:00. They chase exactly what holds the monthly reports up,
+    /// so asking once would leave a report blocked by something nobody is
+    /// being reminded of any more.
     #[test]
-    fn month_end_reminder_fires_on_the_first_from_eight() {
-        assert!(month_end_reminder_is_due_now(
-            Berlin.with_ymd_and_hms(2026, 9, 1, 8, 0, 0).unwrap()
-        ));
-        assert!(month_end_reminder_is_due_now(
-            Berlin.with_ymd_and_hms(2026, 9, 1, 23, 0, 0).unwrap()
-        ));
-        assert!(!month_end_reminder_is_due_now(
-            Berlin.with_ymd_and_hms(2026, 9, 1, 7, 59, 0).unwrap()
-        ));
-        assert!(!month_end_reminder_is_due_now(
-            Berlin.with_ymd_and_hms(2026, 8, 31, 9, 0, 0).unwrap()
-        ));
-        assert!(!month_end_reminder_is_due_now(
-            Berlin.with_ymd_and_hms(2026, 9, 2, 9, 0, 0).unwrap()
-        ));
-    }
-
-    /// The missing-week reminder repeats every third day from the 1st.
-    #[test]
-    fn week_reminder_repeats_every_third_day_from_the_first() {
+    fn month_reminders_repeat_every_third_day_from_the_first() {
         for day in [1, 4, 7, 10, 31] {
             assert!(
-                week_reminder_is_due_now(Berlin.with_ymd_and_hms(2026, 8, day, 8, 0, 0).unwrap()),
+                month_reminder_is_due_now(Berlin.with_ymd_and_hms(2026, 8, day, 8, 0, 0).unwrap()),
                 "expected a reminder on the {day}."
             );
         }
         for day in [2, 3, 5, 6, 8] {
             assert!(
-                !week_reminder_is_due_now(Berlin.with_ymd_and_hms(2026, 8, day, 8, 0, 0).unwrap()),
+                !month_reminder_is_due_now(Berlin.with_ymd_and_hms(2026, 8, day, 8, 0, 0).unwrap()),
                 "expected no reminder on the {day}."
             );
         }
-        assert!(!week_reminder_is_due_now(
-            Berlin.with_ymd_and_hms(2026, 8, 4, 7, 0, 0).unwrap()
+        // Before the working day starts, nothing goes out.
+        assert!(!month_reminder_is_due_now(
+            Berlin.with_ymd_and_hms(2026, 8, 4, 7, 59, 0).unwrap()
         ));
     }
 

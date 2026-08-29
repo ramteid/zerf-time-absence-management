@@ -332,15 +332,17 @@ it is over. Approvers see those days as their own small week block.
 
 Nobody has to remember this on their own:
 
-- On the **1st** of a month, at 08:00, assistants who still hold days of the
-  month that just ended are asked to hand them in, naming the deadline day from
-  the general settings. They get their own message because the week rule does
-  not apply to them.
-- **Every third day from the 1st** (so the 1st, 4th, 7th …), at 08:00, everyone
-  with a fixed working-time contract is reminded of the weeks of that month that
-  are still missing, listed by name, with the same deadline. Assistants do not
-  receive this one: they have no target schedule, so a week without a booking is
-  no sign that anything is missing — they may simply not have worked.
+- **Every third day from the 1st** (so the 1st, 4th, 7th …), at 08:00:
+  assistants who still hold days of the month that just ended are asked to hand
+  them in, naming the deadline day from the general settings. They get their own
+  message because the week rule does not apply to them.
+- On the same days, everyone with a fixed working-time contract is reminded of
+  the weeks of that month that are still missing, listed by name, with the same
+  deadline. Assistants do not receive this one: they have no target schedule, so
+  a week without a booking is no sign that anything is missing — they may simply
+  not have worked.
+- The reminders repeat because what they ask for is what holds the monthly
+  reports up. They stop for you the moment you have handed your part in.
 - Every reminder is decided fresh each time and only goes out when something is
   genuinely missing. A week you have handed in and that is merely waiting for a
   decision never produces one — that is the approver's move, not yours.
@@ -350,8 +352,8 @@ Nobody has to remember this on their own:
   next reminder day on or after that Friday. Only the days of it that belong to
   the finished month are asked for: hand those in, and the week counts as
   settled for that month, whatever you still book in it afterwards.
-- On the **3rd**, approvers are reminded of days from that month that are handed
-  in but still waiting for a decision.
+- On the same days, approvers are reminded of days from that month that are
+  handed in but still waiting for a decision.
 - If the payroll report cannot be sent on its send day, the administrators are
   told once, with the names of the people it is waiting for.
 
@@ -804,10 +806,13 @@ is configured when Zerf creates the notification.
 - absence cancellation is approved or rejected,
 - reopen request is approved or rejected,
 - a monthly submission reminder is triggered on the configured deadline day (lists past weeks that are still not submitted),
-- **on the 1st of a month**, for assistants who still hold unsubmitted days of
-  the month that just ended (see [Month end](#month-end)),
+- **every third day from the 1st**, for assistants who still hold unsubmitted
+  days of the month that just ended (see [Month end](#month-end)),
 - **every third day from the 1st**, if weeks of that month are still missing —
   only for people with a fixed working-time contract.
+
+Assistants receive their own message on those same days whenever they still hold
+a booking they have not handed in.
 
 If an admin approves or rejects their own item, Zerf records the audit event
 and sends an in-app-only notification (no email) back to the same user.
@@ -819,8 +824,8 @@ and sends an in-app-only notification (no email) back to the same user.
   employee's comment, if one was added),
 - a reopen request is submitted,
 - a weekly approval reminder is triggered (pending items awaiting review),
-- **on the 3rd of a month**, if people they approve have handed in days of the
-  month that just ended that are still waiting for a decision (see
+- **every third day from the 1st**, if people they approve have handed in days
+  of the month that just ended that are still waiting for a decision (see
   [Month end](#month-end)).
 
 ### Exception: auto-approved submissions and reopen requests are silent

@@ -112,23 +112,27 @@ let user = UserDb::new(pool.clone()).find_by_id(id).await?;
 - Auth cleanup: purge expired sessions and login attempts (hourly)
 - Notification cleanup: delete notifications older than 90 days (daily)
 - Holiday scheduler: ensure current and next year holidays exist (weekly, Monday noon)
-- Submission reminder scheduler (also carries two month-boundary passes, both
-  at 08:00: `run_month_end_check` on the 1st asks *everyone who booked anything*
-  in the finished month — every role, not just people visibly holding something
-  unsubmitted, because a worked-but-unbooked day leaves no trace — to hand it in
-  by a named date (payroll send day − 1, else the configured submission deadline
-  day; without either it does not fire). `run_month_weeks_reminder` runs every
-  third day from the 1st and names the finished month's missing weeks, for
-  people with a target schedule only: for an assistant a bookingless week proves
-  nothing. The week straddling the turn of the month joins that list only from
-  its Friday, and is judged solely on its in-month days
-  (`reports::unsubmitted_weeks_in_month`). Both passes re-decide their audience
-  on every run and only fire on something genuinely missing — a week that is
-  handed in and merely awaiting a decision is the approver's move, not the
-  employee's. The deadline they name is the organisation's own
-  `submission_deadline_day`, with the payroll send day − 1 as a fallback)
-- Approval reminder scheduler (weekly, plus a **month-end pass** on the 3rd for
-  days of the finished month that are handed in but undecided)
+- Submission reminder scheduler (also carries two month-boundary passes, both at
+  08:00 on every third day from the 1st — `month_reminder_is_due_now`).
+  `run_month_end_check` asks the assistants who still hold a booking they never
+  handed in; `run_month_weeks_reminder` names the finished month's missing weeks
+  for people with a target schedule, where a bookingless week *is* evidence —
+  for an assistant it is not. The week straddling the turn of the month joins
+  that list only from its Friday and is judged solely on its in-month days
+  (`reports::unsubmitted_weeks_in_month`). Both re-decide their audience on
+  every run and only fire on something genuinely missing: a week handed in and
+  merely awaiting a decision is the approver's move, not the employee's. They
+  repeat rather than firing once because what they ask for is exactly what holds
+  the payroll report up — chasing it once would leave a report blocked by
+  something nobody is being reminded of, and would lose the whole month's
+  reminder to a restart on the 1st. The deadline named is the organisation's own
+  `submission_deadline_day`, with the payroll send day − 1 as a fallback; past
+  that date the message drops to the plain missing-weeks wording rather than
+  naming a day that has gone by)
+- Approval reminder scheduler (weekly, plus a **month-end pass** on the same
+  every-third-day rhythm for days of the finished month that are handed in but
+  undecided — an undecided day holds the payroll report, so it is chased until
+  it is decided, not once)
 - Monthly timesheet PDF upload to Nextcloud (daily, after midnight)
 - Monthly payroll report email to the tax office (daily, after midnight)
 - Error-notification worker: drains `error_notification_queue` and alerts opted-in admins in-app + by email (poll every 10s)

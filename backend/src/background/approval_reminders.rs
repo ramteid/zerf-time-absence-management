@@ -132,14 +132,19 @@ pub async fn run_check(state: &crate::AppState) {
     }
 }
 
-/// Day of the new month on which approvers are asked for the finished month's
-/// still-undecided days. Two days after the employee reminder, and before the
-/// default payroll send day (5), so there is room to act between the three.
-const MONTH_END_REMINDER_DAY: u32 = 3;
+/// Days between the month-boundary reminders: the 1st, the 4th, the 7th and so
+/// on — the same rhythm the submission side uses.
+const REMINDER_INTERVAL_DAYS: u32 = 3;
 
-/// True on [`MONTH_END_REMINDER_DAY`] of a month, from 07:00 local time.
+/// True on every third day from the 1st, from 08:00 local time.
+///
+/// It repeats for the same reason the submission side does: an undecided day
+/// of the finished month holds the payroll report back, and a reminder that
+/// fires once would leave the report blocked by something nobody is being
+/// asked about any more.
 fn month_end_reminder_is_due_now(now: chrono::DateTime<chrono_tz::Tz>) -> bool {
-    now.date_naive().day() == MONTH_END_REMINDER_DAY && now.hour() >= 7
+    now.hour() >= 8
+        && (now.date_naive().day() - 1).is_multiple_of(REMINDER_INTERVAL_DAYS)
 }
 
 /// Ask approvers for the finished month specifically.
@@ -147,8 +152,8 @@ fn month_end_reminder_is_due_now(now: chrono::DateTime<chrono_tz::Tz>) -> bool {
 /// The weekly reminder above is not enough for a month boundary: it fires on
 /// Mondays, and the days that decide whether the monthly exports can go out are
 /// handed in on the 1st — which can be a Tuesday, leaving the decision sitting
-/// until after the payroll report was due. This pass asks once, for one month,
-/// and names it.
+/// until after the payroll report was due. This pass names the month, and
+/// repeats every third day for as long as something in it is still undecided.
 pub async fn run_month_end_check(state: &crate::AppState) {
     let pool = &state.pool;
 
@@ -198,9 +203,10 @@ pub async fn run_month_end_check(state: &crate::AppState) {
             crate::i18n::notification_event_text(&language, "month_end_approval_reminder", &params);
         let email_body =
             crate::i18n::notification_email_body(&language, "month_end_approval_reminder", &params);
-        // Once per month per approver: the count must stay out of the key, or
+        // Per day per approver: the pass repeats every third day while
+        // decisions are outstanding, and the count must stay out of the key, or
         // approving one person would re-send the reminder for the rest.
-        let dedupe_key = format!("month_end_approval_reminder:{period}");
+        let dedupe_key = format!("month_end_approval_reminder:{today}");
         crate::services::notifications::deliver(
             state,
             &crate::services::notifications::Outgoing::new(
@@ -257,22 +263,28 @@ mod tests {
     use chrono::TimeZone;
     use chrono_tz::Europe::Berlin;
 
-    /// Approvers are asked on the 3rd — after the employees were asked on the
-    /// 1st, and before the default payroll send day — on whatever weekday that
-    /// happens to be.
+    /// Approvers are asked on the same rhythm as the people who hand things in:
+    /// every third day from the 1st, from 08:00, on whatever weekday that is.
     #[test]
-    fn month_end_reminder_fires_on_the_third_from_seven() {
-        assert!(month_end_reminder_is_due_now(
-            Berlin.with_ymd_and_hms(2026, 9, 3, 7, 0, 0).unwrap()
-        ));
+    fn month_end_reminder_repeats_every_third_day() {
+        for day in [1, 4, 7, 10] {
+            assert!(
+                month_end_reminder_is_due_now(
+                    Berlin.with_ymd_and_hms(2026, 9, day, 8, 0, 0).unwrap()
+                ),
+                "expected a reminder on the {day}."
+            );
+        }
+        for day in [2, 3, 5] {
+            assert!(
+                !month_end_reminder_is_due_now(
+                    Berlin.with_ymd_and_hms(2026, 9, day, 8, 0, 0).unwrap()
+                ),
+                "expected no reminder on the {day}."
+            );
+        }
         assert!(!month_end_reminder_is_due_now(
-            Berlin.with_ymd_and_hms(2026, 9, 3, 6, 0, 0).unwrap()
-        ));
-        assert!(!month_end_reminder_is_due_now(
-            Berlin.with_ymd_and_hms(2026, 9, 1, 9, 0, 0).unwrap()
-        ));
-        assert!(!month_end_reminder_is_due_now(
-            Berlin.with_ymd_and_hms(2026, 9, 4, 9, 0, 0).unwrap()
+            Berlin.with_ymd_and_hms(2026, 9, 4, 7, 0, 0).unwrap()
         ));
     }
 

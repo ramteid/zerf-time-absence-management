@@ -1047,8 +1047,18 @@ async fn reminders_only_chase_what_is_genuinely_missing() {
     );
 
     // The 4th is that week's Friday: now it is fair to ask, and the message
-    // names the deadline from the general settings.
+    // names the deadline from the general settings. The assistant, who still
+    // holds the booking that blocks the payroll report, is asked again.
     run(at(4)).await;
+    let (_, body) = assistant.get("/api/v1/notifications").await;
+    assert_eq!(
+        kinds(&body)
+            .iter()
+            .filter(|kind| *kind == "month_end_submission_reminder")
+            .count(),
+        2,
+        "what blocks the report has to be chased until it is gone: {body}"
+    );
     let (_, body) = boundary.get("/api/v1/notifications").await;
     let reminder = body
         .as_array()

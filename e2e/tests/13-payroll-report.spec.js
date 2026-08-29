@@ -142,6 +142,20 @@ test.describe("month dashboard cards", () => {
   }) => {
     await page.goto("/dashboard");
 
+    // Assert the source before the rendering: the card is hidden whenever this
+    // endpoint fails or reports the feature as off, and "element not found"
+    // alone cannot tell those apart.
+    const response = await page.request.get("/api/v1/reports/payroll-content");
+    const payload = await response.text();
+    expect(
+      response.status(),
+      `payroll-content responded ${response.status()}: ${payload}`,
+    ).toBe(200);
+    expect(
+      JSON.parse(payload).enabled,
+      `the report is switched on, so the card must be live: ${payload}`,
+    ).toBe(true);
+
     const card = page.locator(".payroll-card");
     await expect(card).toBeVisible();
     await expect(card).toContainText(/\d+ absences · \d+ people with hours/);
