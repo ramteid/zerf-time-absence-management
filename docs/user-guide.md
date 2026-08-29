@@ -1952,40 +1952,59 @@ list. Deactivated and deleted accounts are not shown either.
   applied, exactly as on the timesheet PDF. Assistants without any time entry in
   the month are omitted.
 
+#### Who and what the report covers
+
+The report covers everybody the month concerns, except administrators and anyone
+on the exclusion list. Assistants are in it only when they recorded time in that
+month — nothing else can bring them in.
+
+What it prints:
+
+- **Absence days of employees and team leads** in the categories marked
+  payroll-relevant — sick days and unpaid days. Only approved absences produce
+  rows.
+- **Working days and hours of the assistants**, and of everybody else if
+  *List employees' working hours* is switched on. Only approved entries count.
+
+**Assistants' absences never appear.** They are paid for the hours they work, so
+continued pay does not apply to them; only their hours are payroll's business.
+
 #### When it is sent
 
 The schedule works like the Nextcloud timesheet export. On the configured day the
 previous month is prepared; if the month is not final yet the report waits and is
-retried every day until it can be sent. A month counts as final when, for
-everyone it covers:
+retried every day until it can be sent.
 
-- no absence request that the report would print is still undecided — sick and
-  unpaid days are in it, but only once they are approved. An undecided holiday
-  request never appears in the report and does not hold it back, and neither
-  does an assistant's absence of any kind,
-- for everyone whose hours are in the report, all time entries of that month are
-  approved — payroll pays by those hours, so a month that is only submitted would
-  understate them, and
-- no stored entries or absences lie before a person's start date, because those
-  days are hidden from every report and would make the figures too low.
+Three things hold it back, and only these three. Each one is something that can
+be *shown* to be missing from the document — waiting for it changes what the tax
+office receives:
 
-Assistants' absences are not part of the report at all. They are paid for the
-hours they work, so continued pay does not apply to them — only their working
-days and hours appear.
+1. **A booking that exists and is not approved yet**, from somebody whose hours
+   the report prints. A draft, an entry waiting for a decision, a rejection
+   nobody corrected — each of them is proof that the person worked, and the
+   hours are missing from a report that counts only approved minutes.
+2. **An undecided absence request the report would print** — a sick or unpaid
+   day of an employee or team lead. Those days are in the document, but only
+   once they are approved.
+3. **Stored entries or absences before a person's start date.** Those days are
+   hidden from every report and would make the figures too low.
 
-A week nobody handed in does **not** hold the report back. It cannot prove
-anything is missing: an assistant works irregularly and may simply not have
-worked that week, and a salaried employee's hours are not printed in the report
-at all. Only what can be shown to be missing waits — an existing booking that is
-not approved yet, an undecided absence request, or data hidden before a start
-date.
+Just as importantly, these do **not** hold it back:
+
+- **A week nobody handed in.** For an assistant an empty week proves nothing at
+  all: they have no target hours and work irregularly, so a week without a
+  booking is far more likely to be a week they did not work than one they
+  forgot. For an employee or team lead their hours are not printed anyway.
+- **An undecided holiday request.** Holiday never appears in the report, so no
+  decision about it can change the document.
+- **An assistant's absence**, of any kind, for the same reason.
 
 A month that is still open is a normal situation, not a fault. The **Payroll
-Report** card on the dashboard shows team leads and admins how far the month is
-and who is still missing. Once the send day has passed and the report is being
-held back, the administrators additionally receive **one** notification naming
-the people it is waiting for — once per month, not once per night. The report is
-then sent by itself as soon as everybody's month is final.
+Report** card on the dashboard shows team leads and admins what the month holds.
+Once the send day has passed and the report is being held back, the
+administrators receive **one** notification naming the people it is waiting for —
+once per month, not once per night. The report is then sent by itself as soon as
+every covered month is final.
 
 The most common reason for a wait is the calendar: when a month ends early in a
 week, the days at its end belong to a week that is not over on the send day. The

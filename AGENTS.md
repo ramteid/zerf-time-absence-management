@@ -2,6 +2,9 @@
 
 Zerf (Zeiterfassung) is a self-hosted time tracking and absence management platform for teams. It covers working hours, leave requests, approvals, and monthly reports. Data stays on your infrastructure.
 
+## General style
+- Use simple language, concise and natural formulations.
+
 ## Development Workflow
 
 - All development happens on `main`.
@@ -181,20 +184,33 @@ the reminders above ask for those days, and `background::payroll_report`'s
 (`PAYROLL_REPORT_BLOCKED_NOTIFIED_KEY`) when a scheduled report is waiting and on
 whom. The blocked path itself still neither errors nor retries differently.
 
-**What holds the payroll report back** is only what can be *proven* missing:
-`month_export_readiness`'s `require_week_submission` is `false` for it (and
-`true` for the timesheet PDF archive, which is one person's own month). An
-unhanded-in week proves nothing for payroll — an assistant works irregularly and
-may not have worked it, and a salaried employee's hours are not printed in the
-document at all. An existing booking that is not approved yet, an undecided
-absence request the document would print, and data hidden before a start date do
-block, because there waiting demonstrably changes the document. Which absence
-requests count is `reports::PendingAbsences`: the timesheet archive takes `Any`,
-payroll takes `PayrollRelevant` — a sick-like or unpaid category, and never an
-assistant's, since assistants are paid by the hour and their absences are left
-out of the document entirely (`build_absence_rows` skips them). `reports::JudgedDays` clamps a
-week-level check to the days of one month, which is what lets the straddling
-week be settled by its in-month days alone.
+**What the payroll report holds, and what holds it back.** The document prints
+two things: the payroll-relevant absence days (sick-like or unpaid) of everyone
+*except* assistants — `build_absence_rows` skips them, because an hourly worker
+has no continued pay — and the working days and hours of the assistants, plus
+everybody else when `payroll_report_include_employee_hours` is on. Only approved
+entries and approved absences produce rows. `payroll_members` therefore admits an
+assistant on recorded time alone; an absence of theirs cannot bring them in.
+
+Three things hold the send back, and each is something the wait demonstrably
+changes:
+
+1. `UnapprovedEntries::AnyUnsettled` for anyone whose hours are printed — a
+   draft, a submitted row, an unresolved rejection. Each is a booking that
+   *exists*, so the work happened, and the document counts only approved
+   minutes. Deliberately about entries, never weeks.
+2. `PendingAbsences::PayrollRelevant` — an undecided request in a printed
+   category, and never an assistant's. (The timesheet archive takes
+   `PendingAbsences::Any` and `UnapprovedEntries::AnyUnsettled` for everyone:
+   its document is one person's whole month.)
+3. Content stored before a start date, which every renderer hides.
+
+`require_week_submission` is `false` for payroll and `true` for the archive. An
+unhanded-in week proves nothing here: an assistant with no target schedule may
+simply not have worked it, and a salaried employee's hours are not in the
+document at all. `reports::JudgedDays` clamps a week-level check to the days of
+one month, which is what lets the straddling week be settled by its in-month
+days alone.
 
 `reports::weeks_submission_counts` counts the same weeks for the personal
 report's Submissions tile ("x of y weeks", month *and* custom range) — it hangs
