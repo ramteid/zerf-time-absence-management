@@ -112,10 +112,21 @@ let user = UserDb::new(pool.clone()).find_by_id(id).await?;
 - Auth cleanup: purge expired sessions and login attempts (hourly)
 - Notification cleanup: delete notifications older than 90 days (daily)
 - Holiday scheduler: ensure current and next year holidays exist (weekly, Monday noon)
-- Submission reminder scheduler (also carries the **month-end pass** on the 1st:
-  everyone still holding unsubmitted days of the finished month is reminded once
-  per period, assistants included — it asks "were these days handed in", not
-  "is this week complete", so the role exemption does not apply)
+- Submission reminder scheduler (also carries two month-boundary passes, both
+  at 08:00: `run_month_end_check` on the 1st asks *everyone who booked anything*
+  in the finished month — every role, not just people visibly holding something
+  unsubmitted, because a worked-but-unbooked day leaves no trace — to hand it in
+  by a named date (payroll send day − 1, else the configured submission deadline
+  day; without either it does not fire). `run_month_weeks_reminder` runs every
+  third day from the 1st and names the finished month's missing weeks, for
+  people with a target schedule only: for an assistant a bookingless week proves
+  nothing. The week straddling the turn of the month joins that list only from
+  its Friday, and is judged solely on its in-month days
+  (`reports::unsubmitted_weeks_in_month`). Both passes re-decide their audience
+  on every run and only fire on something genuinely missing — a week that is
+  handed in and merely awaiting a decision is the approver's move, not the
+  employee's. The deadline they name is the organisation's own
+  `submission_deadline_day`, with the payroll send day − 1 as a fallback)
 - Approval reminder scheduler (weekly, plus a **month-end pass** on the 3rd for
   days of the finished month that are handed in but undecided)
 - Monthly timesheet PDF upload to Nextcloud (daily, after midnight)
@@ -136,8 +147,9 @@ carve anyone out of that workflow — assistants submit and get approved like
 everyone else; the flag only says whose weeks may be *demanded* to be complete.
 Every completeness/finality judgement in the app works on
 whole ISO weeks. `reports::week_is_accounted_for` is the single implementation:
-one day carrying the required status (submitted/approved) hands in the whole
-week, regardless of how many days the person worked and regardless of
+because submitting and approving cover a week at a time, a single day carrying
+the required status *is* the whole week being handed in, regardless of how many
+days the person worked and regardless of
 `workdays_per_week`; a week with nothing booked passes only when nothing was
 due (every potential workday a holiday, an absence, or before the start date).
 `workdays_per_week` survives in that function purely as the potential-day pool
@@ -146,26 +158,35 @@ punished part-timers whose real pattern is shorter than their contract's day
 count. Target hours and leave-day maths are a different question and still cap
 per week at `workdays_per_week` (`time_calc::count_workdays`).
 `reports::weeks_in_month_to_judge` decides *which* weeks a completeness check
-sees. The employee-facing views (Submissions tile, team report column,
-submission reminders) keep looking at fully elapsed weeks only. The month-export
-gate additionally judges the week being worked, but only while the period
-itself is still running (`month_export_readiness`'s `period_is_running`, i.e.
-the payroll tile's current-month peek): that week counts as *not* handed in
-until it is submitted, which is legitimate because a week can be submitted the
-moment the employee knows they will not book anything else in it. The flag must
-stay off for a finished month — on the 5th, August's trailing week (Aug 31-Sep 6)
-is still running, and judging it would block every month-end report for days.
-`reports::judged_period_end` matches that window: a running period is judged
-through the Sunday of the current week, a finished one in full.
+sees: every week that overlaps the period and has already started, the one being
+worked included. A week belongs to a month as soon as any of its days do.
+`reports::JudgedDays` decides which *days* of those weeks may be looked at.
+Month-scoped checks (Submissions tile, month report, timesheet export gate,
+month-end reminders) clamp to the month, so a draft booked in the new month
+never makes the old one look unfinished and handing in the month's last day
+settles it. A freely chosen date range does *not* clamp — it is a window
+somebody is looking through, not an accounting period, so its boundary weeks are
+judged whole (`build_range_for_page` passes `None`, `build_month` clamps).
+`reports::judged_period_end` bounds the entry-status questions the same way.
 A month boundary is where the week rule and the calendar collide: a month ending
 on a Monday puts its last day in a week that is not over until after the payroll
-report is due, so nobody would submit those days in time on their own. Nothing in
-the model needed changing — `Submit Week` hands in whatever drafts exist, and the
-approver sees them as their own week block — but three nudges make it happen:
-the two month-end reminder passes above, and `background::payroll_report`'s
-`notify_admins_of_hold`, which tells the admins once per period
-(`PAYROLL_REPORT_BLOCKED_NOTIFIED_KEY`) that a scheduled report is waiting and on
+report is due. Nothing in the model needed changing — `Submit Week` hands in
+whatever drafts exist, and the approver sees them as their own week block — but
+the reminders above ask for those days, and `background::payroll_report`'s
+`notify_admins_of_hold` tells the admins once per period
+(`PAYROLL_REPORT_BLOCKED_NOTIFIED_KEY`) when a scheduled report is waiting and on
 whom. The blocked path itself still neither errors nor retries differently.
+
+**What holds the payroll report back** is only what can be *proven* missing:
+`month_export_readiness`'s `require_week_submission` is `false` for it (and
+`true` for the timesheet PDF archive, which is one person's own month). An
+unhanded-in week proves nothing for payroll — an assistant works irregularly and
+may not have worked it, and a salaried employee's hours are not printed in the
+document at all. An existing booking that is not approved yet, an undecided
+absence request, and data hidden before a start date do block, because there
+waiting demonstrably changes the document. `reports::JudgedDays` clamps a
+week-level check to the days of one month, which is what lets the straddling
+week be settled by its in-month days alone.
 
 `reports::weeks_submission_counts` counts the same weeks for the personal
 report's Submissions tile ("x of y weeks", month *and* custom range) — it hangs
@@ -509,9 +530,15 @@ otherwise mail an empty document. `ManualSnapshot` therefore deliberately uses
 a *different* member filter and window from the dashboard tile; the two agree
 only for a finished month. Enabling the report at all requires
 `load_smtp_config()` to be `Some`, and disabling SMTP switches it back off
-(`update_smtp_settings`). `GET /reports/payroll-status` (leads only) backs the
-dashboard tile and reuses the scheduled path's member filter and readiness
-gate, so tile and *delivered* document can never disagree; names of people
+(`update_smtp_settings`). Two lead-only endpoints back the dashboard's month cards.
+`GET /reports/submission-status` (`build_submission_status`) is the **Submissions**
+card: who has closed their month, judged with the week criterion and full
+approval for everyone. It no longer mirrors the payroll gate — the report does
+not wait on unhanded-in weeks — so it is independent of whether the payroll
+report is enabled at all. `GET /reports/payroll-content` (`build_content`) is the
+**Payroll Report** card: it runs the very code that assembles the document
+(`build_report_data`) on the same member set and window the matching send mode
+would use, so the card cannot claim something the PDF would not print; names of people
 outside a team lead's own team are stripped server-side. "Already delivered" is derived from the queue (period reached `payroll_report_queue_period` **and** no longer in `payroll_report_queue`) rather than a stored marker, so it is correct on installations that predate the card. The tile's amber/red split cannot be read off `MonthExportReadiness` alone: the gate returns `PendingAbsenceRequests` before it checks week submission, so `status_for_member` re-checks `all_weeks_submitted_for_month` to keep "still owes weeks" red. The dashboard re-fetches the status when the detail dialog is opened (`Dashboard.svelte`'s `openPayrollDetail`), because approvals granted on that page are exactly what the reader opens the list to verify.
 
 ### Integration tests

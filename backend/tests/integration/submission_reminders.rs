@@ -1,7 +1,7 @@
 //! End-to-end submission reminder tests running in a single container for efficiency.
 //! All test cases run sequentially within the same app instance.
 
-use chrono::Datelike;
+use chrono::{Datelike, TimeZone};
 use reqwest::StatusCode;
 use serde_json::json;
 
@@ -697,13 +697,13 @@ async fn submission_reminders_treat_cancellation_pending_absence_as_covered_week
 }
 
 
-/// The month-end pass chases whoever still holds days of the finished month
-/// that were never handed in — assistants included. They have no completeness
-/// obligation, but their unsubmitted days hold the monthly exports up exactly
-/// like everybody else's, and at a month boundary nobody would submit them on
-/// their own: the week carrying the month's last day is not over yet.
+/// Both month-boundary passes only fire on something genuinely missing, and
+/// they divide the audience between them: an assistant is asked about the
+/// bookings they never handed in, because that is the only evidence the app
+/// has for them, while everybody with a fixed contract gets the missing-week
+/// list instead. Nobody gets both.
 #[tokio::test]
-async fn month_end_reminder_chases_unsubmitted_days_including_assistants() {
+async fn month_end_reminders_split_assistants_from_contract_employees() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
     let (lead_id, _lead_pw, _emp_id, emp_pw, _monday, cat_id) =
@@ -732,6 +732,22 @@ async fn month_end_reminder_chases_unsubmitted_days_including_assistants() {
     )
     .await;
 
+    // The reminder names a deadline, and takes it from the payroll send day.
+    for (key, value) in [
+        (zerf::services::settings::PAYROLL_REPORT_ENABLED_KEY, "true"),
+        (
+            zerf::services::settings::PAYROLL_REPORT_DAY_OF_MONTH_KEY,
+            "5",
+        ),
+    ] {
+        app.state
+            .db
+            .settings
+            .save_setting(key, value)
+            .await
+            .expect("configure the deadline");
+    }
+
     // A day in the middle of the finished month, left as a draft by both.
     let ref_date = reference_date();
     let first_of_month = ref_date.with_day(1).expect("first of month");
@@ -757,38 +773,329 @@ async fn month_end_reminder_chases_unsubmitted_days_including_assistants() {
         assert_eq!(status, StatusCode::OK);
     }
 
-    zerf::background::submission_reminders::run_month_end_check(&app.state).await;
+    let first_of_month = chrono_tz::Europe::Berlin
+        .with_ymd_and_hms(ref_date.year(), ref_date.month(), 1, 8, 0, 0)
+        .single()
+        .expect("local time");
+    zerf::background::submission_reminders::run_month_end_check(&app.state, first_of_month).await;
+    zerf::background::submission_reminders::run_month_weeks_reminder(&app.state, first_of_month)
+        .await;
 
-    for (client, who) in [(&emp, "employee"), (&assistant, "assistant")] {
-        let (status, body) = client.get("/api/v1/notifications").await;
-        assert_eq!(status, StatusCode::OK);
-        let reminders: Vec<_> = body
-            .as_array()
-            .expect("notifications array")
-            .iter()
-            .filter(|item| item["kind"] == "month_end_submission_reminder")
-            .collect();
-        assert_eq!(
-            reminders.len(),
-            1,
-            "{who} must be reminded about the finished month exactly once: {body}"
-        );
-    }
-
-    // A second pass on the same month must not nag again — somebody working
-    // through their backlog would otherwise be reminded on every wake-up.
-    zerf::background::submission_reminders::run_month_end_check(&app.state).await;
-    let (status, body) = emp.get("/api/v1/notifications").await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(
+    let kinds_of = |body: &serde_json::Value| -> Vec<String> {
         body.as_array()
             .expect("notifications array")
             .iter()
-            .filter(|item| item["kind"] == "month_end_submission_reminder")
+            .filter_map(|item| item["kind"].as_str().map(str::to_string))
+            .collect()
+    };
+
+    // The assistant is asked directly: a booking they never handed in is the
+    // only evidence the app has that they owe anything.
+    let (status, body) = assistant.get("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        kinds_of(&body)
+            .iter()
+            .filter(|kind| *kind == "month_end_submission_reminder")
+            .count(),
+        1,
+        "the assistant must be reminded exactly once: {body}"
+    );
+
+    // The employee is served by the missing-week list instead, which says the
+    // same thing with more detail — so they must not get both.
+    let (status, body) = emp.get("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::OK);
+    let employee_kinds = kinds_of(&body);
+    assert_eq!(
+        employee_kinds
+            .iter()
+            .filter(|kind| *kind == "month_weeks_reminder")
+            .count(),
+        1,
+        "the employee must get the missing-week list: {body}"
+    );
+    assert!(
+        !employee_kinds
+            .iter()
+            .any(|kind| kind == "month_end_submission_reminder"),
+        "and must not also get the assistants' message: {body}"
+    );
+
+    // A second pass on the same day must not nag again — somebody working
+    // through their backlog would otherwise be reminded on every wake-up.
+    zerf::background::submission_reminders::run_month_end_check(&app.state, first_of_month).await;
+    zerf::background::submission_reminders::run_month_weeks_reminder(&app.state, first_of_month)
+        .await;
+    let (status, body) = assistant.get("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        kinds_of(&body)
+            .iter()
+            .filter(|kind| *kind == "month_end_submission_reminder")
             .count(),
         1,
         "the month-end reminder must be sent once per month"
     );
+
+    app.cleanup().await;
+}
+
+
+/// December 2029 ends on a Monday, so its last day sits in the week
+/// 31.12.–06.01. Asking for that week on the 1st would mean asking somebody to
+/// hand in a week they are still working; from its Friday the ask is fair, and
+/// only the days that belong to December are what December still needs.
+#[tokio::test]
+async fn the_straddling_week_is_only_asked_for_from_its_friday() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, _lead_pw, emp_id, emp_pw, _monday, _cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "straddle").await;
+    let emp = login_change_pw(&app, "emp-straddle@example.com", &emp_pw).await;
+
+    let december = (
+        chrono::NaiveDate::from_ymd_opt(2029, 12, 1).unwrap(),
+        chrono::NaiveDate::from_ymd_opt(2029, 12, 31).unwrap(),
+    );
+    let straddling_monday = chrono::NaiveDate::from_ymd_opt(2029, 12, 31).unwrap();
+    let start_date = chrono::NaiveDate::from_ymd_opt(2024, 1, 1).unwrap();
+    let pool = app.state.pool.clone();
+    let missing_on = move |today: chrono::NaiveDate| {
+        let pool = pool.clone();
+        async move {
+            zerf::services::reports::unsubmitted_weeks_in_month(
+                &pool,
+                emp_id,
+                december.0,
+                december.1,
+                start_date,
+                5,
+                today,
+            )
+            .await
+            .expect("missing weeks")
+        }
+    };
+
+    let on_the_first = missing_on(chrono::NaiveDate::from_ymd_opt(2030, 1, 1).unwrap()).await;
+    assert!(
+        !on_the_first.is_empty(),
+        "December's own weeks are missing and must be named"
+    );
+    assert!(
+        !on_the_first.contains(&straddling_monday),
+        "the week the employee is still working must not be asked for yet: {on_the_first:?}"
+    );
+
+    let on_friday = missing_on(chrono::NaiveDate::from_ymd_opt(2030, 1, 4).unwrap()).await;
+    assert!(
+        on_friday.contains(&straddling_monday),
+        "from its Friday the straddling week is due: {on_friday:?}"
+    );
+
+    // Handing in just the December day of that week settles it — the drafts
+    // that follow in January belong to January's month, not December's.
+    let (status, _) = emp
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": "2029-12-31",
+                "start_time": "08:00",
+                "end_time": "16:00",
+                "category_id": _cat_id,
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "book the month's last day");
+    let (status, body) = emp.get("/api/v1/time-entries?from=2029-12-31&to=2029-12-31").await;
+    assert_eq!(status, StatusCode::OK);
+    let entry_ids: Vec<i64> = body
+        .as_array()
+        .expect("entries")
+        .iter()
+        .map(|entry| entry["id"].as_i64().expect("id"))
+        .collect();
+    let (status, _) = emp
+        .post("/api/v1/time-entries/submit", &json!({"ids": entry_ids}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "submit it");
+
+    let after_submitting = missing_on(chrono::NaiveDate::from_ymd_opt(2030, 1, 4).unwrap()).await;
+    assert!(
+        !after_submitting.contains(&straddling_monday),
+        "the December part is handed in, so the week is settled: {after_submitting:?}"
+    );
+
+    app.cleanup().await;
+}
+
+
+/// Three rules in one run, on the calendar that actually causes the trouble:
+/// December 2029 ends on a Monday, so its last day sits in the week
+/// 31.12.–06.01.
+///
+///  * that week is not asked for on the 1st — it is still being worked;
+///  * from its Friday it is, and the reminder names the deadline from the
+///    general settings;
+///  * once handed in it produces nothing further, even though nobody has
+///    approved it yet — that is no longer the employee's move.
+#[tokio::test]
+async fn reminders_only_chase_what_is_genuinely_missing() {
+    use chrono::TimeZone;
+
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "genuine").await;
+    let _lead = login_change_pw(&app, "lead-genuine@example.com", &lead_pw).await;
+
+    app.state
+        .db
+        .settings
+        .save_setting(zerf::services::settings::SUBMISSION_DEADLINE_DAY_KEY, "10")
+        .await
+        .expect("configure the deadline day");
+
+    // Starting on the month's last day leaves exactly one December week to
+    // judge: the one reaching into January.
+    let (status, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "boundary-genuine@example.com",
+                "first_name": "Bo",
+                "last_name": "Boundary",
+                "role": "employee",
+                "weekly_hours": 39,
+                "start_date": "2029-12-31",
+                "approver_ids": [lead_id],
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create boundary employee: {body}");
+    let boundary = login_change_pw(&app, "boundary-genuine@example.com", &temp_pw(&body)).await;
+
+    let (status, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "aushilfe-genuine@example.com",
+                "first_name": "Alex",
+                "last_name": "Assist",
+                "role": "assistant",
+                "weekly_hours": 0,
+                "start_date": "2024-01-01",
+                "approver_ids": [lead_id],
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create assistant: {body}");
+    let assistant = login_change_pw(&app, "aushilfe-genuine@example.com", &temp_pw(&body)).await;
+
+    for (client, day) in [(&boundary, "2029-12-31"), (&assistant, "2029-12-10")] {
+        let (status, _) = client
+            .post(
+                "/api/v1/time-entries",
+                &json!({
+                    "entry_date": day,
+                    "start_time": "08:00",
+                    "end_time": "12:00",
+                    "category_id": cat_id,
+                }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "book {day}");
+        let (status, _) = client.delete("/api/v1/notifications").await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    let at = |day: u32| {
+        chrono_tz::Europe::Berlin
+            .with_ymd_and_hms(2030, 1, day, 8, 0, 0)
+            .single()
+            .expect("local time")
+    };
+    let kinds = |body: &serde_json::Value| -> Vec<String> {
+        body.as_array()
+            .expect("notifications array")
+            .iter()
+            .filter_map(|item| item["kind"].as_str().map(str::to_string))
+            .collect()
+    };
+    let state = app.state.clone();
+    let run = move |now: chrono::DateTime<chrono_tz::Tz>| {
+        let state = state.clone();
+        async move {
+            zerf::background::submission_reminders::run_month_end_check(&state, now).await;
+            zerf::background::submission_reminders::run_month_weeks_reminder(&state, now).await;
+        }
+    };
+
+    // The 1st: the assistant is asked about the day they never handed in. The
+    // employee is not — their only December week is still being worked.
+    run(at(1)).await;
+    let (_, body) = assistant.get("/api/v1/notifications").await;
+    assert!(
+        kinds(&body).contains(&"month_end_submission_reminder".to_string()),
+        "the assistant holds an unsubmitted booking: {body}"
+    );
+    let (_, body) = boundary.get("/api/v1/notifications").await;
+    assert!(
+        !kinds(&body).contains(&"month_weeks_reminder".to_string()),
+        "the week reaching into January is not due on the 1st: {body}"
+    );
+
+    // The 4th is that week's Friday: now it is fair to ask, and the message
+    // names the deadline from the general settings.
+    run(at(4)).await;
+    let (_, body) = boundary.get("/api/v1/notifications").await;
+    let reminder = body
+        .as_array()
+        .expect("notifications array")
+        .iter()
+        .find(|item| item["kind"] == "month_weeks_reminder")
+        .unwrap_or_else(|| panic!("no week reminder on the Friday: {body}"));
+    let deadline = zerf::i18n::format_date(
+        &zerf::i18n::Language::default(),
+        chrono::NaiveDate::from_ymd_opt(2030, 1, 10).unwrap(),
+    );
+    assert!(
+        reminder["body"].as_str().unwrap_or_default().contains(&deadline),
+        "the reminder names the configured deadline {deadline}: {reminder}"
+    );
+
+    // Both hand their days in. Nobody has approved them, and that is nobody's
+    // move but the approver's — so the next pass has nothing left to say.
+    for client in [&boundary, &assistant] {
+        let (status, body) = client
+            .get("/api/v1/time-entries?from=2029-12-01&to=2029-12-31")
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        let ids: Vec<i64> = body
+            .as_array()
+            .expect("entries")
+            .iter()
+            .map(|entry| entry["id"].as_i64().expect("id"))
+            .collect();
+        let (status, _) = client
+            .post("/api/v1/time-entries/submit", &json!({"ids": ids}))
+            .await;
+        assert_eq!(status, StatusCode::OK, "submit December");
+        let (status, _) = client.delete("/api/v1/notifications").await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    run(at(7)).await;
+    for (client, who) in [(&boundary, "employee"), (&assistant, "assistant")] {
+        let (_, body) = client.get("/api/v1/notifications").await;
+        let remaining = kinds(&body);
+        assert!(
+            !remaining.contains(&"month_weeks_reminder".to_string())
+                && !remaining.contains(&"month_end_submission_reminder".to_string()),
+            "{who} handed everything in; waiting for approval is not their move: {body}"
+        );
+    }
 
     app.cleanup().await;
 }

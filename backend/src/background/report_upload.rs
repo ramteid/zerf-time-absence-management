@@ -235,7 +235,9 @@ async fn process_one_entry(
     // needs decided absences, fully submitted weeks, and full approval — the
     // PDF's Total row counts only approved, crediting minutes, so a merely
     // submitted month would archive too few hours.
-    match month_export_readiness(&state.pool, &user, from, to, true).await? {
+    // The archive is this person's own month, so a week nobody handed in
+    // leaves a hole in the document and has to hold it back.
+    match month_export_readiness(&state.pool, &user, from, to, true, true).await? {
         MonthExportReadiness::Ready => {}
         MonthExportReadiness::PreStartContent => {
             let params: Vec<(&str, String)> = vec![

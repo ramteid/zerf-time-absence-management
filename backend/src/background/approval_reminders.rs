@@ -217,7 +217,7 @@ pub async fn run_month_end_check(state: &crate::AppState) {
     }
 }
 
-/// Background loop: sleep until the next Monday at 07:00 local time, then run check./// Background loop: sleep until the next Monday at 07:00 local time, then run check.
+/// Background loop: sleep until the next Monday at 07:00 local time, then run check.
 /// Fixed due-first so restart after 07:00 on Monday still fires.
 pub async fn run_loop(state: crate::AppState) {
     loop {

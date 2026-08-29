@@ -120,19 +120,31 @@ test.describe("payroll report configuration", () => {
   });
 });
 
-test.describe("payroll report dashboard card", () => {
+test.describe("month dashboard cards", () => {
   test.use({ storageState: storageStatePath("admin") });
 
-  test("admin: the card summarizes how far the month is", async ({ page }) => {
+  test("admin: the submissions card summarizes how far the month is", async ({
+    page,
+  }) => {
     await page.goto("/dashboard");
 
-    const card = page.locator(".payroll-card");
+    const card = page.locator(".submissions-card");
     await expect(card).toBeVisible();
     // "X of Y done" — the actual numbers depend on the calendar day.
     await expect(card).toContainText(/\d+ of \d+ done/);
     // Pia's contract started in the previous month, so somebody is always
     // covered and the ring is never empty.
     await expect(page.locator(".donut-segment").first()).toBeVisible();
+  });
+
+  test("admin: the payroll card names what the report holds", async ({
+    page,
+  }) => {
+    await page.goto("/dashboard");
+
+    const card = page.locator(".payroll-card");
+    await expect(card).toBeVisible();
+    await expect(card).toContainText(/\d+ absences · \d+ people with hours/);
   });
 
   test("admin: the help text names the send day and the retry rule", async ({
@@ -154,7 +166,7 @@ test.describe("payroll report dashboard card", () => {
     page,
   }) => {
     await page.goto("/dashboard");
-    await page.locator(".payroll-card-button").click();
+    await page.locator(".submissions-card-button").click();
 
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
@@ -169,7 +181,7 @@ test.describe("payroll report dashboard card", () => {
   });
 });
 
-test.describe("payroll report card visibility", () => {
+test.describe("month card visibility", () => {
   test("team lead: sees the card", async ({ browser }) => {
     const context = await browser.newContext({
       storageState: storageStatePath("team_lead"),
@@ -177,6 +189,7 @@ test.describe("payroll report card visibility", () => {
     const page = await context.newPage();
     await page.goto("/dashboard");
 
+    await expect(page.locator(".submissions-card")).toBeVisible();
     await expect(page.locator(".payroll-card")).toBeVisible();
     await context.close();
   });
@@ -203,6 +216,7 @@ test.describe("payroll report card visibility", () => {
     await expect(
       page.getByRole("heading", { name: "Dashboard" }),
     ).toBeVisible();
+    await expect(page.locator(".submissions-card")).toHaveCount(0);
     await expect(page.locator(".payroll-card")).toHaveCount(0);
     await context.close();
   });

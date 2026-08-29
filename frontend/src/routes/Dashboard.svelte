@@ -14,7 +14,8 @@
     getFlextime,
     getMonthSubmissionReport,
     getOvertimeSummary,
-    getPayrollStatus,
+    getSubmissionStatus,
+    getPayrollContent,
     rejectAbsenceById,
     rejectReopen as rejectReopenRequest,
     rejectWeek as rejectWeekEntries,
@@ -29,9 +30,11 @@
   import AbsenceReviewDialog from "../dialogs/AbsenceReviewDialog.svelte";
   import ReopenReviewDialog from "../dialogs/ReopenReviewDialog.svelte";
   import WeekReviewDialog from "../dialogs/WeekReviewDialog.svelte";
-  import PayrollStatusDialog from "../dialogs/PayrollStatusDialog.svelte";
+  import SubmissionStatusDialog from "../dialogs/SubmissionStatusDialog.svelte";
+  import PayrollContentDialog from "../dialogs/PayrollContentDialog.svelte";
   import ApprovalQueues from "./dashboard/ApprovalQueues.svelte";
-  import PayrollStatus from "./dashboard/PayrollStatus.svelte";
+  import SubmissionStatus from "./dashboard/SubmissionStatus.svelte";
+  import PayrollContent from "./dashboard/PayrollContent.svelte";
   import AbsenceSlider from "./dashboard/AbsenceSlider.svelte";
   import BalanceSection from "./dashboard/BalanceSection.svelte";
   import FlextimeSection from "./dashboard/FlextimeSection.svelte";
@@ -196,14 +199,15 @@
       pendingAbsences = [];
       pendingReopens = [];
       users = [];
-      payrollStatus = null;
+      submissionStatus = null;
+      payrollContent = null;
       return;
     }
-    // Every approve/reject on this page calls load() again. The payroll card
-    // tracks exactly those approvals, so it has to refresh with them —
-    // otherwise approving the last outstanding week leaves the card claiming
+    // Every approve/reject on this page calls load() again. Both month cards
+    // track exactly those approvals, so they have to refresh with them —
+    // otherwise approving the last outstanding week leaves a card claiming
     // somebody is still missing until the page is reloaded by hand.
-    loadPayrollStatus();
+    loadMonthCards();
     try {
       const {
         submittedTimeEntries,
@@ -224,41 +228,52 @@
     }
   }
 
-  // ── Payroll report progress (team leads and admins) ───────────────────────────
-  // `null` while loading or when the payroll report is switched off, in which
-  // case the tile stays hidden rather than showing an empty circle.
-  let payrollStatus = null;
+  // ── Month cards (team leads and admins) ───────────────────────────────────────
+  // `null` while loading; the payroll card additionally stays `null` while the
+  // report is switched off, in which case that tile is hidden entirely.
+  let submissionStatus = null;
+  let payrollContent = null;
+  let submissionDetailOpen = false;
   let payrollDetailOpen = false;
   // The tile's "show this month" peek: a transient, in-memory choice (never
   // persisted) that survives the reloads other dashboard actions trigger but
   // resets to the tracked previous month on the next page load.
   let payrollShowCurrentMonth = false;
 
-  async function loadPayrollStatus() {
+  async function loadMonthCards() {
     try {
-      const status = await getPayrollStatus(payrollShowCurrentMonth);
-      payrollStatus = status?.enabled ? status : null;
+      submissionStatus = await getSubmissionStatus(payrollShowCurrentMonth);
     } catch {
-      // A missing payroll status must not break the rest of the dashboard —
-      // the tile simply stays hidden. While the detail list is open, the last
-      // known data stays on screen instead of the popup vanishing under the
-      // reader's hands.
-      if (!payrollDetailOpen) payrollStatus = null;
+      // A failed read must not break the rest of the dashboard — the tile
+      // simply stays hidden. While its detail list is open, the last known
+      // data stays on screen instead of the popup vanishing under the reader's
+      // hands.
+      if (!submissionDetailOpen) submissionStatus = null;
+    }
+    try {
+      const content = await getPayrollContent(payrollShowCurrentMonth);
+      payrollContent = content?.enabled ? content : null;
+    } catch {
+      if (!payrollDetailOpen) payrollContent = null;
     }
   }
 
-  // Opening the detail list always re-reads the status. Approvals granted on
-  // this page change who is still outstanding, and the reader opens the list
-  // precisely to check that — it must never answer with what was loaded when
-  // the page was opened.
+  // Opening a detail list always re-reads it. Approvals granted on this page
+  // change what it says, and the reader opens the list precisely to check
+  // that — it must never answer with what was loaded when the page opened.
+  function openSubmissionDetail() {
+    submissionDetailOpen = true;
+    loadMonthCards();
+  }
+
   function openPayrollDetail() {
     payrollDetailOpen = true;
-    loadPayrollStatus();
+    loadMonthCards();
   }
 
   function showCurrentPayrollMonth() {
     payrollShowCurrentMonth = true;
-    loadPayrollStatus();
+    loadMonthCards();
   }
 
   load();
@@ -548,11 +563,20 @@
       onRejectAbsence={rejectAbsence}
     />
 
-    <div class:single={!payrollStatus} class="dashboard-overview-grid">
+    <div class="dashboard-overview-grid">
       <AbsenceSlider {users} />
-      {#if payrollStatus}
-        <PayrollStatus
-          status={payrollStatus}
+      {#if submissionStatus}
+        <SubmissionStatus
+          status={submissionStatus}
+          {activeHelp}
+          onHelpToggle={toggleHelp}
+          onOpen={openSubmissionDetail}
+          onShowCurrentMonth={showCurrentPayrollMonth}
+        />
+      {/if}
+      {#if payrollContent}
+        <PayrollContent
+          content={payrollContent}
           {activeHelp}
           onHelpToggle={toggleHelp}
           onOpen={openPayrollDetail}
@@ -578,9 +602,16 @@
   {/if}
 </div>
 
-{#if payrollDetailOpen && payrollStatus}
-  <PayrollStatusDialog
-    status={payrollStatus}
+{#if submissionDetailOpen && submissionStatus}
+  <SubmissionStatusDialog
+    status={submissionStatus}
+    onClose={() => (submissionDetailOpen = false)}
+  />
+{/if}
+
+{#if payrollDetailOpen && payrollContent}
+  <PayrollContentDialog
+    content={payrollContent}
     onClose={() => (payrollDetailOpen = false)}
   />
 {/if}
@@ -629,15 +660,13 @@
 {/if}
 
 <style>
+  /* One, two or three cards depending on role and settings, so the columns
+     follow the content instead of a fixed count. */
   .dashboard-overview-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     gap: 16px;
     margin-top: 16px;
-  }
-
-  .dashboard-overview-grid.single {
-    grid-template-columns: 1fr;
   }
 
   @media (max-width: 768px) {

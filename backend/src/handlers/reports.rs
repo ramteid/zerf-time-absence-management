@@ -364,9 +364,6 @@ pub async fn team(
                     (Some(balance_min), Some(month_end.min(cutoff_date)))
                 };
 
-                // The team report's submission column is the employee's own
-                // view of "what do I still owe": the week they are working is
-                // not owed yet, so it stays out of the verdict.
                 let weeks_all_submitted = all_weeks_submitted_for_month(
                     &pool,
                     team_member.id,
@@ -375,7 +372,6 @@ pub async fn team(
                     team_member.start_date,
                     team_member_submission_exempt,
                     team_member.workdays_per_week,
-                    false,
                 )
                 .await?;
 
@@ -634,9 +630,9 @@ pub async fn flextime(
     }))
 }
 
-/// Query parameters for [`payroll_status`].
+/// Query parameters for the two dashboard tiles.
 #[derive(Deserialize)]
-pub struct PayrollStatusQuery {
+pub struct MonthTileQuery {
     /// Dashboard tile's transient "show this month" peek: report the current,
     /// in-progress month instead of the previous (default) period. Never
     /// stored and never affects what actually gets delivered, which always
@@ -645,21 +641,44 @@ pub struct PayrollStatusQuery {
     pub current: bool,
 }
 
-/// Payroll report status for the dashboard tile: how far the previous month is
-/// from being deliverable — or, with `?current=true`, the current in-progress
-/// month instead. Leads only — team leads see the full counts but only their
-/// own team members by name (see `services::payroll_report::build_status`).
-pub async fn payroll_status(
+/// Submission status for the dashboard tile: how far each covered person is
+/// through the previous month — or, with `?current=true`, the current
+/// in-progress month instead. Leads only; a team lead sees the full counts but
+/// only their own team members by name.
+pub async fn submission_status(
     State(app_state): State<AppState>,
     requester: User,
-    Query(query): Query<PayrollStatusQuery>,
-) -> AppResult<Json<crate::services::payroll_report::PayrollStatus>> {
+    Query(query): Query<MonthTileQuery>,
+) -> AppResult<Json<crate::services::payroll_report::SubmissionStatus>> {
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
     let language = crate::i18n::load_ui_language(&app_state.pool).await?;
     Ok(Json(
-        crate::services::payroll_report::build_status(
+        crate::services::payroll_report::build_submission_status(
+            &app_state,
+            &requester,
+            &language,
+            query.current,
+        )
+        .await?,
+    ))
+}
+
+/// What the payroll report for the tracked month holds — sick notes and the
+/// assistants' hours — or, with `?current=true`, what the running month is
+/// shaping up to hold. Leads only, with the same name masking.
+pub async fn payroll_content(
+    State(app_state): State<AppState>,
+    requester: User,
+    Query(query): Query<MonthTileQuery>,
+) -> AppResult<Json<crate::services::payroll_report::PayrollContent>> {
+    if !requester.is_lead() {
+        return Err(AppError::Forbidden);
+    }
+    let language = crate::i18n::load_ui_language(&app_state.pool).await?;
+    Ok(Json(
+        crate::services::payroll_report::build_content(
             &app_state,
             &requester,
             &language,

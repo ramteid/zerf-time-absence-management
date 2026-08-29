@@ -790,46 +790,34 @@ pub async fn build_range_for_page(
         .ok_or(AppError::NotFound)?;
     let user = crate::services::users::repo_user_to_auth_user(repo_user);
     let mut report = build_range_with_user(pool, &user, from, to, label).await?;
-    attach_week_submission_counts(pool, &user, from, to, &mut report).await?;
+    // A freely chosen range is a window somebody is looking through, not an
+    // accounting period, so its boundary weeks are judged whole: a week that
+    // reaches past the edge counts as handed in when it was handed in.
+    attach_week_submission_counts(pool, &user, from, to, &mut report, None).await?;
     Ok(report)
 }
 
-/// Collects the Monday of every fully elapsed week (Sunday < today) that overlaps the given month.
-pub fn complete_weeks_in_month(
-    month_start: NaiveDate,
-    month_end: NaiveDate,
-    today: NaiveDate,
-) -> Vec<NaiveDate> {
-    weeks_in_month_to_judge(month_start, month_end, today, false)
-}
-
-/// Weeks of the month a completeness check looks at.
+/// Every week that overlaps the month and has already started.
 ///
-/// Without `include_running_week` only fully elapsed weeks count — the view an
-/// employee gets, where the week they are working can obviously not be held
-/// against them ([`complete_weeks_in_month`]).
+/// The week currently being worked is one of them as soon as any of its days
+/// belong to the month — those days are part of what the month is missing, and
+/// a week can be handed in the moment its owner knows they will book nothing
+/// more in it. Weeks that have not started at all are never judged: nobody can
+/// owe a week that has not happened.
 ///
-/// With it, the week currently being worked counts too, and counts as *not*
-/// handed in until it actually is. The payroll month-finality gate needs this
-/// for the month that is still running: a week can be submitted the moment the
-/// employee knows they will not work its remaining days, so "not submitted yet"
-/// is the honest state of the running week — and reading its drafts as
-/// "waiting for approval" pointed approvers at work that was never handed to
-/// them. Weeks that have not started at all are never judged.
+/// Which *days* of those weeks a check may look at is a separate question, and
+/// the answer is always "the ones inside the period" — see [`JudgedDays`].
 pub fn weeks_in_month_to_judge(
     month_start: NaiveDate,
     month_end: NaiveDate,
     today: NaiveDate,
-    include_running_week: bool,
 ) -> Vec<NaiveDate> {
     let first_monday = crate::time_calc::week_monday(month_start);
     let last_monday = crate::time_calc::week_monday(month_end);
     let mut mondays = Vec::new();
     let mut current = first_monday;
     while current <= last_monday {
-        let has_elapsed = current + Duration::days(6) < today;
-        let is_running = !has_elapsed && current <= today;
-        if has_elapsed || (include_running_week && is_running) {
+        if current <= today {
             mondays.push(current);
         }
         current += Duration::days(7);
@@ -935,6 +923,25 @@ async fn load_export_week_check_data(
     Ok((holiday_set, absent_days, submitted_dates, incomplete_dates))
 }
 
+/// The slice of a week a completeness check is allowed to look at.
+///
+/// `None` judges the whole week — what the employee-facing views want, because
+/// an employee hands in a week as one piece. A period clamps every day-level
+/// question to the days inside it, which is the answer a month-scoped export
+/// needs: the week carrying a month's last day reaches into the next month, and
+/// those days belong to the next month's report, not this one. Without the
+/// clamp, a draft booked on the 1st would hold the previous month's payroll
+/// report hostage, and handing in the month's last day would be impossible
+/// without also finishing a week that has not happened yet.
+pub type JudgedDays = Option<(NaiveDate, NaiveDate)>;
+
+fn day_is_judged(day: NaiveDate, judged: JudgedDays) -> bool {
+    match judged {
+        Some((from, to)) => day >= from && day <= to,
+        None => true,
+    }
+}
+
 /// Check whether a single week (given by its Monday) is accounted for.
 ///
 /// Zerf judges recorded time in whole weeks, never in single days. Employees
@@ -963,15 +970,22 @@ fn week_is_accounted_for(
     status_check_dates: &std::collections::HashSet<NaiveDate>,
     user_start_date: NaiveDate,
     workdays_per_week: i16,
+    judged: JudgedDays,
 ) -> bool {
-    let week_days = || (0..7i64).map(|d| week_monday + Duration::days(d));
+    let week_days = || {
+        (0..7i64)
+            .map(|d| week_monday + Duration::days(d))
+            .filter(|day| day_is_judged(*day, judged))
+    };
 
     // One day with the required status carries the entire week.
     if week_days().any(|day| status_check_dates.contains(&day)) {
         return true;
     }
 
-    // Nothing was handed in — that is only fine if nothing was due.
+    // Nothing was handed in — that is only fine if nothing was due. An empty
+    // iterator passes, which is the right answer for a week whose judged part
+    // holds no days at all.
     week_days().all(|day| {
         !crate::time_calc::is_potential_workday(day, workdays_per_week)
             || day < user_start_date
@@ -1092,6 +1106,7 @@ pub async fn approved_weeks(
                 &approved_dates,
                 user_start_date,
                 workdays_per_week,
+                None,
             )
         {
             mondays.insert(current_monday);
@@ -1131,11 +1146,12 @@ pub fn check_weeks_all_submitted(
     incomplete_dates: &std::collections::HashSet<NaiveDate>,
     user_start_date: NaiveDate,
     workdays_per_week: i16,
+    judged: JudgedDays,
 ) -> bool {
     for &week_monday in complete_week_mondays {
         let has_incomplete = (0..7i64).any(|d| {
             let day = week_monday + Duration::days(d);
-            if day < user_start_date {
+            if day < user_start_date || !day_is_judged(day, judged) {
                 return false;
             }
             incomplete_dates.contains(&day)
@@ -1151,6 +1167,7 @@ pub fn check_weeks_all_submitted(
             submitted_dates,
             user_start_date,
             workdays_per_week,
+            judged,
         ) {
             return false;
         }
@@ -1175,7 +1192,10 @@ pub async fn submission_status_for_month(
         return Ok((true, true));
     }
     let today = crate::services::settings::app_today(pool).await;
-    let complete_week_mondays = complete_weeks_in_month(month_start, month_end, today);
+    // The week being worked counts as soon as any of its days belong to this
+    // month — the same rule the report's Submissions tile uses, so the two can
+    // never disagree about the same month.
+    let complete_week_mondays = weeks_in_month_to_judge(month_start, month_end, today);
     if complete_week_mondays.is_empty() {
         return Ok((true, true));
     }
@@ -1194,6 +1214,7 @@ pub async fn submission_status_for_month(
         &incomplete_dates,
         user_start_date,
         workdays_per_week,
+        None,
     ) {
         return Ok((false, false));
     }
@@ -1289,7 +1310,10 @@ pub async fn build_month(
     .await?;
     report.weeks_all_submitted = Some(all_submitted);
     report.weeks_all_approved = Some(all_approved);
-    attach_week_submission_counts(pool, &user, from, to, &mut report).await?;
+    // A month is a closed period: its boundary weeks are judged on the days
+    // that belong to it, so what is still being booked in the next month never
+    // makes this one look unfinished.
+    attach_week_submission_counts(pool, &user, from, to, &mut report, Some((from, to))).await?;
     // Pass the same submission_exempt flag used for month-level checks, so
     // zero-weekly-hours users are exempted from the current-week status nag
     // just as they are exempt from submission reminders and month-level checks.
@@ -1883,9 +1907,12 @@ fn month_end_date(year: i32, month: u32) -> AppResult<NaiveDate> {
 }
 
 /// Checks whether the working weeks overlapping the given month have been
-/// submitted for the user. `include_running_week` decides whether the week
-/// currently being worked is one of them — see [`weeks_in_month_to_judge`].
-#[allow(clippy::too_many_arguments)]
+/// submitted for the user.
+///
+/// Every week overlapping the month counts, the one being worked included — it
+/// belongs to this month as soon as any of its days do, and those days are what
+/// the month is missing. Only the month's own days are judged, so what is still
+/// being booked in the next month never reflects on this one.
 pub async fn all_weeks_submitted_for_month(
     pool: &crate::db::DatabasePool,
     user_id: i64,
@@ -1894,11 +1921,9 @@ pub async fn all_weeks_submitted_for_month(
     user_start_date: NaiveDate,
     submission_exempt: bool,
     workdays_per_week: i16,
-    include_running_week: bool,
 ) -> AppResult<bool> {
     let today = crate::services::settings::app_today(pool).await;
-    let complete_week_mondays =
-        weeks_in_month_to_judge(month_start, month_end, today, include_running_week);
+    let complete_week_mondays = weeks_in_month_to_judge(month_start, month_end, today);
     if complete_week_mondays.is_empty() {
         return Ok(true);
     }
@@ -1918,6 +1943,7 @@ pub async fn all_weeks_submitted_for_month(
         &incomplete_dates,
         user_start_date,
         workdays_per_week,
+        Some((month_start, month_end)),
     ))
 }
 
@@ -1925,12 +1951,14 @@ pub async fn all_weeks_submitted_for_month(
 /// the period covers at all.
 ///
 /// Weeks are counted whole. A period that starts on a Wednesday still stands or
-/// falls with that entire calendar week — the employee submits weeks, not days,
+/// falls with that entire calendar week (`judged` says whether the days it is
+/// judged *on* are narrowed to the period — see [`JudgedDays`]) — the employee submits weeks, not days,
 /// so half a week is not a thing that can be handed in. Weeks that have not
 /// started yet are not counted at all: they cannot be missing. The week
 /// currently being worked *is* counted and stays "not handed in" until it is
 /// submitted, which an employee can do as soon as they know they will not book
 /// anything else in it.
+#[allow(clippy::too_many_arguments)]
 pub async fn weeks_submission_counts(
     pool: &crate::db::DatabasePool,
     user_id: i64,
@@ -1938,12 +1966,13 @@ pub async fn weeks_submission_counts(
     to: NaiveDate,
     user_start_date: NaiveDate,
     workdays_per_week: i16,
+    judged: JudgedDays,
 ) -> AppResult<(i64, i64)> {
     let today = crate::services::settings::app_today(pool).await;
     // Weeks that ended before the user was employed are nobody's business —
     // counting them would inflate both numbers with weeks that never existed
     // for this person.
-    let week_mondays: Vec<NaiveDate> = weeks_in_month_to_judge(from, to, today, true)
+    let week_mondays: Vec<NaiveDate> = weeks_in_month_to_judge(from, to, today)
         .into_iter()
         .filter(|monday| *monday + Duration::days(6) >= user_start_date)
         .collect();
@@ -1965,10 +1994,57 @@ pub async fn weeks_submission_counts(
                 &incomplete_dates,
                 user_start_date,
                 workdays_per_week,
+                judged,
             )
         })
         .count();
     Ok((submitted as i64, week_mondays.len() as i64))
+}
+
+/// The weeks of a month a user has not handed in, judged only on the days that
+/// belong to that month.
+///
+/// The week carrying the month's last day reaches into the next one. Asking for
+/// it on the 1st would mean asking somebody to hand in a week they are still
+/// working, so it only appears from its Friday, by which point the working week
+/// is effectively over and can be submitted. The days of it that belong to the
+/// reported month are exactly what that month is still missing, which is why
+/// the check is clamped to them: drafts booked in the new month must not make
+/// the old month look unfinished.
+pub async fn unsubmitted_weeks_in_month(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    month_start: NaiveDate,
+    month_end: NaiveDate,
+    user_start_date: NaiveDate,
+    workdays_per_week: i16,
+    today: NaiveDate,
+) -> AppResult<Vec<NaiveDate>> {
+    let mut week_mondays = weeks_in_month_to_judge(month_start, month_end, today);
+    week_mondays.retain(|monday| {
+        let reaches_into_the_next_month = *monday + Duration::days(6) > month_end;
+        !reaches_into_the_next_month || today >= *monday + Duration::days(4)
+    });
+    if week_mondays.is_empty() {
+        return Ok(Vec::new());
+    }
+    let (holiday_set, absent_days, submitted_dates, incomplete_dates) =
+        load_week_check_data(pool, user_id, &week_mondays, true).await?;
+    Ok(week_mondays
+        .into_iter()
+        .filter(|monday| {
+            !check_weeks_all_submitted(
+                std::slice::from_ref(monday),
+                &holiday_set,
+                &absent_days,
+                &submitted_dates,
+                &incomplete_dates,
+                user_start_date,
+                workdays_per_week,
+                Some((month_start, month_end)),
+            )
+        })
+        .collect())
 }
 
 /// Fills the report's Submissions tile counts, unless the user has no
@@ -1980,6 +2056,7 @@ async fn attach_week_submission_counts(
     from: NaiveDate,
     to: NaiveDate,
     report: &mut MonthReport,
+    judged: JudgedDays,
 ) -> AppResult<()> {
     if !crate::roles::has_submission_obligation(&user.role, user.weekly_hours) {
         return Ok(());
@@ -1991,6 +2068,7 @@ async fn attach_week_submission_counts(
         to,
         user.start_date,
         user.workdays_per_week,
+        judged,
     )
     .await?;
     report.weeks_submitted = Some(submitted);
@@ -2002,11 +2080,6 @@ async fn attach_week_submission_counts(
 /// Pending absence requests hold this gate because PDF content only includes
 /// finalized absences.
 ///
-/// `include_running_week` is set for a month that is still running: the week
-/// being worked is then judged too, and counts as not handed in until it is
-/// submitted (see [`weeks_in_month_to_judge`]). A month that is already over
-/// never has a running week of its own to judge.
-#[allow(clippy::too_many_arguments)]
 pub async fn all_weeks_ready_for_timesheet_export(
     pool: &crate::db::DatabasePool,
     user_id: i64,
@@ -2015,11 +2088,9 @@ pub async fn all_weeks_ready_for_timesheet_export(
     user_start_date: NaiveDate,
     submission_exempt: bool,
     workdays_per_week: i16,
-    include_running_week: bool,
 ) -> AppResult<bool> {
     let today = crate::services::settings::app_today(pool).await;
-    let complete_week_mondays =
-        weeks_in_month_to_judge(month_start, month_end, today, include_running_week);
+    let complete_week_mondays = weeks_in_month_to_judge(month_start, month_end, today);
     if complete_week_mondays.is_empty() {
         return Ok(true);
     }
@@ -2055,6 +2126,10 @@ pub async fn all_weeks_ready_for_timesheet_export(
         &incomplete_dates,
         user_start_date,
         workdays_per_week,
+        // Only this month's own days: the week carrying the month's last day
+        // reaches into the next one, and a draft booked there belongs to the
+        // next month's document, not this one's.
+        Some((month_start, month_end)),
     ))
 }
 
@@ -2106,6 +2181,18 @@ impl MonthExportReadiness {
 /// submitted, while weeks that have not started yet are ignored (see
 /// [`judged_period_end`] and [`weeks_in_month_to_judge`]).
 ///
+/// `require_week_submission` decides whether an unaccounted-for week blocks the
+/// export. The timesheet PDF archive needs it: that document is one person's
+/// month, and a week nobody handed in leaves a hole in it. The payroll report
+/// must not use it, and that is not a shortcut but the only defensible reading.
+/// An assistant works irregularly and has no target schedule, so a week they
+/// did not hand in is no evidence that anything is missing — they may simply
+/// not have worked. And a salaried employee's hours are not printed in the
+/// report at all, so their weeks cannot change it either. What can be *proven*
+/// missing still blocks: an existing booking that is not approved yet, an
+/// undecided absence request, or data hidden before a start date — there,
+/// waiting demonstrably changes the document.
+///
 /// `require_full_approval` additionally requires every time entry in the
 /// period to be approved, not merely submitted. The timesheet PDF export and
 /// the payroll report both need this — the PDF Total row and the payroll
@@ -2117,6 +2204,7 @@ pub async fn month_export_readiness(
     from: NaiveDate,
     to: NaiveDate,
     require_full_approval: bool,
+    require_week_submission: bool,
 ) -> AppResult<MonthExportReadiness> {
     let reports_db = crate::repository::ReportDb::new(pool.clone());
 
@@ -2135,10 +2223,6 @@ pub async fn month_export_readiness(
     // at the end of the week being worked.
     let today = crate::services::settings::app_today(pool).await;
     let judged_to = judged_period_end(to, today);
-    // A period that has not ended yet carries the week currently being worked,
-    // and that week has to be handed in like any other before the month can be
-    // called final.
-    let period_is_running = to >= today;
     if judged_to < from {
         // The period has not started at all: nothing in it can be missing yet.
         return Ok(MonthExportReadiness::Ready);
@@ -2164,20 +2248,22 @@ pub async fn month_export_readiness(
         return Ok(MonthExportReadiness::PendingAbsenceRequests);
     }
 
-    let submission_exempt = !crate::roles::has_submission_obligation(&user.role, user.weekly_hours);
-    let submitted = all_weeks_ready_for_timesheet_export(
-        pool,
-        user.id,
-        from,
-        to,
-        user.start_date,
-        submission_exempt,
-        user.workdays_per_week,
-        period_is_running,
-    )
-    .await?;
-    if !submitted {
-        return Ok(MonthExportReadiness::WeeksNotSubmitted);
+    if require_week_submission {
+        let submission_exempt =
+            !crate::roles::has_submission_obligation(&user.role, user.weekly_hours);
+        let submitted = all_weeks_ready_for_timesheet_export(
+            pool,
+            user.id,
+            from,
+            to,
+            user.start_date,
+            submission_exempt,
+            user.workdays_per_week,
+        )
+        .await?;
+        if !submitted {
+            return Ok(MonthExportReadiness::WeeksNotSubmitted);
+        }
     }
 
     if require_full_approval
@@ -2572,18 +2658,20 @@ mod tests {
     }
 
     #[test]
-    fn complete_weeks_in_month_includes_only_fully_elapsed_weeks() {
+    fn weeks_in_month_to_judge_reaches_the_week_being_worked() {
         let month_start = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap();
         let month_end = NaiveDate::from_ymd_opt(2026, 5, 31).unwrap();
         let today = NaiveDate::from_ymd_opt(2026, 5, 20).unwrap();
 
-        let mondays = complete_weeks_in_month(month_start, month_end, today);
+        let mondays = weeks_in_month_to_judge(month_start, month_end, today);
         assert_eq!(
             mondays,
             vec![
                 NaiveDate::from_ymd_opt(2026, 4, 27).unwrap(),
                 NaiveDate::from_ymd_opt(2026, 5, 4).unwrap(),
                 NaiveDate::from_ymd_opt(2026, 5, 11).unwrap(),
+                // Started on the 18th and still being worked — judged too.
+                NaiveDate::from_ymd_opt(2026, 5, 18).unwrap(),
             ]
         );
     }
@@ -2605,6 +2693,7 @@ mod tests {
             &full_week,
             long_ago,
             5,
+            None,
         ));
 
         // Only Monday approved — the week still counts, because the employee
@@ -2617,6 +2706,7 @@ mod tests {
             &monday_only,
             long_ago,
             5,
+            None,
         ));
     }
 
@@ -2634,6 +2724,7 @@ mod tests {
             &HashSet::new(),
             long_ago,
             5,
+            None,
         ));
 
         // Mon-Fri excused by holidays: nothing was due, so the week is fine.
@@ -2646,6 +2737,7 @@ mod tests {
             &HashSet::new(),
             long_ago,
             5,
+            None,
         ));
         // ... the same via an absence.
         assert!(week_is_accounted_for(
@@ -2655,6 +2747,7 @@ mod tests {
             &HashSet::new(),
             long_ago,
             5,
+            None,
         ));
         // One unexcused workday left over is enough to fail again.
         let mut without_friday = workweek.clone();
@@ -2666,6 +2759,7 @@ mod tests {
             &HashSet::new(),
             long_ago,
             5,
+            None,
         ));
     }
 
@@ -2681,6 +2775,7 @@ mod tests {
             &HashSet::new(),
             NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
             5,
+            None,
         ));
     }
 
@@ -2701,6 +2796,7 @@ mod tests {
                 &two_days,
                 long_ago,
                 workdays_per_week,
+                None,
             ));
         }
     }
@@ -2722,6 +2818,7 @@ mod tests {
             &HashSet::new(),
             NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
             5,
+            None,
         ));
 
         // Only Monday booked: the employee handed the week in as a unit, so it
@@ -2735,6 +2832,7 @@ mod tests {
             &HashSet::new(),
             NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
             5,
+            None,
         ));
 
         let holiday_set: HashSet<NaiveDate> = (0..5).map(|d| monday + Duration::days(d)).collect();
@@ -2746,6 +2844,7 @@ mod tests {
             &HashSet::new(),
             NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
             5,
+            None,
         ));
 
         let mut incomplete = HashSet::new();
@@ -2758,6 +2857,7 @@ mod tests {
             &incomplete,
             NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
             5,
+            None,
         ));
     }
 
@@ -2894,29 +2994,25 @@ mod tests {
         assert_eq!(categories[2].category, "C");
     }
 
-    /// With `include_running_week` the week being worked joins the list, but a
-    /// week that has not started yet never does.
+    /// The week being worked is judged; a week that has not started is not.
     #[test]
-    fn weeks_in_month_to_judge_adds_the_running_week_only() {
+    fn weeks_in_month_to_judge_covers_started_weeks_only() {
         let month_start = NaiveDate::from_ymd_opt(2026, 8, 1).unwrap();
         let month_end = NaiveDate::from_ymd_opt(2026, 8, 31).unwrap();
         // Saturday of the week starting Aug 24; Aug 31 starts a week that has
         // not begun yet.
         let today = NaiveDate::from_ymd_opt(2026, 8, 29).unwrap();
 
-        let elapsed_only = weeks_in_month_to_judge(month_start, month_end, today, false);
+        let judged = weeks_in_month_to_judge(month_start, month_end, today);
         assert_eq!(
-            elapsed_only.last(),
-            Some(&NaiveDate::from_ymd_opt(2026, 8, 17).unwrap())
-        );
-
-        let with_running = weeks_in_month_to_judge(month_start, month_end, today, true);
-        assert_eq!(
-            with_running.last(),
+            judged.last(),
             Some(&NaiveDate::from_ymd_opt(2026, 8, 24).unwrap()),
             "the week being worked has to be judged too"
         );
-        assert_eq!(with_running.len(), elapsed_only.len() + 1);
+        assert!(
+            !judged.contains(&NaiveDate::from_ymd_opt(2026, 8, 31).unwrap()),
+            "but not one that has not started: {judged:?}"
+        );
     }
 
     /// The judged window ends with the week being worked while the period is
@@ -2934,22 +3030,16 @@ mod tests {
         assert_eq!(judged_period_end(july_end, today), july_end);
     }
 
-    /// `complete_weeks_in_month` returns an empty vec when today is the very
-    /// first day of the month (no week can have elapsed yet).
+    /// The list is empty when not one of the month's weeks has started.
     #[test]
-    fn complete_weeks_in_month_returns_empty_when_no_week_elapsed() {
-        // May 1, 2026 is a Friday. The first overlapping week starts on
-        // April 27 (Monday); its Sunday is May 3. With today = May 1, even
-        // that partial week is not yet complete (May 3 >= May 1).
+    fn weeks_in_month_to_judge_is_empty_before_the_month_begins() {
         let month_start = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap();
         let month_end = NaiveDate::from_ymd_opt(2026, 5, 31).unwrap();
-        let today = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap(); // first of month
+        // Looking at May from April: not one of its weeks has started.
+        let today = NaiveDate::from_ymd_opt(2026, 4, 20).unwrap();
 
-        let mondays = complete_weeks_in_month(month_start, month_end, today);
-        assert!(
-            mondays.is_empty(),
-            "expected no complete weeks, got {mondays:?}"
-        );
+        let mondays = weeks_in_month_to_judge(month_start, month_end, today);
+        assert!(mondays.is_empty(), "expected no weeks, got {mondays:?}");
     }
 
     /// `check_weeks_all_submitted` considers a week fully excused when every
@@ -2970,6 +3060,7 @@ mod tests {
             &HashSet::new(),
             user_start,
             5,
+            None,
         ));
     }
 
@@ -2988,6 +3079,7 @@ mod tests {
             &HashSet::new(), // no incomplete dates
             user_start,
             5,
+            None,
         ));
     }
 

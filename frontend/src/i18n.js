@@ -103,6 +103,21 @@ const TRANSLATIONS = {
     "All submitted and approved": "All submitted and approved",
     "All submitted (approvals pending)": "All submitted (approvals pending)",
     "Weeks missing": "Weeks missing",
+    help_submissions_card:
+      "How far each person is through the tracked month: everything submitted and approved, submitted and waiting for a decision, or still missing. It says nothing about the payroll report — that has its own card.",
+    "{absences} absences · {people} people with hours":
+      "{absences} absences · {people} people with hours",
+    "still running": "still running",
+    sent: "sent",
+    "What this month is shaping up to report.":
+      "What this month is shaping up to report.",
+    "What this month's report contained.":
+      "What this month's report contained.",
+    "What this month's report will contain.":
+      "What this month's report will contain.",
+    "Nothing to report for this month.": "Nothing to report for this month.",
+    "Working days and hours": "Working days and hours",
+    "{days} days": "{days} days",
     "{submitted} of {total} weeks": "{submitted} of {total} weeks",
     "Current week: still open": "Current week: still open",
     "Current week: draft": "Current week: draft",
@@ -1293,6 +1308,22 @@ const TRANSLATIONS = {
     "All submitted (approvals pending)":
       "Alles eingereicht (Genehmigungen ausstehend)",
     "Weeks missing": "Wochen fehlen",
+    help_submissions_card:
+      "Wie weit jede Person im betrachteten Monat ist: alles eingereicht und genehmigt, eingereicht und auf Entscheidung wartend, oder noch offen. \u00dcber die Lohnmeldung sagt die Kachel nichts \u2014 daf\u00fcr gibt es eine eigene.",
+    "{absences} absences · {people} people with hours":
+      "{absences} Abwesenheiten · {people} Personen mit Stunden",
+    "still running": "l\u00e4uft noch",
+    sent: "versendet",
+    "What this month is shaping up to report.":
+      "Was sich f\u00fcr diesen Monat abzeichnet.",
+    "What this month's report contained.":
+      "Was die Meldung dieses Monats enthielt.",
+    "What this month's report will contain.":
+      "Was die Meldung dieses Monats enthalten wird.",
+    "Nothing to report for this month.":
+      "F\u00fcr diesen Monat gibt es nichts zu melden.",
+    "Working days and hours": "Arbeitstage und Stunden",
+    "{days} days": "{days} Tage",
     "{submitted} of {total} weeks": "{submitted} von {total} Wochen",
     "Current week: still open": "Aktuelle Woche: noch offen",
     "Current week: draft": "Aktuelle Woche: Entwurf",

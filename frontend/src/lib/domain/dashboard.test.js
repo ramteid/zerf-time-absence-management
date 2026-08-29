@@ -98,6 +98,18 @@ describe("dashboard domain helpers", () => {
     ).toBe("/dashboard?focus=absences&n=3-10");
   });
 
+  it("routes the month-boundary reminders to the dashboard, marked", () => {
+    // Without the explicit branch these fall through to a bare "/dashboard"
+    // and lose the marker that opens the notification they came from.
+    for (const kind of [
+      "month_end_submission_reminder",
+      "month_end_approval_reminder",
+      "payroll_report_blocked",
+    ]) {
+      expect(notificationTarget({ id: 7, kind }, 11)).toBe("/dashboard?n=7-11");
+    }
+  });
+
   it("routes timesheet_submitted notifications to the timesheets focus", () => {
     expect(
       notificationTarget({ id: 5, kind: "timesheet_submitted" }, 0),

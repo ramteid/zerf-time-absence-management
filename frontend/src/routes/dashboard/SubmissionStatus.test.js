@@ -1,13 +1,13 @@
-// Tests for the payroll report dashboard tile and its detail dialog. They
-// cover the states the tile switches between (pending vs. already sent), the
+// Tests for the Submissions dashboard tile and its detail dialog. They
+// cover the states the tile switches between, the
 // "X of Y done" summary, the traffic-light breakdown, and — most importantly —
 // that a team lead sees anonymized rows for people they may not see while the
 // counts still cover everyone.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount, unmount } from "svelte";
-import PayrollStatus from "./PayrollStatus.svelte";
-import PayrollStatusDialog from "../../dialogs/PayrollStatusDialog.svelte";
+import SubmissionStatus from "./SubmissionStatus.svelte";
+import SubmissionStatusDialog from "../../dialogs/SubmissionStatusDialog.svelte";
 import { setLanguage } from "../../i18n.js";
 import { appTodayDate, fmtMonthName } from "../../format.js";
 
@@ -65,7 +65,7 @@ function status(overrides = {}) {
   };
 }
 
-describe("PayrollStatus tile", () => {
+describe("SubmissionStatus tile", () => {
   let component;
   let target;
 
@@ -85,7 +85,10 @@ describe("PayrollStatus tile", () => {
   });
 
   it("summarizes progress and draws one arc per state", async () => {
-    component = mount(PayrollStatus, { target, props: { status: status() } });
+    component = mount(SubmissionStatus, {
+      target,
+      props: { status: status() },
+    });
     await settle();
 
     expect(target.textContent).toContain("1 of 3 done");
@@ -96,7 +99,7 @@ describe("PayrollStatus tile", () => {
   });
 
   it("omits arcs for states nobody is in", async () => {
-    component = mount(PayrollStatus, {
+    component = mount(SubmissionStatus, {
       target,
       props: {
         status: status({
@@ -113,25 +116,13 @@ describe("PayrollStatus tile", () => {
     expect(target.textContent).toContain("2 of 2 done");
   });
 
-  it("dims the tile and drops the donut once the month has been sent", async () => {
-    component = mount(PayrollStatus, {
-      target,
-      props: { status: status({ sent: true }) },
-    });
-    await settle();
-
-    expect(target.textContent).toContain("July 2026 sent");
-    expect(target.querySelector(".is-dimmed")).toBeTruthy();
-    expect(target.querySelector(".donut-segment")).toBeNull();
-    // Nothing to drill into any more.
-    expect(target.querySelector(".payroll-card-button")).toBeNull();
-  });
-
-  it("offers a peek at the current month once the previous one has been sent", async () => {
+  it("always offers a peek at the current month", async () => {
+    // The submissions tile is never "done" — there is always a running month
+    // worth looking at, so the offer does not wait on a delivery any more.
     const onShowCurrentMonth = vi.fn();
-    component = mount(PayrollStatus, {
+    component = mount(SubmissionStatus, {
       target,
-      props: { status: status({ sent: true }), onShowCurrentMonth },
+      props: { status: status(), onShowCurrentMonth },
     });
     await settle();
 
@@ -145,10 +136,12 @@ describe("PayrollStatus tile", () => {
     expect(onShowCurrentMonth).toHaveBeenCalled();
   });
 
-  it("does not offer the peek button while the month is still outstanding", async () => {
-    component = mount(PayrollStatus, {
+  it("drops the peek offer while it is already showing that month", async () => {
+    const now = appTodayDate();
+    const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    component = mount(SubmissionStatus, {
       target,
-      props: { status: status({ sent: false }) },
+      props: { status: status({ period: currentPeriod }) },
     });
     await settle();
 
@@ -156,32 +149,32 @@ describe("PayrollStatus tile", () => {
     expect(target.textContent).not.toContain(label);
   });
 
-  it("names the send day in the help text", async () => {
-    component = mount(PayrollStatus, {
+  it("explains itself, and says it is not the payroll report", async () => {
+    component = mount(SubmissionStatus, {
       target,
-      props: { status: status({ day_of_month: 9 }), activeHelp: "payroll" },
+      props: { status: status(), activeHelp: "submissions" },
     });
     await settle();
 
     expect(target.querySelector(".dashboard-help").textContent).toContain(
-      "day 9 of the month",
+      "payroll report",
     );
   });
 
   it("opens the detail view when the tile is clicked", async () => {
     const onOpen = vi.fn();
-    component = mount(PayrollStatus, {
+    component = mount(SubmissionStatus, {
       target,
       props: { status: status(), onOpen },
     });
     await settle();
 
-    target.querySelector(".payroll-card-button").click();
+    target.querySelector(".submissions-card-button").click();
     expect(onOpen).toHaveBeenCalled();
   });
 });
 
-describe("PayrollStatusDialog", () => {
+describe("SubmissionStatusDialog", () => {
   let component;
   let target;
 
@@ -201,7 +194,7 @@ describe("PayrollStatusDialog", () => {
   });
 
   it("anonymizes people the viewer may not see but still lists them", async () => {
-    component = mount(PayrollStatusDialog, {
+    component = mount(SubmissionStatusDialog, {
       target,
       props: { status: status(), onClose: () => {} },
     });
@@ -220,7 +213,7 @@ describe("PayrollStatusDialog", () => {
   });
 
   it("deep-links a named row into that person's report for the month", async () => {
-    component = mount(PayrollStatusDialog, {
+    component = mount(SubmissionStatusDialog, {
       target,
       props: { status: status(), onClose: () => {} },
     });
@@ -238,7 +231,7 @@ describe("PayrollStatusDialog", () => {
   });
 
   it("lists the people still missing before the ones already done", async () => {
-    component = mount(PayrollStatusDialog, {
+    component = mount(SubmissionStatusDialog, {
       target,
       props: { status: status(), onClose: () => {} },
     });
@@ -252,7 +245,7 @@ describe("PayrollStatusDialog", () => {
   });
 
   it("marks a booked but unapproved person with the amber status", async () => {
-    component = mount(PayrollStatusDialog, {
+    component = mount(SubmissionStatusDialog, {
       target,
       props: { status: status(), onClose: () => {} },
     });

@@ -10,7 +10,18 @@ const mockState = vi.hoisted(() => ({
   monthReport: null,
   overtimeResponse: { rows: [], balance_as_of: null },
   flextimeResponse: { days: [], balance_as_of: null },
-  payrollStatus: {
+  submissionStatus: {
+    period: "2026-07",
+    period_label: "July 2026",
+    from: "2026-07-01",
+    to: "2026-07-31",
+    total: 2,
+    ready: 1,
+    awaiting_approval: 0,
+    not_submitted: 1,
+    members: [],
+  },
+  payrollContent: {
     enabled: true,
     period: "2026-07",
     period_label: "July 2026",
@@ -18,11 +29,11 @@ const mockState = vi.hoisted(() => ({
     to: "2026-07-31",
     sent: false,
     day_of_month: 5,
-    total: 2,
-    ready: 1,
-    awaiting_approval: 0,
-    not_submitted: 1,
-    members: [],
+    in_progress: false,
+    absence_count: 1,
+    people_with_hours: 1,
+    minutes: 480,
+    rows: [],
   },
 }));
 
@@ -44,7 +55,9 @@ vi.mock("../api.js", () => ({
     if (urlPath.startsWith("/reports/flextime?"))
       return mockState.flextimeResponse;
     // Approver-only endpoints, reached when can_approve is set below.
-    if (urlPath === "/reports/payroll-status") return mockState.payrollStatus;
+    if (urlPath === "/reports/submission-status")
+      return mockState.submissionStatus;
+    if (urlPath === "/reports/payroll-content") return mockState.payrollContent;
     if (urlPath.startsWith("/time-entries/all")) return [];
     if (urlPath.startsWith("/absences/all")) return [];
     if (urlPath.startsWith("/reopen-requests/pending")) return [];
@@ -417,10 +430,16 @@ describe("Dashboard", () => {
 
     function approverApi(overrides = {}) {
       return async (urlPath, opts = {}) => {
-        if (urlPath === "/reports/payroll-status")
-          return overrides.payrollStatus ?? mockState.payrollStatus;
-        if (urlPath === "/reports/payroll-status?current=true")
-          return overrides.payrollStatusCurrent ?? mockState.payrollStatus;
+        if (urlPath === "/reports/submission-status")
+          return overrides.submissionStatus ?? mockState.submissionStatus;
+        if (urlPath === "/reports/submission-status?current=true")
+          return (
+            overrides.submissionStatusCurrent ?? mockState.submissionStatus
+          );
+        if (urlPath === "/reports/payroll-content")
+          return overrides.payrollContent ?? mockState.payrollContent;
+        if (urlPath === "/reports/payroll-content?current=true")
+          return overrides.payrollContentCurrent ?? mockState.payrollContent;
         if (urlPath === "/time-entries/all?status=submitted")
           return overrides.submitted ?? [submittedEntry];
         if (urlPath === "/absences/all?status=pending_review") return [];
@@ -447,7 +466,7 @@ describe("Dashboard", () => {
 
     function payrollCalls(suffix = "") {
       return api.mock.calls.filter(
-        ([p]) => p === `/reports/payroll-status${suffix}`,
+        ([p]) => p === `/reports/submission-status${suffix}`,
       ).length;
     }
 
@@ -479,12 +498,15 @@ describe("Dashboard", () => {
       await settle();
 
       await waitForText(target, "1 of 2 done");
-      expect(target.querySelector(".payroll-card")).toBeTruthy();
+      expect(target.querySelector(".submissions-card")).toBeTruthy();
       const overviewCards = target.querySelector(".dashboard-overview-grid");
       expect(overviewCards.children[0].classList.contains("slider-card")).toBe(
         true,
       );
-      expect(overviewCards.children[1].classList.contains("payroll-card")).toBe(
+      expect(
+        overviewCards.children[1].classList.contains("submissions-card"),
+      ).toBe(true);
+      expect(overviewCards.children[2].classList.contains("payroll-card")).toBe(
         true,
       );
     });
@@ -514,12 +536,10 @@ describe("Dashboard", () => {
     it("peeking at the current month sticks across later dashboard refreshes", async () => {
       api.mockImplementation(
         approverApi({
-          payrollStatus: { ...mockState.payrollStatus, sent: true },
-          payrollStatusCurrent: {
-            ...mockState.payrollStatus,
+          submissionStatusCurrent: {
+            ...mockState.submissionStatus,
             period: "2026-08",
             period_label: "August 2026",
-            sent: false,
             ready: 0,
             awaiting_approval: 1,
             not_submitted: 1,
@@ -530,7 +550,7 @@ describe("Dashboard", () => {
       component = mount(Dashboard, { target });
       await settle();
       await settle();
-      await waitForText(target, "July 2026 sent");
+      await waitForText(target, "1 of 2 done");
       expect(payrollCalls("?current=true")).toBe(0);
 
       const label = `Show ${fmtMonthName(appTodayDate())}`;
@@ -564,7 +584,7 @@ describe("Dashboard", () => {
     it("re-reads the status when the detail list is opened", async () => {
       // The overrides object is read on every call, so changing it here is
       // what "somebody approved something in the meantime" looks like.
-      const overrides = { payrollStatus: { ...mockState.payrollStatus } };
+      const overrides = { submissionStatus: { ...mockState.submissionStatus } };
       api.mockImplementation(approverApi(overrides));
 
       component = mount(Dashboard, { target });
@@ -573,13 +593,13 @@ describe("Dashboard", () => {
       await waitForText(target, "1 of 2 done");
 
       const before = payrollCalls();
-      overrides.payrollStatus = {
-        ...mockState.payrollStatus,
+      overrides.submissionStatus = {
+        ...mockState.submissionStatus,
         ready: 2,
         not_submitted: 0,
       };
 
-      target.querySelector(".payroll-card-button").click();
+      target.querySelector(".submissions-card-button").click();
       await settle();
       await settle();
 

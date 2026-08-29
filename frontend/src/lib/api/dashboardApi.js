@@ -94,9 +94,15 @@ export function rejectReopen(id, reason) {
   });
 }
 
-// Payroll report progress for the dashboard tile (team leads and admins).
+// Submission progress for the dashboard tile (team leads and admins).
 // `current` is the tile's transient, non-persistent "show this month" peek —
 // it reports the in-progress month instead of the tracked previous period.
-export function getPayrollStatus(current = false) {
-  return api(`/reports/payroll-status${current ? "?current=true" : ""}`);
+export function getSubmissionStatus(current = false) {
+  return api(`/reports/submission-status${current ? "?current=true" : ""}`);
+}
+
+// What the payroll report for the tracked month holds — or, while the month is
+// still running, what it is shaping up to hold. Same period logic as above.
+export function getPayrollContent(current = false) {
+  return api(`/reports/payroll-content${current ? "?current=true" : ""}`);
 }

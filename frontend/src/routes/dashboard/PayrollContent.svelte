@@ -1,24 +1,21 @@
 <script>
   import { t } from "../../i18n.js";
   import Icon from "../../Icons.svelte";
-  import StatusDonut from "../../lib/ui/StatusDonut.svelte";
-  import { appTodayDate, fmtMonthName } from "../../format.js";
+  import { appTodayDate, fmtMonthName, minToHM } from "../../format.js";
 
-  // Payload of GET /reports/payroll-status, or null while it loads.
-  export let status = null;
+  // Payload of GET /reports/payroll-content, or null while it loads.
+  export let content = null;
   export let activeHelp = null;
   export let onHelpToggle = () => {};
   export let onOpen = () => {};
   // Transient peek at the current, in-progress month — see Dashboard.svelte.
   export let onShowCurrentMonth = () => {};
 
-  // Once the month's report has gone out there is nothing left to chase, so
-  // the tile steps back: dimmed, no donut, and not clickable. The peek button
-  // only ever appears here: asking for the current month always comes back
-  // with `sent: false` (it can never have reached the delivery queue yet),
-  // so a successful peek naturally drops out of this branch on its own.
-  $: done = !!status?.sent;
   const currentMonthName = fmtMonthName(appTodayDate());
+  // Once the month has been delivered the card steps back: the figures are
+  // history, not something anybody still has to act on.
+  $: done = !!content?.sent;
+  $: hasRows = (content?.rows?.length ?? 0) > 0;
 </script>
 
 <div class="zf-card payroll-card" class:is-dimmed={done}>
@@ -28,52 +25,47 @@
     <button
       class="zf-btn-icon-sm zf-btn-ghost zf-help-icon"
       title={$t("help_payroll_report")}
-      on:click={() => onHelpToggle("payroll")}
+      on:click={() => onHelpToggle("payrollContent")}
     >
       <Icon name="Info" size={14} />
     </button>
   </div>
-  {#if activeHelp === "payroll"}
+  {#if activeHelp === "payrollContent"}
     <div class="dashboard-help payroll-help">
-      {$t("help_payroll_report").replace("{day}", status?.day_of_month ?? 5)}
+      {$t("help_payroll_report").replace("{day}", content?.day_of_month ?? 5)}
     </div>
   {/if}
 
-  {#if done}
-    <div class="payroll-body">
-      <Icon name="Check" size={20} />
-      <div>
-        <div class="payroll-headline">
-          {$t("{month} sent").replace("{month}", status?.period_label ?? "")}
-        </div>
-        <div class="payroll-sub">{$t("Nothing left to do this month.")}</div>
-        <button
-          class="zf-btn zf-btn-ghost zf-btn-sm payroll-peek-btn"
-          on:click={onShowCurrentMonth}
-        >
-          {$t("Show {month}").replace("{month}", currentMonthName)}
-        </button>
+  <button
+    class="payroll-body payroll-card-button"
+    on:click={onOpen}
+    disabled={!content || !hasRows}
+  >
+    <div>
+      <div class="payroll-headline">
+        {$t("{absences} absences · {people} people with hours")
+          .replace("{absences}", content?.absence_count ?? 0)
+          .replace("{people}", content?.people_with_hours ?? 0)}
+      </div>
+      <div class="payroll-sub">
+        {content?.period_label ?? ""}
+        {#if (content?.minutes ?? 0) > 0}
+          · {minToHM(content?.minutes ?? 0)}
+        {/if}
+        {#if content?.in_progress}
+          · {$t("still running")}
+        {:else if done}
+          · {$t("sent")}
+        {/if}
       </div>
     </div>
-  {:else}
+  </button>
+  {#if !content?.in_progress}
     <button
-      class="payroll-body payroll-card-button"
-      on:click={onOpen}
-      disabled={!status}
+      class="zf-btn zf-btn-ghost zf-btn-sm payroll-peek-btn"
+      on:click={onShowCurrentMonth}
     >
-      <StatusDonut
-        ready={status?.ready ?? 0}
-        awaitingApproval={status?.awaiting_approval ?? 0}
-        notSubmitted={status?.not_submitted ?? 0}
-      />
-      <div>
-        <div class="payroll-headline">
-          {$t("{ready} of {total} done")
-            .replace("{ready}", status?.ready ?? 0)
-            .replace("{total}", status?.total ?? 0)}
-        </div>
-        <div class="payroll-sub">{status?.period_label ?? ""}</div>
-      </div>
+      {$t("Show {month}").replace("{month}", currentMonthName)}
     </button>
   {/if}
 </div>
@@ -137,7 +129,7 @@
   }
 
   .payroll-peek-btn {
-    margin-top: 6px;
+    margin: 0 16px 12px;
     padding-left: 0;
     padding-right: 0;
     height: auto;

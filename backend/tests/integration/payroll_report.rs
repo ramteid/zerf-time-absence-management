@@ -627,6 +627,7 @@ async fn payroll_report_never_reports_missing_submissions_as_a_technical_error()
             from,
             to,
             false,
+            true,
         )
         .await
         .expect("readiness")
@@ -738,7 +739,7 @@ async fn payroll_status_tracks_only_assistants_with_month_activity() {
     let day = monday.format("%Y-%m-%d").to_string();
     let entry_id = create_and_submit_entry(&active_assistant, &day, cat_id).await;
 
-    let (status, card) = admin.get("/api/v1/reports/payroll-status").await;
+    let (status, card) = admin.get("/api/v1/reports/submission-status").await;
     assert_eq!(status, StatusCode::OK);
     let members = card["members"].as_array().expect("payroll members");
     let active_member = members
@@ -764,7 +765,7 @@ async fn payroll_status_tracks_only_assistants_with_month_activity() {
         .await;
     assert_eq!(status, StatusCode::OK, "approve assistant entry");
 
-    let (status, card) = admin.get("/api/v1/reports/payroll-status").await;
+    let (status, card) = admin.get("/api/v1/reports/submission-status").await;
     assert_eq!(status, StatusCode::OK);
     let active_member = card["members"]
         .as_array()
@@ -952,13 +953,20 @@ async fn payroll_status_counts_everyone_but_anonymizes_outside_a_leads_team() {
         .await;
     assert_eq!(status, StatusCode::OK, "store payroll settings");
 
-    // Switched off: the tile has nothing to show and stays hidden.
-    let (status, body) = admin.get("/api/v1/reports/payroll-status").await;
+    // Switched off: the payroll card has nothing to show and stays hidden.
+    // The submissions card is independent of it and stays live.
+    let (status, body) = admin.get("/api/v1/reports/payroll-content").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         body["enabled"],
         json!(false),
-        "disabled report hides the tile"
+        "disabled report hides the payroll card"
+    );
+    let (status, body) = admin.get("/api/v1/reports/submission-status").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body["total"].as_u64().is_some(),
+        "the submissions card does not depend on the payroll report: {body}"
     );
 
     let (status, _) = admin
@@ -969,7 +977,7 @@ async fn payroll_status_counts_everyone_but_anonymizes_outside_a_leads_team() {
         .await;
     assert_eq!(status, StatusCode::OK, "enable payroll report");
 
-    let (status, admin_view) = admin.get("/api/v1/reports/payroll-status").await;
+    let (status, admin_view) = admin.get("/api/v1/reports/submission-status").await;
     assert_eq!(status, StatusCode::OK);
     let total = admin_view["total"].as_u64().expect("total");
     assert!(total > 0, "the previous month covers somebody");
@@ -993,7 +1001,7 @@ async fn payroll_status_counts_everyone_but_anonymizes_outside_a_leads_team() {
         "the admin account itself is not part of the payroll report"
     );
 
-    let (status, lead_view) = lead.get("/api/v1/reports/payroll-status").await;
+    let (status, lead_view) = lead.get("/api/v1/reports/submission-status").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         lead_view["total"].as_u64().unwrap(),
@@ -1023,7 +1031,7 @@ async fn payroll_status_counts_everyone_but_anonymizes_outside_a_leads_team() {
     );
 
     // The tile is a lead-only feature.
-    let (status, _) = employee.get("/api/v1/reports/payroll-status").await;
+    let (status, _) = employee.get("/api/v1/reports/submission-status").await;
     assert_eq!(
         status,
         StatusCode::FORBIDDEN,
@@ -1094,13 +1102,15 @@ async fn payroll_report_settles_a_month_that_covers_nobody() {
     // With the period gone from the queue (and recorded as reached), the
     // dashboard card reports the month as done rather than staying live
     // forever on a delivery that can never happen.
-    let (status, card) = admin.get("/api/v1/reports/payroll-status").await;
+    let (status, card) = admin.get("/api/v1/reports/submission-status").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(card["total"], json!(0), "nobody is covered");
+    let (status, content) = admin.get("/api/v1/reports/payroll-content").await;
+    assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        card["sent"],
+        content["sent"],
         json!(true),
-        "a settled month greys the dashboard card out"
+        "a settled month greys the payroll card out"
     );
 
     app.cleanup().await;
@@ -1136,7 +1146,7 @@ async fn payroll_status_reports_an_already_delivered_month_as_sent() {
     let period = zerf::background::schedule::previous_period(today);
 
     // Not queued yet (before the send day): outstanding, so the card is live.
-    let (_, card) = admin.get("/api/v1/reports/payroll-status").await;
+    let (_, card) = admin.get("/api/v1/reports/payroll-content").await;
     assert_eq!(card["period"], json!(period));
     assert_eq!(
         card["sent"],
@@ -1160,7 +1170,7 @@ async fn payroll_status_reports_an_already_delivered_month_as_sent() {
         )
         .await
         .expect("record queue period");
-    let (_, card) = admin.get("/api/v1/reports/payroll-status").await;
+    let (_, card) = admin.get("/api/v1/reports/payroll-content").await;
     assert_eq!(card["sent"], json!(false), "a queued month is outstanding");
 
     // Delivered: the scheduler drops the queue entry, and the card follows.
@@ -1170,7 +1180,7 @@ async fn payroll_status_reports_an_already_delivered_month_as_sent() {
         .delete_entry(&period)
         .await
         .expect("delete entry");
-    let (_, card) = admin.get("/api/v1/reports/payroll-status").await;
+    let (_, card) = admin.get("/api/v1/reports/payroll-content").await;
     assert_eq!(
         card["sent"],
         json!(true),
@@ -1334,23 +1344,29 @@ async fn payroll_status_current_flag_reports_the_in_progress_month() {
         .await
         .expect("delete entry");
 
-    let (_, default_card) = admin.get("/api/v1/reports/payroll-status").await;
-    assert_eq!(default_card["period"], json!(previous));
-    assert_eq!(
-        default_card["sent"],
-        json!(true),
-        "the default view keeps tracking the delivered previous month"
-    );
+    // Both cards track the same period and follow the same peek flag.
+    for path in [
+        "/api/v1/reports/submission-status",
+        "/api/v1/reports/payroll-content",
+    ] {
+        let (_, default_card) = admin.get(path).await;
+        assert_eq!(
+            default_card["period"],
+            json!(previous),
+            "{path} keeps tracking the delivered previous month"
+        );
+        let (_, current_card) = admin.get(&format!("{path}?current=true")).await;
+        assert_eq!(current_card["period"], json!(current), "{path} peek");
+    }
 
-    let (_, current_card) = admin
-        .get("/api/v1/reports/payroll-status?current=true")
+    // Only the payroll card carries a delivery state, and a month still in
+    // progress can never have been delivered.
+    let (_, delivered) = admin.get("/api/v1/reports/payroll-content").await;
+    assert_eq!(delivered["sent"], json!(true));
+    let (_, peek) = admin
+        .get("/api/v1/reports/payroll-content?current=true")
         .await;
-    assert_eq!(current_card["period"], json!(current));
-    assert_eq!(
-        current_card["sent"],
-        json!(false),
-        "a month still in progress can never have been delivered yet"
-    );
+    assert_eq!(peek["sent"], json!(false));
 
     app.cleanup().await;
 }
@@ -1420,7 +1436,7 @@ async fn payroll_status_requires_approval_even_when_hours_are_not_in_the_report(
     let day = monday.format("%Y-%m-%d").to_string();
     create_and_submit_entry(&employee, &day, cat_id).await;
 
-    let (status, card) = admin.get("/api/v1/reports/payroll-status").await;
+    let (status, card) = admin.get("/api/v1/reports/submission-status").await;
     assert_eq!(status, StatusCode::OK);
     let member = card["members"]
         .as_array()
@@ -2040,7 +2056,7 @@ async fn a_held_back_scheduled_report_tells_the_admins_once() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
     configure_unreachable_smtp(&app).await;
-    let (_lead_id, _lead_pw, _emp_id, _emp_pw, _monday, _cat_id) =
+    let (_lead_id, _lead_pw, emp_id, _emp_pw, _monday, _cat_id) =
         bootstrap_team_with_suffix(&app, &admin, false, "payroll-hold").await;
 
     let (status, _) = admin
@@ -2075,11 +2091,30 @@ async fn a_held_back_scheduled_report_tells_the_admins_once() {
         .await
         .expect("record queue period");
 
+    // An undecided absence request in the reported month: sick days belong in
+    // the document but only once they are approved, so this genuinely holds the
+    // report back — unlike an unhanded-in week, which proves nothing.
+    let (from, _to) = zerf::background::schedule::period_bounds(&previous).expect("bounds");
+    let sick = absence_cat(&app.state.pool, "sick").await;
+    app.state
+        .db
+        .absences
+        .create(
+            emp_id,
+            sick.id,
+            true,
+            from + Duration::days(7),
+            from + Duration::days(8),
+            None,
+            "requested",
+        )
+        .await
+        .expect("pending sick note");
+
     let (status, _) = admin.delete("/api/v1/notifications").await;
     assert_eq!(status, StatusCode::OK);
 
-    // Nobody has booked or submitted anything, so the covered employee holds
-    // the month up and the period stays queued.
+    // The undecided request holds the month up, so the period stays queued.
     zerf::background::payroll_report::run_once(&app.state)
         .await
         .expect("scheduled run");
@@ -2125,6 +2160,270 @@ async fn a_held_back_scheduled_report_tells_the_admins_once() {
             .count(),
         1,
         "a nightly retry must not re-warn about the same month"
+    );
+
+    app.cleanup().await;
+}
+
+
+/// The payroll card is assembled by the very code that builds the document, so
+/// what it lists is what the report prints: an employee's sick note and an
+/// assistant's working hours, and nothing else.
+#[tokio::test]
+async fn the_payroll_card_lists_what_the_report_will_print() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    configure_unreachable_smtp(&app).await;
+    let (lead_id, lead_pw, emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "payroll-card").await;
+    let lead = login_change_pw(&app, "lead-payroll-card@example.com", &lead_pw).await;
+    let (_assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "payroll-card").await;
+    let assistant = login_change_pw(
+        &app,
+        "aushilfe-payroll-card@example.com",
+        &assistant_pw,
+    )
+    .await;
+
+    let (status, _) = admin
+        .put(
+            "/api/v1/settings/payroll-report",
+            &json!({
+                "payroll_report_enabled": true,
+                "payroll_report_recipients": ["payroll@example.com"],
+                "payroll_report_day_of_month": 5,
+                "payroll_report_include_assistant_hours": true,
+                "payroll_report_include_employee_hours": false,
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "enable payroll report");
+
+    let today = zerf::services::settings::app_today(&app.state.pool).await;
+    let previous = zerf::background::schedule::previous_period(today);
+    let (from, _to) = zerf::background::schedule::period_bounds(&previous).expect("bounds");
+
+    // The assistant works a day in the reported month, and it gets approved.
+    let day = (from + Duration::days(9)).format("%Y-%m-%d").to_string();
+    let entry_id = create_and_submit_entry(&assistant, &day, cat_id).await;
+    let (status, _) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [entry_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the assistant's day");
+
+    // The employee is off sick, decided.
+    let sick = absence_cat(&app.state.pool, "sick").await;
+    app.state
+        .db
+        .absences
+        .create(
+            emp_id,
+            sick.id,
+            true,
+            // Tuesday and Wednesday: a weekend sick note would carry no
+            // workdays and say nothing.
+            from + Duration::days(10),
+            from + Duration::days(11),
+            None,
+            "approved",
+        )
+        .await
+        .expect("approved sick note");
+
+    let (status, card) = admin.get("/api/v1/reports/payroll-content").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(card["enabled"], json!(true));
+    assert_eq!(card["period"], json!(previous));
+    assert_eq!(card["absence_count"], json!(1), "the sick note: {card}");
+    assert_eq!(
+        card["people_with_hours"],
+        json!(1),
+        "only the assistant's hours are printed: {card}"
+    );
+    assert!(
+        card["minutes"].as_i64().unwrap_or(0) > 0,
+        "the approved day carries minutes: {card}"
+    );
+
+    let rows = card["rows"].as_array().expect("rows");
+    assert!(
+        rows.iter()
+            .any(|row| row["kind"] == "absence" && row["name"].is_string()),
+        "the absence row names the employee: {card}"
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row["kind"] == "hours" && row["minutes"].as_i64().unwrap_or(0) > 0),
+        "the hours row carries the assistant's minutes: {card}"
+    );
+
+    app.cleanup().await;
+}
+
+
+/// The rule the payroll report now lives by: a week nobody handed in proves
+/// nothing and holds nothing back, while a booking that exists and is not
+/// approved yet is proof that hours are missing from the document.
+#[tokio::test]
+async fn only_provable_gaps_hold_the_payroll_report_back() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    configure_unreachable_smtp(&app).await;
+    let (lead_id, lead_pw, emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "payroll-gate").await;
+    let lead = login_change_pw(&app, "lead-payroll-gate@example.com", &lead_pw).await;
+    let (assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "payroll-gate").await;
+    let assistant =
+        login_change_pw(&app, "aushilfe-payroll-gate@example.com", &assistant_pw).await;
+
+    let today = zerf::services::settings::app_today(&app.state.pool).await;
+    let previous = zerf::background::schedule::previous_period(today);
+    let (from, to) = zerf::background::schedule::period_bounds(&previous).expect("bounds");
+
+    let pool = app.state.pool.clone();
+    let users = app.state.db.users.clone();
+    let readiness_of = move |user_id: i64, require_full_approval: bool| {
+        let pool = pool.clone();
+        let users = users.clone();
+        async move {
+            let user = users
+                .find_by_id(user_id)
+                .await
+                .expect("load user")
+                .expect("user exists");
+            zerf::services::reports::month_export_readiness(
+                &pool,
+                &user,
+                from,
+                to,
+                require_full_approval,
+                false,
+            )
+            .await
+            .expect("readiness")
+        }
+    };
+
+    // The employee booked nothing at all in the reported month. Their hours are
+    // not printed anyway, so nothing about the document is missing.
+    assert!(
+        readiness_of(emp_id, false).await.is_ready(),
+        "an unhanded-in month must not hold the report back"
+    );
+
+    // The assistant worked and handed the day in; nobody has decided it yet.
+    let day = (from + Duration::days(9)).format("%Y-%m-%d").to_string();
+    let entry_id = create_and_submit_entry(&assistant, &day, cat_id).await;
+    assert!(
+        !readiness_of(assistant_id, true).await.is_ready(),
+        "hours that exist but are not approved are provably missing from the report"
+    );
+
+    let (status, _) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [entry_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the assistant's day");
+    assert!(
+        readiness_of(assistant_id, true).await.is_ready(),
+        "once decided, the month is final for them"
+    );
+
+    app.cleanup().await;
+}
+
+/// A month is judged on its own days. The week carrying December's last day
+/// runs into January, and what is booked there belongs to January's month —
+/// handing in the December part settles December, whatever follows it.
+#[tokio::test]
+async fn the_month_card_is_settled_by_the_months_own_days() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "month-days").await;
+    let lead = login_change_pw(&app, "lead-month-days@example.com", &lead_pw).await;
+
+    // Starting on the month's last day leaves exactly one week to judge: the
+    // one that reaches into the new month.
+    let (status, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "boundary-month-days@example.com",
+                "first_name": "Bo",
+                "last_name": "Boundary",
+                "role": "employee",
+                "weekly_hours": 39,
+                "start_date": "2029-12-31",
+                "approver_ids": [lead_id],
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create boundary employee: {body}");
+    let boundary_id = id(&body);
+    let boundary = login_change_pw(
+        &app,
+        "boundary-month-days@example.com",
+        &temp_pw(&body),
+    )
+    .await;
+
+    let december_status = || async {
+        let (status, card) = admin.get("/api/v1/reports/submission-status").await;
+        assert_eq!(status, StatusCode::OK);
+        card["members"]
+            .as_array()
+            .expect("members")
+            .iter()
+            .find(|member| member["user_id"].as_i64() == Some(boundary_id))
+            .map(|member| member["status"].as_str().unwrap_or_default().to_string())
+            .unwrap_or_else(|| panic!("boundary employee missing from the card: {card}"))
+    };
+
+    assert_eq!(
+        december_status().await,
+        "not_submitted",
+        "the month's last day has not been handed in yet"
+    );
+
+    // Hand in exactly that day.
+    let entry_id = create_and_submit_entry(&boundary, "2029-12-31", cat_id).await;
+    let (status, _) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [entry_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve it");
+    assert_eq!(
+        december_status().await,
+        "ready",
+        "December is settled by December's own day"
+    );
+
+    // A draft in the new month sits in the very same calendar week. It is
+    // January's business and must not reopen December.
+    let (status, _) = boundary
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": "2030-01-02",
+                "start_time": "08:00",
+                "end_time": "12:00",
+                "category_id": cat_id,
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "book a day in the new month");
+    assert_eq!(
+        december_status().await,
+        "ready",
+        "what is booked in January must not make December look unfinished"
     );
 
     app.cleanup().await;

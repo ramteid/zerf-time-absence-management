@@ -332,14 +332,28 @@ it is over. Approvers see those days as their own small week block.
 
 Nobody has to remember this on their own:
 
-- On the **1st** of a month, everyone who still has unsubmitted days in the
-  month that just ended receives a reminder — assistants included.
+- On the **1st** of a month, at 08:00, assistants who still hold days of the
+  month that just ended are asked to hand them in, naming the deadline day from
+  the general settings. They get their own message because the week rule does
+  not apply to them.
+- **Every third day from the 1st** (so the 1st, 4th, 7th …), at 08:00, everyone
+  with a fixed working-time contract is reminded of the weeks of that month that
+  are still missing, listed by name, with the same deadline. Assistants do not
+  receive this one: they have no target schedule, so a week without a booking is
+  no sign that anything is missing — they may simply not have worked.
+- Every reminder is decided fresh each time and only goes out when something is
+  genuinely missing. A week you have handed in and that is merely waiting for a
+  decision never produces one — that is the approver's move, not yours.
+- The **week that runs across the turn of the month** is part of that list, but
+  only from its **Friday**. Before that you are still working it, and asking for
+  it would be asking for days that have not happened. It is then named on the
+  next reminder day on or after that Friday. Only the days of it that belong to
+  the finished month are asked for: hand those in, and the week counts as
+  settled for that month, whatever you still book in it afterwards.
 - On the **3rd**, approvers are reminded of days from that month that are handed
   in but still waiting for a decision.
-- If the payroll report cannot be sent on its send day because somebody's month
-  is not finished, the administrators are told once, with the names. The report
-  then goes out automatically as soon as the month is complete — it is never
-  sent incomplete, and it is never sent twice.
+- If the payroll report cannot be sent on its send day, the administrators are
+  told once, with the names of the people it is waiting for.
 
 ### Time-entry summary tiles
 
@@ -513,12 +527,12 @@ Flextime (positive or negative balance) is calculated as:
 
 Only **crediting entries** count as actual work hours in this calculation. Non-crediting entries are recorded and approved like all others, but they do not contribute to your flextime.
 
-**Only fully approved weeks count toward the flextime balance.** A week
-counts once its entries are approved and nothing in it is still waiting for
-approval or was rejected. Here too the week is judged as a whole: how many days
-you worked in it makes no difference. A week you booked nothing in only counts
-when nothing was due — every working day a public holiday or covered by an
-approved absence. A week that does not meet this bar adds neither
+**Only fully approved weeks count toward the flextime balance.** A week counts
+once it has been approved and nothing in it is still waiting for approval or was
+rejected. Approval always covers the whole week, so how many days you worked in
+it makes no difference. A week you booked nothing in does not count as handed
+in — unless nothing was due in it, every working day being a public holiday or
+covered by an approved absence. A week that does not meet this bar adds neither
 hours nor targets, so it can never pull your balance down or up — whether it
 is the most recent week, or an older one still waiting to be corrected and
 resubmitted while a later week has already been approved. The balance is
@@ -680,12 +694,14 @@ A week is considered **complete** when:
 
 - No entry anywhere in the week is still in draft state, and no rejected entry
   remains without an overlapping approved correction, **and**
-- You handed the week in: at least one day of it has a submitted or approved
-  entry (crediting or non-crediting).
-  (A week without any entry is complete when there was nothing to hand in:
-  every working day is excused by an approved, cancellation-pending, or
-  requested absence, a public holiday, or falls before your contract start
-  date — a full-vacation week, for example.)
+- You handed the week in — submitting covers the whole week at once, so a week
+  with a single booked day is submitted just as completely as one with five.
+  (A week you booked nothing in counts as **not** handed in, unless there was
+  nothing to hand in: every working day excused by an approved,
+  cancellation-pending, or requested absence, a public holiday, or falling
+  before your contract start date — a full-vacation week, for example. This
+  applies to people with a fixed working-time contract; for assistants an empty
+  week means nothing, see below.)
 
 For users with role `assistant`, past-week completeness is always treated as
 complete. That only switches off the demand — they still submit their weeks and
@@ -704,12 +720,12 @@ report's submission column, the monthly submission reminder, the payroll
 report, and the scheduled timesheet PDF upload. They can never disagree with
 each other.
 
-The week you are currently working is not part of this check — it is not over
-yet. Two places do look at it: the **Payroll Report** card on the dashboard,
-because a month can only be called final once the running week has been handed
-in too, and the **Submissions** tile in the report, which counts every week of
-the shown period. In both, the running week stays "not submitted" until you
-submit it.
+A month is judged by the weeks that overlap it, the week you are currently
+working included — as soon as any of its days belong to that month, those days
+are part of what the month is missing. Only the month's own days count, so
+whatever you are still booking in the new month never makes the old one look
+unfinished, and handing in the last days of a month settles it even though the
+week itself runs on.
 
 ### Important: non-crediting entries affect completeness
 
@@ -788,9 +804,10 @@ is configured when Zerf creates the notification.
 - absence cancellation is approved or rejected,
 - reopen request is approved or rejected,
 - a monthly submission reminder is triggered on the configured deadline day (lists past weeks that are still not submitted),
-- **on the 1st of a month**, if any day of the month that just ended has not
-  been submitted (see [Month end](#month-end)). This one reaches everybody who
-  has such a day, assistants included.
+- **on the 1st of a month**, for assistants who still hold unsubmitted days of
+  the month that just ended (see [Month end](#month-end)),
+- **every third day from the 1st**, if weeks of that month are still missing —
+  only for people with a fixed working-time contract.
 
 If an admin approves or rejects their own item, Zerf records the audit event
 and sends an in-app-only notification (no email) back to the same user.
@@ -1017,7 +1034,9 @@ Zerf distinguishes between workflow coverage and work-credit math.
   period you have handed in, for example *3 of 4 weeks*. Weeks are counted
   whole: a week that reaches beyond the start or the end of the period is
   counted completely, and it makes no difference on how many days of it you
-  booked. The week you are currently working counts too and stays open until
+  booked. In a month view only that month's own days decide — hand in the last
+  days of the month and the week counts, whatever you book afterwards. A freely
+  chosen range judges its boundary weeks as whole weeks. The week you are currently working counts too and stays open until
   you submit it — you can submit a week as soon as you know you will not book
   anything else in it. The tile is not shown for assistants or for users
   without weekly hours, who have no submission duty.
@@ -1935,13 +1954,20 @@ previous month is prepared; if the month is not final yet the report waits and i
 retried every day until it can be sent. A month counts as final when, for
 everyone it covers:
 
-- all elapsed weeks are submitted,
-- no absence request is still undecided, and
+- no absence request is still undecided — sick days are in the report, but only
+  once they are approved,
 - for everyone whose hours are in the report, all time entries of that month are
   approved — payroll pays by those hours, so a month that is only submitted would
   understate them, and
 - no stored entries or absences lie before a person's start date, because those
   days are hidden from every report and would make the figures too low.
+
+A week nobody handed in does **not** hold the report back. It cannot prove
+anything is missing: an assistant works irregularly and may simply not have
+worked that week, and a salaried employee's hours are not printed in the report
+at all. Only what can be shown to be missing waits — an existing booking that is
+not approved yet, an undecided absence request, or data hidden before a start
+date.
 
 A month that is still open is a normal situation, not a fault. The **Payroll
 Report** card on the dashboard shows team leads and admins how far the month is
@@ -1990,13 +2016,15 @@ there was nothing to send, or why sending failed.
 as delivered, so the complete report still goes out automatically on the
 configured day.
 
-#### The dashboard card
+#### The two dashboard cards
 
-Team leads and admins see a **Payroll Report** card next to **Who is absent** on
-their dashboard while the previous month's report is still outstanding. It
-shows a ring split into three colours and the summary **"X of Y done"**. The
-ring and detail list count only people relevant to that month; assistants
-without any time entry are omitted:
+Team leads and admins see two month cards next to **Who is absent** on their
+dashboard. Employees see neither.
+
+**Submissions** answers "who has closed their month". It shows a ring split into
+three colours and the summary **"X of Y done"**, counting everybody the month
+concerns — administrators aside, and assistants who booked nothing at all, who
+have nothing to close:
 
 | Colour | Meaning |
 | --- | --- |
@@ -2004,29 +2032,30 @@ without any time entry are omitted:
 | Amber | Everything submitted, but an approval or an absence decision is still missing. |
 | Red | Weeks are still missing, or the data needs an administrator's attention. |
 
-Clicking the card opens the full list, with the people who are still missing at
-the top. The list is re-read every time you open it, so approvals you just
-granted on the dashboard are already reflected. Clicking a person opens their
-report for that month, so you can go straight to what needs approving.
+Clicking it opens the full list, with the people who are still missing at the
+top. The list is re-read every time you open it, so approvals you just granted
+on the dashboard are already reflected. Clicking a person opens their report for
+that month, so you can go straight to what needs approving. Drafts are never
+reported as waiting for approval — nobody has handed them in yet.
 
-When you look at the month that is currently running, the running week counts
-too: as long as somebody has not submitted it, they are listed as *Not
-submitted*. A week can be submitted as soon as you know you will not book
-anything else in it, so this is never a dead end. Entries that are still drafts
-are therefore never reported as waiting for approval — nobody has handed them
-in yet.
+This card says nothing about the payroll report. An outstanding week is worth
+chasing, but it does not hold a report back (see [When it is
+sent](#when-it-is-sent)).
 
-Team leads see the counts and colours for **everyone**, so they can tell whether
-the report as a whole is ready. People outside their own team are shown as
-*Not visible to you* — they still count towards the totals, but their names are
-not revealed.
+**Payroll Report** shows what that month's report holds — the sick notes and the
+assistants' working days and hours — or, while the month is still running, what
+it is shaping up to hold. Clicking it lists the entries the document contains.
+Once the report has been sent the card greys out; it is hidden entirely when the
+payroll report is switched off.
 
-Once the report has been sent, the card greys out and reads e.g. *"June sent"*
-for the rest of the month. A small **"Show [current month]"** link appears
-underneath — click it to see progress for the month that is currently running
-instead. This is just a quick look, not a setting: it is not saved, and going
-back to the dashboard later shows the sent month again. The card is hidden
-entirely when the payroll report is switched off.
+Both cards track the previous month and carry a small **"Show [current month]"**
+link: a quick look at the month that is currently running. It is not a setting —
+it is not saved, and coming back to the dashboard shows the previous month
+again.
+
+Team leads see the counts for **everyone**, so they can tell whether the month
+is complete. People outside their own team appear as *Not visible to you* — they
+still count towards the totals, but their names are not revealed.
 
 ### Managing categories
 

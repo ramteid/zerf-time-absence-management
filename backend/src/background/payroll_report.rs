@@ -269,6 +269,10 @@ async fn notify_admins_of_hold(
     ready: usize,
     pending: &[payroll_report::MemberReadiness],
 ) {
+    // Compared with `>=`, not `==`: two blocked periods are processed oldest
+    // first, so an equality check would let the marker flip between them and
+    // reconsider both every night. "YYYY-MM" sorts chronologically as a string,
+    // so a period at or below the last one reported has already been covered.
     let already_reported = settings::load_setting(
         &state.pool,
         settings::PAYROLL_REPORT_BLOCKED_NOTIFIED_KEY,
@@ -276,7 +280,7 @@ async fn notify_admins_of_hold(
     )
     .await
     .unwrap_or_default();
-    if already_reported == period {
+    if already_reported.as_str() >= period {
         return;
     }
 
@@ -393,9 +397,16 @@ async fn process_period(
             // end up in the PDF — an unapproved entry that never gets printed
             // doesn't make the document wrong. (The dashboard tile asks a
             // stricter, unconditional question; see `evaluate_members`.)
-            let readiness = payroll_report::evaluate_members(state, &members, from, to, |role| {
-                config.includes_hours_for(role)
-            })
+            // No week criterion: an unhanded-in week proves nothing about a
+            // payroll month — see `reports::month_export_readiness`.
+            let readiness = payroll_report::evaluate_members(
+                state,
+                &members,
+                from,
+                to,
+                |role| config.includes_hours_for(role),
+                false,
+            )
             .await?;
             let (ready, pending): (Vec<_>, Vec<_>) = readiness
                 .into_iter()

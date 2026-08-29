@@ -183,6 +183,7 @@ async fn find_unsubmitted_weeks(
             &incomplete_dates,
             user_start,
             workdays_per_week,
+            None,
         );
         if !week_is_complete {
             incomplete_week_mondays.push(week_monday);
@@ -287,35 +288,79 @@ pub async fn run_check(state: &crate::AppState) {
     }
 }
 
-/// Day of the new month on which the finished month's still-unsubmitted days
-/// are chased. Day 1 is the earliest possible: the month is over, and the
-/// monthly exports (timesheet PDF archive, payroll report) run within days.
-const MONTH_END_REMINDER_DAY: u32 = 1;
-
-/// True on the first day of a month, from 07:00 local time.
-fn month_end_reminder_is_due_now(now: chrono::DateTime<chrono_tz::Tz>) -> bool {
-    now.date_naive().day() == MONTH_END_REMINDER_DAY && now.hour() >= 7
+/// Both month-boundary reminders go out from 08:00 local time — the start of
+/// the working day, not the middle of the night.
+fn reminder_hour_reached(now: chrono::DateTime<chrono_tz::Tz>) -> bool {
+    now.hour() >= 8
 }
 
-/// Chase the days of the just-finished month that nobody has handed in.
-///
-/// This is a different question from [`run_check`] and therefore a different
-/// audience. `run_check` asks "is this person's week complete against their
-/// contract", which only makes sense for people who have a target schedule.
-/// Here the question is "do entries exist that were never submitted" — and
-/// those hold up the monthly exports no matter whose they are. Assistants are
-/// explicitly included: they submit and get approved like everybody else, and
-/// their unhanded-in days block the payroll report just as hard.
-///
-/// It exists because the week rule and the calendar collide at a month
-/// boundary: when a month ends on a Monday, the week carrying its last day is
-/// not over until well after the payroll report is due, so nobody would submit
-/// those days in time on their own. A week may be handed in as soon as the
-/// employee knows they will book nothing more in it, which is exactly what
-/// this reminder asks them to do.
-pub async fn run_month_end_check(state: &crate::AppState) {
-    let pool = &state.pool;
+/// True on the first day of a month, once the reminder hour is reached.
+fn month_end_reminder_is_due_now(now: chrono::DateTime<chrono_tz::Tz>) -> bool {
+    reminder_hour_reached(now) && now.date_naive().day() == 1
+}
 
+/// Days between the missing-week reminders that run through the new month:
+/// the 1st, the 4th, the 7th and so on.
+const WEEK_REMINDER_INTERVAL_DAYS: u32 = 3;
+
+/// True on every third day from the 1st, once the reminder hour is reached.
+fn week_reminder_is_due_now(now: chrono::DateTime<chrono_tz::Tz>) -> bool {
+    reminder_hour_reached(now)
+        && (now.date_naive().day() - 1).is_multiple_of(WEEK_REMINDER_INTERVAL_DAYS)
+}
+
+/// The date by which the finished month's hours have to be handed in.
+///
+/// The organisation's own deadline day, from the general settings: it is what
+/// the working agreement asks for, it exists whether or not a payroll report is
+/// configured, and it is the date the reminders name. Should it ever be unset,
+/// the payroll send day stands in — the report goes out just after midnight on
+/// that day, so the day before is the last one that still counts.
+async fn month_submission_deadline(
+    pool: &DatabasePool,
+    today: NaiveDate,
+) -> Option<NaiveDate> {
+    let configured: Option<u8> = load_setting(pool, SUBMISSION_DEADLINE_DAY_KEY, "")
+        .await
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .filter(|day: &u8| (1..=28).contains(day));
+    if let Some(day) = configured {
+        return NaiveDate::from_ymd_opt(today.year(), today.month(), u32::from(day));
+    }
+    let config = crate::services::payroll_report::load_config(pool).await.ok()?;
+    if !config.enabled || config.day_of_month <= 1 {
+        return None;
+    }
+    NaiveDate::from_ymd_opt(
+        today.year(),
+        today.month(),
+        u32::from(config.day_of_month) - 1,
+    )
+}
+
+/// On the first of the month: ask the assistants who still hold days of the
+/// finished month to hand them in, and name the date it has to happen by.
+///
+/// Assistants get their own pass because the week question does not apply to
+/// them — no target schedule means a week without a booking is no evidence of
+/// anything missing. What *is* evidence is a booking they made and never handed
+/// in, so that is the trigger, re-checked on every pass. A day that is
+/// submitted and merely waiting for a decision is not their move any more and
+/// never produces a reminder.
+///
+/// Once, on the 1st: unlike a salaried employee there is no list of missing
+/// weeks to work through, so repeating it would only be pressure over work they
+/// may not owe. Everybody with a fixed contract is served by
+/// [`run_month_weeks_reminder`] instead, which names their missing weeks.
+pub async fn run_month_end_check(
+    state: &crate::AppState,
+    now_local: chrono::DateTime<chrono_tz::Tz>,
+) {
+    let pool = &state.pool;
+    if !month_end_reminder_is_due_now(now_local) {
+        return;
+    }
     let reminders_enabled = load_setting(pool, SUBMISSION_REMINDERS_ENABLED_KEY, "true")
         .await
         .unwrap_or_else(|_| "true".to_string());
@@ -323,15 +368,19 @@ pub async fn run_month_end_check(state: &crate::AppState) {
         return;
     }
 
+    let today = now_local.date_naive();
+    let Some(deadline) = month_submission_deadline(pool, today).await else {
+        return;
+    };
     let language = crate::i18n::load_ui_language(pool)
         .await
         .unwrap_or_default();
-    let today = app_today(pool).await;
     let period = crate::background::schedule::previous_period(today);
     let Ok((from, to)) = crate::background::schedule::period_bounds(&period) else {
         return;
     };
     let month_label = crate::i18n::format_month(&language, from.year(), from.month());
+    let deadline_label = crate::i18n::format_date(&language, deadline);
 
     let user_ids = match state
         .db
@@ -347,25 +396,32 @@ pub async fn run_month_end_check(state: &crate::AppState) {
     };
 
     for user_id in user_ids {
-        // An archived account or one with time tracking switched off cannot
-        // submit anything any more; only an admin can settle those rows.
+        // Assistants only, and never an archived account or one with time
+        // tracking switched off — those rows can only be settled by an admin.
         match state.db.users.find_by_id(user_id).await {
-            Ok(Some(user)) if user.active && user.archived_at.is_none() && user.tracks_time => {}
+            Ok(Some(user))
+                if user.active
+                    && user.archived_at.is_none()
+                    && user.tracks_time
+                    && crate::roles::is_assistant_role(&user.role) => {}
             _ => continue,
         }
+        let params = [
+            ("month", month_label.clone()),
+            ("deadline", deadline_label.clone()),
+        ];
         let text = crate::i18n::notification_event_text(
             &language,
             "month_end_submission_reminder",
-            &[("month", month_label.clone())],
+            &params,
         );
         let email_body = crate::i18n::notification_email_body(
             &language,
             "month_end_submission_reminder",
-            &[("month", month_label.clone())],
+            &params,
         );
         // Once per month, not once per pass: the loop re-checks every hour
-        // while the first of the month lasts, and somebody working through
-        // their backlog must not be nagged hourly for it.
+        // while the first of the month lasts.
         let dedupe_key = format!("month_end_submission_reminder:{period}");
         crate::services::notifications::deliver(
             state,
@@ -383,7 +439,119 @@ pub async fn run_month_end_check(state: &crate::AppState) {
     }
 }
 
-/// Background loop: sleep until the next deadline day at 07:00 then run check./// Background loop: sleep until the next deadline day at 07:00 then run check.
+/// Every third day from the 1st: name the weeks of the finished month that are
+/// still missing.
+///
+/// Only for people with a target schedule. For them a week without a booking
+/// *is* evidence of something missing, so the app can point at it; for an
+/// assistant it is not, and guessing would only create pressure over a week
+/// they may simply not have worked. This is the organisation's own interest in
+/// a closed month — the payroll report does not depend on these weeks at all.
+///
+/// A week that is handed in and merely waiting for a decision counts as done:
+/// the employee has nothing left to do with it, and chasing them for somebody
+/// else's approval would be noise. The list is rebuilt on every pass, so it
+/// shrinks as they work through it.
+pub async fn run_month_weeks_reminder(
+    state: &crate::AppState,
+    now_local: chrono::DateTime<chrono_tz::Tz>,
+) {
+    let pool = &state.pool;
+    if !week_reminder_is_due_now(now_local) {
+        return;
+    }
+    let reminders_enabled = load_setting(pool, SUBMISSION_REMINDERS_ENABLED_KEY, "true")
+        .await
+        .unwrap_or_else(|_| "true".to_string());
+    if reminders_enabled == "false" {
+        return;
+    }
+
+    let today = now_local.date_naive();
+    let Some(deadline) = month_submission_deadline(pool, today).await else {
+        return;
+    };
+    let language = crate::i18n::load_ui_language(pool)
+        .await
+        .unwrap_or_default();
+    let period = crate::background::schedule::previous_period(today);
+    let Ok((from, to)) = crate::background::schedule::period_bounds(&period) else {
+        return;
+    };
+    let month_label = crate::i18n::format_month(&language, from.year(), from.month());
+    let deadline_label = crate::i18n::format_date(&language, deadline);
+
+    let rows = match state.db.users.get_active_non_assistant_users().await {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::warn!(target:"zerf::submission_reminders", "week reminder user query failed: {e}");
+            return;
+        }
+    };
+
+    for crate::repository::ActiveUserRow {
+        id: user_id,
+        start_date: user_start,
+        workdays_per_week,
+        ..
+    } in rows
+    {
+        let missing = crate::services::reports::unsubmitted_weeks_in_month(
+            pool,
+            user_id,
+            from,
+            to,
+            user_start,
+            workdays_per_week,
+            today,
+        )
+        .await
+        .unwrap_or_default();
+        if missing.is_empty() {
+            continue;
+        }
+        let labels: Vec<String> = missing
+            .iter()
+            .map(|monday| crate::i18n::format_week_label(&language, *monday))
+            .collect();
+        let text = crate::i18n::notification_event_text(
+            &language,
+            "month_weeks_reminder",
+            &[
+                ("month", month_label.clone()),
+                ("deadline", deadline_label.clone()),
+                ("weeks", labels.join(", ")),
+            ],
+        );
+        let email_body = crate::i18n::notification_email_body(
+            &language,
+            "month_weeks_reminder",
+            &[
+                ("month", month_label.clone()),
+                ("deadline", deadline_label.clone()),
+                ("weeks", labels.join("\n")),
+            ],
+        );
+        // Per day: the loop wakes hourly, and the list must not be re-sent each
+        // hour while somebody is working through it.
+        let dedupe_key = format!("month_weeks_reminder:{today}");
+        crate::services::notifications::deliver(
+            state,
+            &crate::services::notifications::Outgoing::new(
+                user_id,
+                &language,
+                "month_weeks_reminder",
+                &text.title,
+                &text.body,
+            )
+            .email_body(&email_body)
+            .dedupe_key(&dedupe_key),
+        )
+        .await;
+    }
+}
+
+/// Background loop: sleep until the next deadline day at 07:00 then run check.
 /// Fixed to not miss deadline when restarting after 07:00 – we check due-first.
 pub async fn run_loop(pool: DatabasePool, state: crate::AppState) {
     loop {
@@ -411,10 +579,9 @@ pub async fn run_loop(pool: DatabasePool, state: crate::AppState) {
             // leftovers are chased on the 1st, because the monthly exports
             // depend on them. Safe to call on every hourly wake-up — the
             // per-period dedupe key collapses the repeats.
-            if month_end_reminder_is_due_now(Utc::now().with_timezone(&tz)) {
-                tracing::info!(target:"zerf::submission_reminders", "Running month-end submission reminder check");
-                run_month_end_check(&state).await;
-            }
+            let now_local = Utc::now().with_timezone(&tz);
+            run_month_end_check(&state, now_local).await;
+            run_month_weeks_reminder(&state, now_local).await;
 
             let wait = duration_until_next_deadline(Utc::now().with_timezone(&tz), d);
             let sleep_for = scheduler_sleep_duration(wait);
@@ -433,10 +600,9 @@ pub async fn run_loop(pool: DatabasePool, state: crate::AppState) {
             let tz = timezone
                 .parse::<chrono_tz::Tz>()
                 .unwrap_or(chrono_tz::Europe::Berlin);
-            if month_end_reminder_is_due_now(Utc::now().with_timezone(&tz)) {
-                tracing::info!(target:"zerf::submission_reminders", "Running month-end submission reminder check");
-                run_month_end_check(&state).await;
-            }
+            let now_local = Utc::now().with_timezone(&tz);
+            run_month_end_check(&state, now_local).await;
+            run_month_weeks_reminder(&state, now_local).await;
             tokio::time::sleep(Duration::from_secs(3600)).await;
         }
     }
@@ -447,24 +613,44 @@ mod tests {
     use super::*;
     use chrono_tz::Europe::Berlin;
 
-    /// The month-end pass runs on the 1st from 07:00 and on no other day, so
+    /// The month-end ask runs on the 1st from 08:00 and on no other day, so
     /// nobody is chased for a month that is not over.
     #[test]
-    fn month_end_reminder_fires_on_the_first_from_seven() {
+    fn month_end_reminder_fires_on_the_first_from_eight() {
         assert!(month_end_reminder_is_due_now(
-            Berlin.with_ymd_and_hms(2026, 9, 1, 7, 0, 0).unwrap()
+            Berlin.with_ymd_and_hms(2026, 9, 1, 8, 0, 0).unwrap()
         ));
         assert!(month_end_reminder_is_due_now(
             Berlin.with_ymd_and_hms(2026, 9, 1, 23, 0, 0).unwrap()
         ));
         assert!(!month_end_reminder_is_due_now(
-            Berlin.with_ymd_and_hms(2026, 9, 1, 6, 59, 0).unwrap()
+            Berlin.with_ymd_and_hms(2026, 9, 1, 7, 59, 0).unwrap()
         ));
         assert!(!month_end_reminder_is_due_now(
             Berlin.with_ymd_and_hms(2026, 8, 31, 9, 0, 0).unwrap()
         ));
         assert!(!month_end_reminder_is_due_now(
             Berlin.with_ymd_and_hms(2026, 9, 2, 9, 0, 0).unwrap()
+        ));
+    }
+
+    /// The missing-week reminder repeats every third day from the 1st.
+    #[test]
+    fn week_reminder_repeats_every_third_day_from_the_first() {
+        for day in [1, 4, 7, 10, 31] {
+            assert!(
+                week_reminder_is_due_now(Berlin.with_ymd_and_hms(2026, 8, day, 8, 0, 0).unwrap()),
+                "expected a reminder on the {day}."
+            );
+        }
+        for day in [2, 3, 5, 6, 8] {
+            assert!(
+                !week_reminder_is_due_now(Berlin.with_ymd_and_hms(2026, 8, day, 8, 0, 0).unwrap()),
+                "expected no reminder on the {day}."
+            );
+        }
+        assert!(!week_reminder_is_due_now(
+            Berlin.with_ymd_and_hms(2026, 8, 4, 7, 0, 0).unwrap()
         ));
     }
 

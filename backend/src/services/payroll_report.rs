@@ -266,59 +266,248 @@ pub mod status_value {
 /// to know whether the month is complete even when the outstanding person is
 /// not on their team — but the identity never leaves the server.
 #[derive(serde::Serialize)]
-pub struct PayrollStatusMember {
+pub struct SubmissionStatusMember {
     pub user_id: Option<i64>,
     pub name: Option<String>,
     pub status: &'static str,
     pub reason_key: Option<&'static str>,
 }
 
-/// Everything the payroll dashboard tile renders for the tracked month.
+/// Everything the Submissions dashboard tile renders for the tracked month.
 #[derive(serde::Serialize)]
-pub struct PayrollStatus {
-    /// False when the payroll report is switched off; the tile stays hidden.
-    pub enabled: bool,
+pub struct SubmissionStatus {
     /// Tracked period, "YYYY-MM" — the previous month by default, or the
-    /// current in-progress month when the dashboard tile's transient "show
-    /// this month" peek was requested (see `build_status`'s
-    /// `show_current_month` parameter).
+    /// current in-progress month when the tile's transient "show this month"
+    /// peek was requested (see `build_submission_status`).
     pub period: String,
     /// Localized month name, e.g. "Juli 2026".
     pub period_label: String,
     pub from: NaiveDate,
     pub to: NaiveDate,
-    /// True once the scheduled delivery for this period has gone out. The tile
-    /// is greyed out from that moment until the next month begins.
-    pub sent: bool,
-    pub day_of_month: u8,
     pub total: usize,
     pub ready: usize,
     pub awaiting_approval: usize,
     pub not_submitted: usize,
-    pub members: Vec<PayrollStatusMember>,
+    pub members: Vec<SubmissionStatusMember>,
 }
 
-/// Build the payroll status for the dashboard tile.
+/// One line of what the payroll report holds for one person: either an absence
+/// period or a person's working days and hours.
 ///
-/// Covers exactly the people the report itself covers (see [`payroll_members`])
-/// and judges them with the same gate the send path uses, so "12 of 12 done"
-/// on the tile means the next scheduled run will actually deliver.
+/// `name` is `None` for somebody a team lead may not see — the line still
+/// counts towards the totals, because a lead has to be able to tell whether the
+/// month looks complete, but the identity never leaves the server.
+#[derive(serde::Serialize)]
+pub struct PayrollContentRow {
+    pub name: Option<String>,
+    /// `absence` or `hours`.
+    pub kind: &'static str,
+    /// Localized absence category; `None` on an hours line.
+    pub category: Option<String>,
+    pub from: Option<NaiveDate>,
+    pub to: Option<NaiveDate>,
+    /// Absence days, or days worked on an hours line.
+    pub days: f64,
+    /// Minutes worked; `None` on an absence line.
+    pub minutes: Option<i64>,
+    pub medical_certificate_required: Option<bool>,
+}
+
+/// What the payroll report for the tracked month contains — or, while the month
+/// is still running, what it is shaping up to contain.
+#[derive(serde::Serialize)]
+pub struct PayrollContent {
+    /// False when the payroll report is switched off; the tile stays hidden.
+    pub enabled: bool,
+    pub period: String,
+    pub period_label: String,
+    pub from: NaiveDate,
+    pub to: NaiveDate,
+    /// True once the scheduled delivery for this period has gone out.
+    pub sent: bool,
+    pub day_of_month: u8,
+    /// The month is still running, so these figures are a snapshot of today.
+    pub in_progress: bool,
+    pub absence_count: usize,
+    /// People with an hours line — assistants, unless employee hours are on.
+    pub people_with_hours: usize,
+    pub minutes: i64,
+    pub rows: Vec<PayrollContentRow>,
+}
+
+/// Build the payroll content tile.
 ///
-/// `show_current_month` switches the tracked period from the previous month
-/// (the default, and the only period that is ever actually delivered) to the
-/// current, still in-progress one. It exists solely for the dashboard tile's
-/// transient "show this month" peek, offered once the previous month's report
-/// has already gone out and the tile would otherwise sit idle for the rest of
-/// the month; the peek is a client-side, non-persistent choice, not a setting
-/// stored anywhere. A current-month period can never be `sent` — it cannot
-/// have reached the delivery queue yet — so the tile always shows live counts
-/// while peeking.
-pub async fn build_status(
+/// Deliberately assembled by the very code that builds the document
+/// ([`build_report_data`]), on the very member set the matching send mode would
+/// use, so the tile cannot claim something the PDF would not print. For the
+/// finished month that is the scheduled run's view; for the running month it is
+/// the interim snapshot's — clamped to today, and dropping rows that only mean
+/// something once a month is over.
+pub async fn build_content(
     app_state: &AppState,
     requester: &crate::middleware::auth::User,
     language: &Language,
     show_current_month: bool,
-) -> AppResult<PayrollStatus> {
+) -> AppResult<PayrollContent> {
+    let config = load_config(&app_state.pool).await?;
+    let today = settings::app_today(&app_state.pool).await;
+    let period = if show_current_month {
+        crate::background::schedule::current_period(today)
+    } else {
+        crate::background::schedule::previous_period(today)
+    };
+    let (from, month_end) = crate::background::schedule::period_bounds(&period)?;
+    let period_label = crate::i18n::format_month(language, from.year(), from.month());
+    let in_progress = show_current_month;
+    let to = if in_progress {
+        month_end.min(today)
+    } else {
+        month_end
+    };
+
+    if !config.enabled {
+        return Ok(PayrollContent {
+            enabled: false,
+            period,
+            period_label,
+            from,
+            to,
+            sent: false,
+            day_of_month: config.day_of_month,
+            in_progress,
+            absence_count: 0,
+            people_with_hours: 0,
+            minutes: 0,
+            rows: Vec::new(),
+        });
+    }
+
+    let sent = period_delivered(&app_state.pool, &period).await?;
+    let members = payroll_members(
+        app_state,
+        from,
+        to,
+        &config.excluded_user_ids,
+        in_progress,
+    )
+    .await?;
+
+    // Names a team lead may see. Matched on the printed name because that is
+    // all a rendered row carries; a unique index on (first name, last name)
+    // makes that exact.
+    let visible_names: Option<std::collections::HashSet<String>> = if requester.is_admin() {
+        None
+    } else {
+        let team = app_state
+            .db
+            .reports
+            .active_team_members(requester.id, false)
+            .await?;
+        let visible_ids: std::collections::HashSet<i64> =
+            team.into_iter().map(|member| member.id).collect();
+        Some(
+            members
+                .iter()
+                .filter(|member| visible_ids.contains(&member.id))
+                .map(employee_name)
+                .collect(),
+        )
+    };
+    let show_name = |employee: &str| -> Option<String> {
+        match &visible_names {
+            None => Some(employee.to_string()),
+            Some(names) if names.contains(employee) => Some(employee.to_string()),
+            Some(_) => None,
+        }
+    };
+
+    let data = build_report_data(
+        app_state,
+        ReportWindow {
+            from,
+            to,
+            interim: in_progress,
+            created_on: today,
+        },
+        &members,
+        &config,
+        language,
+        None,
+    )
+    .await?;
+
+    let mut rows = Vec::new();
+    let mut absence_count = 0;
+    for absence in data.absence_rows.into_iter().flatten() {
+        absence_count += 1;
+        rows.push(PayrollContentRow {
+            name: show_name(&absence.employee),
+            kind: "absence",
+            category: Some(absence.category),
+            from: Some(absence.from),
+            to: Some(absence.to),
+            days: absence.days,
+            minutes: None,
+            medical_certificate_required: absence.medical_certificate_required,
+        });
+    }
+    let mut people_with_hours = 0;
+    let mut minutes = 0;
+    for section in data.hours_sections {
+        for row in section.rows {
+            people_with_hours += 1;
+            minutes += row.minutes;
+            rows.push(PayrollContentRow {
+                name: show_name(&row.employee),
+                kind: "hours",
+                category: None,
+                from: None,
+                to: None,
+                days: row.work_days as f64,
+                minutes: Some(row.minutes),
+                medical_certificate_required: None,
+            });
+        }
+    }
+
+    Ok(PayrollContent {
+        enabled: true,
+        period,
+        period_label,
+        from,
+        to,
+        sent,
+        day_of_month: config.day_of_month,
+        in_progress,
+        absence_count,
+        people_with_hours,
+        minutes,
+        rows,
+    })
+}
+
+/// Build the Submissions status for the dashboard tile.
+///
+/// This tile answers "who has closed their month" and nothing else. It used to
+/// double as the payroll report's readiness display, but the report no longer
+/// waits on unhanded-in weeks (see `reports::month_export_readiness`), so the
+/// two questions came apart: an outstanding week is worth chasing, and is not
+/// a reason to hold a document. What the report will actually contain is a
+/// separate tile, [`build_content`].
+///
+/// It still covers the people [`payroll_members`] tracks — everybody the month
+/// concerns, minus administrators, minus anyone explicitly excluded, minus
+/// assistants who booked nothing at all and therefore have nothing to close.
+///
+/// `show_current_month` switches the tracked period from the previous month to
+/// the current, still-running one. It is the tile's transient "show this month"
+/// peek: a client-side, non-persistent choice, not a stored setting.
+pub async fn build_submission_status(
+    app_state: &AppState,
+    requester: &crate::middleware::auth::User,
+    language: &Language,
+    show_current_month: bool,
+) -> AppResult<SubmissionStatus> {
     let config = load_config(&app_state.pool).await?;
     let today = settings::app_today(&app_state.pool).await;
     let period = if show_current_month {
@@ -329,38 +518,15 @@ pub async fn build_status(
     let (from, to) = crate::background::schedule::period_bounds(&period)?;
 
     let period_label = crate::i18n::format_month(language, from.year(), from.month());
-    if !config.enabled {
-        // Nothing to show, and no reason to touch the queue: the card is
-        // hidden entirely while the payroll report is switched off.
-        return Ok(PayrollStatus {
-            enabled: false,
-            period,
-            period_label,
-            from,
-            to,
-            sent: false,
-            day_of_month: config.day_of_month,
-            total: 0,
-            ready: 0,
-            awaiting_approval: 0,
-            not_submitted: 0,
-            members: Vec::new(),
-        });
-    }
-
-    // Before the send day the period has not been queued yet; that counts as
-    // outstanding, so the card is already live from the 1st. See
-    // [`period_delivered`] for why this is derived from the queue.
-    let sent = period_delivered(&app_state.pool, &period).await?;
 
     // The tile counts everybody the month covers, including people who have
     // not booked anything yet — showing who still owes something is the whole
     // point of the card, so it never uses the snapshot's narrower filter.
     let members = payroll_members(app_state, from, to, &config.excluded_user_ids, false).await?;
-    // The tile's colours always require full approval, for every person —
-    // see the doc comment on `evaluate_members` for why this must not reuse
-    // the send path's role-conditional rule.
-    let evaluated = evaluate_members(app_state, &members, from, to, |_role| true).await?;
+    // The tile's colours always require full approval, for every person — see
+    // the doc comment on `evaluate_members` — and, unlike the payroll gate, a
+    // week nobody handed in is exactly what this tile is here to show.
+    let evaluated = evaluate_members(app_state, &members, from, to, |_role| true, true).await?;
 
     // Team leads only see the names of their own people; everybody else on the
     // tile is counted but anonymized.
@@ -379,14 +545,11 @@ pub async fn build_status(
         )
     };
 
-    let mut status = PayrollStatus {
-        enabled: true,
+    let mut status = SubmissionStatus {
         period,
         period_label,
         from,
         to,
-        sent,
-        day_of_month: config.day_of_month,
         total: evaluated.len(),
         ready: 0,
         awaiting_approval: 0,
@@ -403,7 +566,7 @@ pub async fn build_status(
         let visible = visible_ids
             .as_ref()
             .is_none_or(|ids| ids.contains(&member.user.id));
-        status.members.push(PayrollStatusMember {
+        status.members.push(SubmissionStatusMember {
             user_id: visible.then_some(member.user.id),
             name: visible.then(|| format!("{} {}", member.user.first_name, member.user.last_name)),
             status: value,
@@ -472,9 +635,6 @@ async fn status_for_member(
     // gate skipped: an open request is "submitted, awaiting approval" (amber),
     // but missing weeks outrank it (red).
     let submission_exempt = !crate::roles::has_submission_obligation(&user.role, user.weekly_hours);
-    // Same window the readiness gate used: while the month is still running,
-    // the week being worked counts and is not handed in until it is submitted.
-    let today = crate::services::settings::app_today(&app_state.pool).await;
     let weeks_in = crate::services::reports::all_weeks_submitted_for_month(
         &app_state.pool,
         user.id,
@@ -483,7 +643,6 @@ async fn status_for_member(
         user.start_date,
         submission_exempt,
         user.workdays_per_week,
-        to >= today,
     )
     .await?;
     Ok(if weeks_in {
@@ -529,6 +688,7 @@ pub async fn evaluate_members(
     from: NaiveDate,
     to: NaiveDate,
     require_full_approval: impl Fn(&str) -> bool,
+    require_week_submission: bool,
 ) -> AppResult<Vec<MemberReadiness>> {
     let mut evaluated = Vec::with_capacity(members.len());
     for member in members {
@@ -538,6 +698,7 @@ pub async fn evaluate_members(
             from,
             to,
             require_full_approval(&member.role),
+            require_week_submission,
         )
         .await?;
         evaluated.push(MemberReadiness {

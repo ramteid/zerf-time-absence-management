@@ -237,6 +237,9 @@ export function notificationTarget(notification, now = Date.now()) {
   if (
     notification.kind === "submission_reminder" ||
     notification.kind === "approval_reminder" ||
+    notification.kind === "month_end_submission_reminder" ||
+    notification.kind === "month_end_approval_reminder" ||
+    notification.kind === "payroll_report_blocked" ||
     notification.kind === "system_error"
   ) {
     return `/dashboard?${query}`;

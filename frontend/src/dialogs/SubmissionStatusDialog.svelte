@@ -3,7 +3,7 @@
   import Dialog from "../Dialog.svelte";
   import { go } from "../stores.js";
 
-  // Payload of GET /reports/payroll-status.
+  // Payload of GET /reports/submission-status.
   export let status;
   export let onClose;
 
@@ -36,10 +36,10 @@
   );
 </script>
 
-<Dialog title={$t("Payroll Report")} {onClose}>
+<Dialog title={$t("Submissions")} {onClose}>
   <svelte:fragment slot="title">
     <span class="flex-1">
-      {$t("Payroll Report")} · {status.period_label}
+      {$t("Submissions")} · {status.period_label}
     </span>
   </svelte:fragment>
 

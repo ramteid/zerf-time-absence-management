@@ -698,7 +698,6 @@ async fn report_export_gate_waits_for_pending_absence_decision() {
         user_start_date,
         false,
         1,
-        false,
     )
     .await
     .expect("check user-facing completeness while absence pending");
@@ -731,7 +730,6 @@ async fn report_export_gate_waits_for_pending_absence_decision() {
         user_start_date,
         false,
         1,
-        false,
     )
     .await
     .expect("check export gate while absence pending");
@@ -755,7 +753,6 @@ async fn report_export_gate_waits_for_pending_absence_decision() {
         user_start_date,
         false,
         1,
-        false,
     )
     .await
     .expect("check export gate after absence rejection");
@@ -820,7 +817,6 @@ async fn report_export_gate_ignores_pending_absence_outside_export_month() {
         user_start_date,
         false,
         5,
-        false,
     )
     .await
     .expect("check export gate with adjacent pending absence");
@@ -2294,6 +2290,72 @@ async fn report_counts_submitted_weeks_of_the_shown_period() {
     assert_eq!(
         report["weeks_submitted"], 0,
         "a week with nothing booked is not handed in"
+    );
+
+    app.cleanup().await;
+}
+
+
+/// The employee's own month view counts the week they are working: it belongs
+/// to this month, and handing it in is what settles it. Before the change this
+/// week was invisible here, so a month could read as complete while its last
+/// days had never been handed in.
+#[tokio::test]
+async fn the_month_report_counts_the_week_being_worked() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "running-week").await;
+    let lead = login_change_pw(&app, "lead-running-week@example.com", &lead_pw).await;
+
+    let today = reference_date();
+    let month = today.format("%Y-%m").to_string();
+    // Starting today leaves exactly one week of this month to judge: this one.
+    let (status, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "running-week@example.com",
+                "first_name": "Rita",
+                "last_name": "Running",
+                "role": "employee",
+                "weekly_hours": 39,
+                "start_date": today.format("%Y-%m-%d").to_string(),
+                "approver_ids": [lead_id],
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create employee: {body}");
+    let employee = login_change_pw(&app, "running-week@example.com", &temp_pw(&body)).await;
+
+    let (status, report) = employee
+        .get(&format!("/api/v1/reports/month?month={month}"))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        report["weeks_all_submitted"],
+        json!(false),
+        "nothing has been handed in for the week being worked: {report}"
+    );
+
+    let entry_id =
+        create_and_submit_entry(&employee, &today.format("%Y-%m-%d").to_string(), cat_id).await;
+    let (status, _) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [entry_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the day");
+
+    let (status, report) = employee
+        .get(&format!("/api/v1/reports/month?month={month}"))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        report["weeks_all_submitted"],
+        json!(true),
+        "handing the week in settles it, however many days it holds: {report}"
     );
 
     app.cleanup().await;
