@@ -4,7 +4,7 @@ version = "0.0.0"
 edition = "2021"
 
 [dependencies]
-axum = { version = "0.8", features = ["macros"] }
+axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "macros"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 tower = "0.5"
@@ -15,7 +15,6 @@ sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio",
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 argon2 = "0.5"
-password-hash = { version = "0.6", features = ["getrandom"] }
 rand = "0.10"
 rand_core = { version = "0.6", features = ["getrandom"] }
 subtle = "2"
@@ -29,12 +28,10 @@ csv = "1"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "smtp-transport", "builder", "hostname"] }
 pdf-writer = "0.15"
-flate2 = "1"
 
 [dev-dependencies]
-reqwest = { version = "0.13", features = ["json", "cookies"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "cookies"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "macros", "test-util"] }
-uuid = { version = "1", features = ["v4"] }
 testcontainers = "0.27"
 testcontainers-modules = { version = "0.15", features = ["postgres"] }
 
