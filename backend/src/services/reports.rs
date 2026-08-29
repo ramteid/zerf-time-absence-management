@@ -2167,6 +2167,26 @@ impl MonthExportReadiness {
     }
 }
 
+/// Which unfinished time entries hold an export back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnapprovedEntries {
+    /// None of them. The document does not print this person's hours, so no
+    /// state of theirs can change it.
+    NotRequired,
+    /// Anything unsettled: a draft, a row waiting for a decision, a rejection
+    /// nobody corrected. Every one of them is a booking that *exists*, which is
+    /// proof that the person worked in that week — and until it is approved,
+    /// those hours are missing from a document that counts only approved
+    /// minutes.
+    ///
+    /// This is deliberately about entries, never about weeks. A week with no
+    /// booking at all says nothing: an assistant has no target schedule and
+    /// works irregularly, so an empty week is far more likely to be a week they
+    /// did not work than one they forgot. Holding a report for that would mean
+    /// waiting for something that may never come.
+    AnyUnsettled,
+}
+
 /// Which undecided absence requests hold an export back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PendingAbsences {
@@ -2207,17 +2227,16 @@ pub enum PendingAbsences {
 /// undecided absence request, or data hidden before a start date — there,
 /// waiting demonstrably changes the document.
 ///
-/// `require_full_approval` additionally requires every time entry in the
-/// period to be approved, not merely submitted. The timesheet PDF export and
-/// the payroll report both need this — the PDF Total row and the payroll
-/// hours count only approved, crediting minutes, so a month that is only
-/// submitted would archive/report too few hours until an approver catches up.
+/// `unapproved` says which unfinished time entries block — see
+/// [`UnapprovedEntries`]. Both documents count only approved, crediting
+/// minutes, so an entry that is still waiting for a decision would make them
+/// report too few hours; they differ in whether a draft counts too.
 pub async fn month_export_readiness(
     pool: &crate::db::DatabasePool,
     user: &crate::repository::User,
     from: NaiveDate,
     to: NaiveDate,
-    require_full_approval: bool,
+    unapproved: UnapprovedEntries,
     require_week_submission: bool,
     pending_absences: PendingAbsences,
 ) -> AppResult<MonthExportReadiness> {
@@ -2293,11 +2312,15 @@ pub async fn month_export_readiness(
         }
     }
 
-    if require_full_approval
-        && reports_db
-            .has_unresolved_time_entries_in_range(user.id, from, judged_to)
-            .await?
-    {
+    let unfinished = match unapproved {
+        UnapprovedEntries::NotRequired => false,
+        UnapprovedEntries::AnyUnsettled => {
+            reports_db
+                .has_unresolved_time_entries_in_range(user.id, from, judged_to)
+                .await?
+        }
+    };
+    if unfinished {
         return Ok(MonthExportReadiness::UnapprovedTimeEntries);
     }
 

@@ -534,7 +534,8 @@ pub async fn build_submission_status(
         &members,
         from,
         to,
-        |_role| true,
+        // Closing a month means nothing of it is left open, drafts included.
+        |_role| crate::services::reports::UnapprovedEntries::AnyUnsettled,
         true,
         crate::services::reports::PendingAbsences::Any,
     )
@@ -699,7 +700,7 @@ pub async fn evaluate_members(
     members: &[User],
     from: NaiveDate,
     to: NaiveDate,
-    require_full_approval: impl Fn(&str) -> bool,
+    unapproved: impl Fn(&str) -> crate::services::reports::UnapprovedEntries,
     require_week_submission: bool,
     pending_absences: crate::services::reports::PendingAbsences,
 ) -> AppResult<Vec<MemberReadiness>> {
@@ -710,7 +711,7 @@ pub async fn evaluate_members(
             member,
             from,
             to,
-            require_full_approval(&member.role),
+            unapproved(&member.role),
             require_week_submission,
             pending_absences,
         )

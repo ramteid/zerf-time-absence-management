@@ -626,7 +626,7 @@ async fn payroll_report_never_reports_missing_submissions_as_a_technical_error()
             &assistant_user,
             from,
             to,
-            false,
+            zerf::services::reports::UnapprovedEntries::NotRequired,
             true,
             zerf::services::reports::PendingAbsences::Any,
         )
@@ -2286,7 +2286,8 @@ async fn only_provable_gaps_hold_the_payroll_report_back() {
 
     let pool = app.state.pool.clone();
     let users = app.state.db.users.clone();
-    let readiness_of = move |user_id: i64, require_full_approval: bool| {
+    let readiness_of = move |user_id: i64,
+                             unapproved: zerf::services::reports::UnapprovedEntries| {
         let pool = pool.clone();
         let users = users.clone();
         async move {
@@ -2300,7 +2301,7 @@ async fn only_provable_gaps_hold_the_payroll_report_back() {
                 &user,
                 from,
                 to,
-                require_full_approval,
+                unapproved,
                 false,
                 zerf::services::reports::PendingAbsences::PayrollRelevant,
             )
@@ -2312,7 +2313,9 @@ async fn only_provable_gaps_hold_the_payroll_report_back() {
     // The employee booked nothing at all in the reported month. Their hours are
     // not printed anyway, so nothing about the document is missing.
     assert!(
-        readiness_of(emp_id, false).await.is_ready(),
+        readiness_of(emp_id, zerf::services::reports::UnapprovedEntries::NotRequired)
+            .await
+            .is_ready(),
         "an unhanded-in month must not hold the report back"
     );
 
@@ -2320,8 +2323,10 @@ async fn only_provable_gaps_hold_the_payroll_report_back() {
     let day = (from + Duration::days(9)).format("%Y-%m-%d").to_string();
     let entry_id = create_and_submit_entry(&assistant, &day, cat_id).await;
     assert!(
-        !readiness_of(assistant_id, true).await.is_ready(),
-        "hours that exist but are not approved are provably missing from the report"
+        !readiness_of(assistant_id, zerf::services::reports::UnapprovedEntries::AnyUnsettled)
+            .await
+            .is_ready(),
+        "a booking that exists and is not approved is proof of hours the report would miss"
     );
 
     let (status, _) = lead
@@ -2332,7 +2337,9 @@ async fn only_provable_gaps_hold_the_payroll_report_back() {
         .await;
     assert_eq!(status, StatusCode::OK, "approve the assistant's day");
     assert!(
-        readiness_of(assistant_id, true).await.is_ready(),
+        readiness_of(assistant_id, zerf::services::reports::UnapprovedEntries::AnyUnsettled)
+            .await
+            .is_ready(),
         "once decided, the month is final for them"
     );
 
@@ -2354,7 +2361,9 @@ async fn only_provable_gaps_hold_the_payroll_report_back() {
         .await
         .expect("pending holiday request");
     assert!(
-        readiness_of(emp_id, false).await.is_ready(),
+        readiness_of(emp_id, zerf::services::reports::UnapprovedEntries::NotRequired)
+            .await
+            .is_ready(),
         "an undecided holiday request is not in the report and must not hold it"
     );
 
@@ -2375,7 +2384,9 @@ async fn only_provable_gaps_hold_the_payroll_report_back() {
         .await
         .expect("pending sick note");
     assert!(
-        !readiness_of(emp_id, false).await.is_ready(),
+        !readiness_of(emp_id, zerf::services::reports::UnapprovedEntries::NotRequired)
+            .await
+            .is_ready(),
         "an undecided sick note changes the document and has to be waited for"
     );
 
@@ -2396,7 +2407,9 @@ async fn only_provable_gaps_hold_the_payroll_report_back() {
         .await
         .expect("assistant sick note");
     assert!(
-        readiness_of(assistant_id, true).await.is_ready(),
+        readiness_of(assistant_id, zerf::services::reports::UnapprovedEntries::AnyUnsettled)
+            .await
+            .is_ready(),
         "an assistant's absence is not in the report and must not hold it"
     );
 

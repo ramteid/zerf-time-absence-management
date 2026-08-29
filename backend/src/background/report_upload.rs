@@ -32,6 +32,7 @@ use crate::services::{
     nextcloud,
     reports::{
         build_timesheet_section, month_export_readiness, MonthExportReadiness, PendingAbsences,
+        UnapprovedEntries,
     },
     settings,
     users::repo_user_to_auth_user,
@@ -244,7 +245,8 @@ async fn process_one_entry(
         &user,
         from,
         to,
-        true,
+        // The archive is this person's whole month, so a draft in it is a hole.
+        UnapprovedEntries::AnyUnsettled,
         true,
         // The archive prints every absence, so any undecided request would
         // change it.

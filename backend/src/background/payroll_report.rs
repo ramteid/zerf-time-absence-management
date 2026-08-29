@@ -404,7 +404,15 @@ async fn process_period(
                 &members,
                 from,
                 to,
-                |role| config.includes_hours_for(role),
+                |role| {
+                    if config.includes_hours_for(role) {
+                        // A booking that exists but is not approved is proof of
+                        // work whose hours the document would be missing.
+                        crate::services::reports::UnapprovedEntries::AnyUnsettled
+                    } else {
+                        crate::services::reports::UnapprovedEntries::NotRequired
+                    }
+                },
                 false,
                 // Only what this document would actually print.
                 crate::services::reports::PendingAbsences::PayrollRelevant,
