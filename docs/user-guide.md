@@ -1983,6 +1983,11 @@ the following report no longer lists it. Nothing is carried out of a month whose
 own report is still outstanding — that report is still coming and will contain
 the day itself.
 
+Only days whose hours the report actually prints are carried: assistants'
+always, everybody else's when *List employees' working hours* is switched on. A
+day that no report prints simply stays outstanding, so if you switch that setting
+on later, the days recorded since are still there to be reported.
+
 This covers days that were newly recorded. Changing a day that a report already
 contained is not carried over — if that happens, tell the payroll accountant
 directly.
