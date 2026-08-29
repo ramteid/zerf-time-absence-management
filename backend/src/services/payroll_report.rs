@@ -156,13 +156,16 @@ pub async fn payroll_members(
     Ok(members
         .into_iter()
         .filter(|member| {
-            let needs_recorded_time =
-                everyone_needs_recorded_time || is_assistant_role(&member.role);
+            let is_assistant = is_assistant_role(&member.role);
+            let needs_recorded_time = everyone_needs_recorded_time || is_assistant;
+            // An absence only makes somebody relevant when the report would
+            // print it, which for an assistant it never does — they are paid by
+            // the hour, so only recorded time can bring them in.
+            let has_relevant_data = users_with_entries.contains(&member.id)
+                || (!is_assistant && users_with_payroll_absences.contains(&member.id));
             !crate::roles::is_admin_role(&member.role)
                 && !excluded_user_ids.contains(&member.id)
-                && (!needs_recorded_time
-                    || users_with_entries.contains(&member.id)
-                    || users_with_payroll_absences.contains(&member.id))
+                && (!needs_recorded_time || has_relevant_data)
         })
         .collect())
 }
