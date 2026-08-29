@@ -252,7 +252,16 @@ pub struct CarriedDays {
     /// The difference matters for a month that has already gone out: asking the
     /// first question about it would list days booked *since* the send as
     /// though the tax office had received them, when they are in fact still
-    /// waiting for the next report.
+    /// waiting for the next report. `Some(period)` also switches the *regular*
+    /// hours sections from a live recompute to reading back the same mark
+    /// (`sent_hours_rows`) for exactly this reason — the hours, not only the
+    /// catch-up rows, must describe what was mailed, not the entries' current
+    /// state.
+    ///
+    /// Absence rows have no equivalent: there is no marker on `absences`, so a
+    /// sick note approved after a month's send still inflates that month's
+    /// card. Fixing that needs its own marker on `absences` and is out of
+    /// scope for the entry-only carry-over this type exists for.
     pub reported_as: Option<String>,
 }
 
@@ -1017,26 +1026,38 @@ pub async fn build_report_data(
         )
     };
 
-    let mut hours_sections = Vec::new();
-    if config.include_assistant_hours {
-        hours_sections.push(PayrollHoursSection {
-            heading_key: ASSISTANT_HOURS_HEADING_KEY,
-            // Assistants are paid by the hour, so an empty month is never
-            // their row — in any mode.
-            rows: build_hours_rows(app_state, from, to, members, true, true).await?,
-        });
-    }
-    if config.include_employee_hours {
-        hours_sections.push(PayrollHoursSection {
-            heading_key: EMPLOYEE_HOURS_HEADING_KEY,
-            // Employees are salaried, so "worked no days" is real
-            // information for a finished month and their zero row stays. In an
-            // interim look at a month still running it means nothing yet —
-            // usually just an unapproved current week — so it is dropped, which
-            // also keeps `people_in_report` equal to what the PDF prints.
-            rows: build_hours_rows(app_state, from, to, members, false, interim).await?,
-        });
-    }
+    // A delivered month reads its hours back from what its own send actually
+    // marked (see `sent_hours_rows`) rather than recomputing live — otherwise
+    // an entry approved afterwards for a date inside that month would inflate
+    // this section as though it had been mailed, while it is in fact still
+    // waiting for a future report to carry it, and would end up counted twice
+    // on the dashboard.
+    let hours_sections =
+        if let Some(period) = carried.as_ref().and_then(|c| c.reported_as.as_deref()) {
+            sent_hours_rows(app_state, period, from, to, members, config).await?
+        } else {
+            let mut hours_sections = Vec::new();
+            if config.include_assistant_hours {
+                hours_sections.push(PayrollHoursSection {
+                    heading_key: ASSISTANT_HOURS_HEADING_KEY,
+                    // Assistants are paid by the hour, so an empty month is never
+                    // their row — in any mode.
+                    rows: build_hours_rows(app_state, from, to, members, true, true).await?,
+                });
+            }
+            if config.include_employee_hours {
+                hours_sections.push(PayrollHoursSection {
+                    heading_key: EMPLOYEE_HOURS_HEADING_KEY,
+                    // Employees are salaried, so "worked no days" is real
+                    // information for a finished month and their zero row stays. In an
+                    // interim look at a month still running it means nothing yet —
+                    // usually just an unapproved current week — so it is dropped, which
+                    // also keeps `people_in_report` equal to what the PDF prints.
+                    rows: build_hours_rows(app_state, from, to, members, false, interim).await?,
+                });
+            }
+            hours_sections
+        };
 
     // Days from earlier months whose own report has already gone out. They are
     // built for every mode, so the dashboard card shows exactly what the PDF
@@ -1093,23 +1114,51 @@ async fn build_late_entry_rows(
         .reports
         .carried_time_entries_before(carried.reported_as.as_deref(), carried.before)
         .await?;
+    let net_by_day = net_minutes_by_day(app_state, entries, &printed).await?;
 
-    // Group per person and day first: the automatic break deduction is a
-    // property of the day, not of a single booking.
-    let mut minutes_by_day: std::collections::HashMap<
-        (i64, NaiveDate),
-        Vec<(NaiveTime, NaiveTime)>,
-    > = std::collections::HashMap::new();
+    let mut rows: Vec<PayrollLateEntryRow> = net_by_day
+        .into_iter()
+        .filter(|(_, minutes)| *minutes > 0)
+        .map(|((user_id, date), minutes)| PayrollLateEntryRow {
+            employee: employee_name(printed[&user_id]),
+            date,
+            minutes,
+        })
+        .collect();
+    // Person first, then chronological, so one person's catch-up days stay
+    // together — the order the reader books them in.
+    rows.sort_by(|left, right| {
+        left.employee
+            .cmp(&right.employee)
+            .then_with(|| left.date.cmp(&right.date))
+    });
+    Ok(rows)
+}
+
+/// Net worked minutes per person and day, from a fixed list of entries rather
+/// than a live status query — the auto-break deduction shared by the catch-up
+/// section and a delivered month's own hours (see [`sent_hours_rows`]).
+///
+/// `eligible` restricts which user IDs are worth grouping at all; an entry for
+/// anyone else is dropped before it is even bucketed by day. Days before a
+/// person's start date are dropped too, belt and braces — the queries that
+/// feed this already exclude them, and must, or the marking and the reading
+/// would disagree.
+async fn net_minutes_by_day(
+    app_state: &AppState,
+    entries: Vec<(i64, NaiveDate, String, String)>,
+    eligible: &std::collections::HashMap<i64, &User>,
+) -> AppResult<std::collections::HashMap<(i64, NaiveDate), i64>> {
+    let mut times_by_day: std::collections::HashMap<(i64, NaiveDate), Vec<(NaiveTime, NaiveTime)>> =
+        std::collections::HashMap::new();
     for (user_id, entry_date, start_time, end_time) in entries {
-        let Some(member) = printed.get(&user_id) else {
+        let Some(member) = eligible.get(&user_id) else {
             continue;
         };
-        // Belt and braces: the query already drops days before the start date,
-        // and it must, or the marking and the reading would disagree.
         if entry_date < member.start_date {
             continue;
         }
-        minutes_by_day
+        times_by_day
             .entry((user_id, entry_date))
             .or_default()
             .push((
@@ -1119,38 +1168,107 @@ async fn build_late_entry_rows(
     }
 
     let auto_break = crate::services::reports::load_auto_break_config(&app_state.pool).await?;
-    let mut rows: Vec<PayrollLateEntryRow> = Vec::new();
-    for ((user_id, date), times) in minutes_by_day {
+    let mut net = std::collections::HashMap::new();
+    for (key, times) in times_by_day {
         let raw_minutes: i64 = times
             .iter()
             .map(|(start, end)| (*end - *start).num_minutes())
             .sum();
-        // The break is computed over the late bookings alone. On the rare day
-        // that already had reported hours this deducts a second break, which
-        // errs downwards — the alternative, restating the whole day, would
-        // change hours the payroll accountant has already filed.
         let deduction = auto_break
             .as_deref()
             .map(|rules| crate::time_calc::compute_day_auto_break(&times, rules))
             .unwrap_or(0);
-        let minutes = (raw_minutes - deduction).max(0);
+        net.insert(key, (raw_minutes - deduction).max(0));
+    }
+    Ok(net)
+}
+
+/// The hours sections of an already-delivered month, read back from what its
+/// own send actually marked rather than recomputed live.
+///
+/// `build_hours_rows` (the general path) always reflects the current, live
+/// state of the entries in range — correct for a month that has not gone out
+/// yet, since that is exactly what a real send right now would produce. For a
+/// month that has already gone out, "live" is the wrong answer: a new entry
+/// approved afterwards for a date inside that month would inflate this
+/// section as though it had been mailed, while it is in fact still waiting to
+/// be carried into a *future* report — showing it here as well would count it
+/// twice on the dashboard, once under a month it never reached.
+///
+/// Every entry dated inside the period was marked with that period at send
+/// time regardless of status (see `TimeEntryDb::mark_payroll_reported`), so
+/// filtering by the mark is exactly "what was there when it was sent".
+async fn sent_hours_rows(
+    app_state: &AppState,
+    period: &str,
+    from: NaiveDate,
+    to: NaiveDate,
+    members: &[User],
+    config: &PayrollReportConfig,
+) -> AppResult<Vec<PayrollHoursSection>> {
+    let printed: std::collections::HashMap<i64, &User> = members
+        .iter()
+        .filter(|member| config.includes_hours_for(&member.role))
+        .map(|member| (member.id, member))
+        .collect();
+    if printed.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let entries = app_state
+        .db
+        .reports
+        .time_entries_reported_in_range(period, from, to)
+        .await?;
+    let net_by_day = net_minutes_by_day(app_state, entries, &printed).await?;
+
+    let mut totals: std::collections::HashMap<i64, (i64, i64)> = std::collections::HashMap::new();
+    for ((user_id, _date), minutes) in net_by_day {
         if minutes <= 0 {
             continue;
         }
-        rows.push(PayrollLateEntryRow {
-            employee: employee_name(printed[&user_id]),
-            date,
-            minutes,
-        });
+        let entry = totals.entry(user_id).or_default();
+        entry.0 += 1;
+        entry.1 += minutes;
     }
-    // Person first, then chronological, so one person's catch-up days stay
-    // together — the order the reader books them in.
-    rows.sort_by(|left, right| {
-        left.employee
-            .cmp(&right.employee)
-            .then_with(|| left.date.cmp(&right.date))
-    });
-    Ok(rows)
+
+    let mut sections = Vec::new();
+    for (heading_key, assistants) in [
+        (ASSISTANT_HOURS_HEADING_KEY, true),
+        (EMPLOYEE_HOURS_HEADING_KEY, false),
+    ] {
+        let include = if assistants {
+            config.include_assistant_hours
+        } else {
+            config.include_employee_hours
+        };
+        if !include {
+            continue;
+        }
+        // A sent month is by definition finished, never a running-month
+        // snapshot, so this mirrors `build_hours_rows`'s own rule exactly:
+        // an assistant's empty month is never a row, an employee's zero row
+        // is real information once the month is over and stays.
+        let drop_zero_rows = assistants;
+        let mut rows: Vec<PayrollHoursRow> = printed
+            .iter()
+            .filter(|(_, member)| is_assistant_role(&member.role) == assistants)
+            .filter_map(|(id, member)| {
+                let (work_days, minutes) = totals.get(id).copied().unwrap_or((0, 0));
+                if drop_zero_rows && work_days == 0 && minutes == 0 {
+                    return None;
+                }
+                Some(PayrollHoursRow {
+                    employee: employee_name(member),
+                    work_days,
+                    minutes,
+                })
+            })
+            .collect();
+        rows.sort_by(|left, right| left.employee.cmp(&right.employee));
+        sections.push(PayrollHoursSection { heading_key, rows });
+    }
+    Ok(sections)
 }
 
 /// One row per absence period of a payroll-relevant category, clamped to the

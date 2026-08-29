@@ -240,7 +240,17 @@ use one value. `CarriedDays::reported_as` picks the direction: `None` asks what 
 report produced now would carry, `Some(period)` asks what that period's send
 actually carried, read back from the mark. The dashboard card uses the second
 form for a month already delivered — asking the first would list days booked
-*since* the send under "what this month's report contained". `payroll_members` takes it too, because
+*since* the send under "what this month's report contained". For the same
+reason `reported_as = Some(period)` also switches the regular hours sections
+away from the live recompute every other window uses
+(`payroll_report::sent_hours_rows`, reading `time_entries_reported_in_range`):
+otherwise a brand-new entry approved for a date *inside* an already-sent month
+would silently inflate that month's hours as if it had been mailed, while
+independently reappearing as a catch-up row on the *next* month's card — the
+same hours shown twice, under two different months. Absence rows have no
+equivalent fix: `absences` carries no marker, so a sick note approved after
+the send still inflates a delivered month's card. That gap is deliberate and
+unrelated to what this feature was asked to solve — entries only. `payroll_members` takes it too, because
 somebody who worked only in the closed month has no activity in the month now
 being reported (and may since have been deactivated, hence
 `users_with_unreported_time_entries_before` returning whole user rows). The

@@ -3049,3 +3049,198 @@ async fn a_sent_month_shows_the_days_it_carried_and_not_the_ones_since() {
 
     app.cleanup().await;
 }
+
+/// A delivered month's card must show what its own report actually printed,
+/// not the live state of the entries: a new entry approved afterwards for a
+/// date inside that month is not in the mailed PDF and belongs to a future
+/// report, so it must not inflate this month's hours or appear twice across
+/// the two dashboard cards.
+#[tokio::test]
+async fn a_sent_months_hours_do_not_grow_after_the_fact() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    configure_unreachable_smtp(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "sent-stable").await;
+    let lead = login_change_pw(&app, "lead-sent-stable@example.com", &lead_pw).await;
+    let (_assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "sent-stable").await;
+    let assistant = login_change_pw(&app, "aushilfe-sent-stable@example.com", &assistant_pw).await;
+
+    let (status, _) = admin
+        .put(
+            "/api/v1/settings/payroll-report",
+            &json!({
+                "payroll_report_enabled": true,
+                "payroll_report_recipients": ["payroll@example.com"],
+                "payroll_report_day_of_month": 5,
+                "payroll_report_include_assistant_hours": true,
+                "payroll_report_include_employee_hours": false,
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let today = zerf::services::settings::app_today(&app.state.pool).await;
+    let period = zerf::background::schedule::previous_period(today);
+    let (from, to) = zerf::background::schedule::period_bounds(&period).expect("bounds");
+
+    // One approved day, present when the month is (simulated as) sent.
+    let day1 = from + Duration::days(2);
+    let id1 =
+        create_and_submit_entry(&assistant, &day1.format("%Y-%m-%d").to_string(), cat_id).await;
+    let (status, _) = lead
+        .post("/api/v1/time-entries/batch-approve", &json!({"ids":[id1]}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the original day");
+
+    app.state
+        .db
+        .time_entries
+        .mark_payroll_reported(&period, from, to, None, &[])
+        .await
+        .expect("mark what the send accounted for");
+    app.state
+        .db
+        .settings
+        .save_setting(
+            zerf::services::settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+            &period,
+        )
+        .await
+        .expect("record the queued period");
+
+    let (status, body) = lead.get("/api/v1/reports/payroll-content").await;
+    assert_eq!(status, StatusCode::OK, "payroll content: {body}");
+    assert_eq!(body["sent"], true, "the month has been delivered");
+    assert_eq!(
+        body["minutes"], 240,
+        "exactly the one day that was there at send time"
+    );
+
+    // A second day, approved only after the send — for a date inside the
+    // SAME already-reported month.
+    let day2 = from + Duration::days(3);
+    let id2 =
+        create_and_submit_entry(&assistant, &day2.format("%Y-%m-%d").to_string(), cat_id).await;
+    let (status, _) = lead
+        .post("/api/v1/time-entries/batch-approve", &json!({"ids":[id2]}))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "approve the day booked after the send"
+    );
+
+    let (status, body) = lead.get("/api/v1/reports/payroll-content").await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "payroll content after the late approval: {body}"
+    );
+    assert_eq!(
+        body["minutes"], 240,
+        "a day approved after the send must not inflate what the sent report is shown to contain"
+    );
+    let hours_rows: Vec<&serde_json::Value> = body["rows"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .filter(|row| row["kind"] == "hours")
+        .collect();
+    assert_eq!(
+        hours_rows.len(),
+        1,
+        "one hours row for the one day the report actually sent"
+    );
+
+    app.cleanup().await;
+}
+
+/// The zero-row rule for a finished month must survive the switch to reading
+/// a sent month back from its mark: an employee who did nothing in an
+/// already-delivered month is still a real, printed "0 days" line once
+/// employee hours are switched on, exactly as it would have been at send
+/// time — the marker-based read must not silently drop people who have no
+/// entry to key off of.
+#[tokio::test]
+async fn a_sent_months_employee_zero_row_survives_the_marker_based_read() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    configure_unreachable_smtp(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "sent-zero").await;
+    let lead = login_change_pw(&app, "lead-sent-zero@example.com", &lead_pw).await;
+    let (_assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "sent-zero").await;
+    let assistant = login_change_pw(&app, "aushilfe-sent-zero@example.com", &assistant_pw).await;
+
+    let (status, _) = admin
+        .put(
+            "/api/v1/settings/payroll-report",
+            &json!({
+                "payroll_report_enabled": true,
+                "payroll_report_recipients": ["payroll@example.com"],
+                "payroll_report_day_of_month": 5,
+                "payroll_report_include_assistant_hours": true,
+                "payroll_report_include_employee_hours": true,
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let today = zerf::services::settings::app_today(&app.state.pool).await;
+    let period = zerf::background::schedule::previous_period(today);
+    let (from, to) = zerf::background::schedule::period_bounds(&period).expect("bounds");
+
+    // The assistant books something so the month covers somebody; the
+    // employee books nothing at all.
+    let day1 = from + Duration::days(2);
+    let id1 =
+        create_and_submit_entry(&assistant, &day1.format("%Y-%m-%d").to_string(), cat_id).await;
+    let (status, _) = lead
+        .post("/api/v1/time-entries/batch-approve", &json!({"ids":[id1]}))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    app.state
+        .db
+        .time_entries
+        .mark_payroll_reported(&period, from, to, None, &[])
+        .await
+        .expect("mark the reported month");
+    app.state
+        .db
+        .settings
+        .save_setting(
+            zerf::services::settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+            &period,
+        )
+        .await
+        .expect("record the queued period");
+
+    let (status, body) = lead.get("/api/v1/reports/payroll-content").await;
+    assert_eq!(status, StatusCode::OK, "payroll content: {body}");
+    assert_eq!(body["sent"], true);
+    let hours_rows: Vec<&serde_json::Value> = body["rows"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .filter(|row| row["kind"] == "hours")
+        .collect();
+    // The assistant's worked day, plus a zero row each for the employee and
+    // the team lead — both non-assistants, both booked nothing.
+    assert_eq!(
+        hours_rows.len(),
+        3,
+        "one worked row and two zero rows: {hours_rows:?}"
+    );
+    let zero_rows = hours_rows
+        .iter()
+        .filter(|row| row["days"].as_f64() == Some(0.0) && row["minutes"].as_i64() == Some(0))
+        .count();
+    assert_eq!(
+        zero_rows, 2,
+        "the employee and the lead, both with no bookings, must still print as 0-day rows: {hours_rows:?}"
+    );
+
+    app.cleanup().await;
+}

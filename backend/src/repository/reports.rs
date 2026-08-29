@@ -465,6 +465,37 @@ impl ReportDb {
         .await?)
     }
 
+    /// Approved, work-crediting time entries dated inside `[from, to]` that
+    /// were marked as accounted for by `period`'s report.
+    ///
+    /// A delivered month's dashboard card uses this instead of a live
+    /// recomputation: every entry dated inside the period was marked at send
+    /// time regardless of status (see `TimeEntryDb::mark_payroll_reported`),
+    /// so an entry with this exact mark is provably one the sent document
+    /// actually had. A new entry approved for the same dates afterwards has no
+    /// mark and is therefore correctly left out — it belongs to whichever
+    /// future report ends up carrying it, not to this one's history.
+    pub async fn time_entries_reported_in_range(
+        &self,
+        period: &str,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<Vec<(i64, NaiveDate, String, String)>> {
+        Ok(sqlx::query_as(
+            "SELECT z.user_id, z.entry_date, z.start_time, z.end_time FROM time_entries z \
+             JOIN categories c ON c.id = z.category_id \
+             WHERE z.payroll_reported_period = $1 \
+             AND z.entry_date BETWEEN $2 AND $3 \
+             AND z.status='approved' AND c.counts_as_work \
+             ORDER BY z.user_id, z.entry_date, z.start_time",
+        )
+        .bind(period)
+        .bind(from)
+        .bind(to)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     /// User IDs with payroll-relevant absences (auto_approve_past OR unpaid) in period.
     pub async fn user_ids_with_payroll_absences_in_range(
         &self,
