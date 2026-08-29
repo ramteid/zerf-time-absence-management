@@ -1969,6 +1969,27 @@ What it prints:
 **Assistants' absences never appear.** They are paid for the hours they work, so
 continued pay does not apply to them; only their hours are payroll's business.
 
+#### Days booked after the report was sent
+
+Sometimes a day is recorded only after the report for its month has already gone
+out — an assistant remembers a shift a week too late, or an approval comes
+through afterwards. The month is closed by then, so nothing would ever pay those
+hours.
+
+They are therefore carried into the next report, in a separate section headed
+**Booked later**, each day under the date it was actually worked. The section
+appears only when there is something in it, and a day is carried exactly once:
+the following report no longer lists it. Nothing is carried out of a month whose
+own report is still outstanding — that report is still coming and will contain
+the day itself.
+
+This covers days that were newly recorded. Changing a day that a report already
+contained is not carried over — if that happens, tell the payroll accountant
+directly.
+
+The **Payroll Report** card on the dashboard shows these days the same way, so
+you can see before the send what the next report will carry.
+
 #### When it is sent
 
 The schedule works like the Nextcloud timesheet export. On the configured day the

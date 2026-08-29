@@ -205,6 +205,34 @@ changes:
    its document is one person's whole month.)
 3. Content stored before a start date, which every renderer hides.
 
+**Days booked after their month was reported.** A day recorded only after its
+month's report went out belongs to no document at all, so the next report carries
+it in its own section (`PayrollLateEntryRow`, "Booked later"), under its real
+date. `time_entries.payroll_reported_period` is the record of what a report
+accounted for: a *scheduled* send marks every entry dated in the period plus the
+carried days it printed (`TimeEntryDb::mark_payroll_reported`), and the two
+settle-without-sending branches mark too, so a settled month can never resurface.
+If marking fails the period is left queued on purpose: a second copy of the same
+month is recognisable, whereas the same hours reappearing a month later under an
+older date read like new work. Manual sends never mark — the scheduled copy is
+still to come. An approved,
+work-crediting entry with no mark is therefore provably a late booking. Migration
+044 backfills every pre-existing entry with its own month, so switching the
+feature on cannot dump history into the next report.
+
+`services::payroll_report::carry_over_boundary` decides how far back that
+reaches: the earlier of the reported month's start and the start of the oldest
+month still in `payroll_report_queue`. A month whose own report is still owed is
+never raided — that report will print those days itself. The boundary travels in
+`ReportWindow::carry_over_before`, so the member set, the document and the
+marking afterwards all use one value. `payroll_members` takes it too, because
+somebody who worked only in the closed month has no activity in the month now
+being reported (and may since have been deactivated, hence
+`users_with_unreported_time_entries_before` returning whole user rows). The
+Submissions tile passes `None`: a late day from a closed month says nothing about
+whether *this* month is closed. Absences are deliberately out of scope — an
+assistant's absence never appears in the report at all.
+
 `require_week_submission` is `false` for payroll and `true` for the archive. An
 unhanded-in week proves nothing here: an assistant with no target schedule may
 simply not have worked it, and a salaried employee's hours are not in the
@@ -277,7 +305,7 @@ sends a real message and must not be blocked by unrelated breaker state.
 | `sessions` | Hashed session tokens, CSRF tokens, activity timestamps |
 | `login_attempts` | Failed login tracking for rate-limit lockout |
 | `categories` | Work categories |
-| `time_entries` | Daily entries (date, start/end, category, status) |
+| `time_entries` | Daily entries (date, start/end, category, status, `payroll_reported_period`) |
 | `flextime_adjustments` | Dated, signed changes to a flextime balance that no worked time explains (carry-in balance, admin corrections) |
 | `absences` | Absence requests with status workflow |
 | `holidays` | Public holidays (auto-fetched or manual) |
