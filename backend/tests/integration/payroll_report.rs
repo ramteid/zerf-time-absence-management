@@ -2754,10 +2754,12 @@ async fn a_month_still_awaiting_its_own_report_is_not_carried_into_the_next() {
     let carried = payroll_report::carry_over_boundary(&app.state.pool, next_from)
         .await
         .expect("carry-over boundary");
+    // The owed month is skipped by name, not by lowering the upper bound —
+    // see `CarriedDays::owed_periods`.
     assert_eq!(
         carried.as_ref().map(|c| c.before),
-        Some(from),
-        "nothing from the month still owed may be carried"
+        Some(next_from),
+        "the bound is the reported month's own start"
     );
 
     let members = payroll_report::payroll_members(
