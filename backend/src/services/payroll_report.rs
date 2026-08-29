@@ -123,11 +123,11 @@ pub async fn load_config(pool: &crate::db::DatabasePool) -> AppResult<PayrollRep
 /// true: an employee with an empty month still owes a declaration, so they
 /// stay in and the default (`false`) keeps them.
 ///
-/// `carry_over_before` additionally admits people who booked a day of an
-/// already-reported month too late for that month's report (see
-/// [`carry_over_boundary`]). `None` asks the plain question "who does this
-/// period concern" — which is what the Submissions tile wants, since a late
-/// booking from a closed month says nothing about whether this month is closed.
+/// `carried` additionally admits people who booked a day of an already-reported
+/// month too late for that month's report (see [`CarriedDays`]). `None` asks
+/// the plain question "who does this period concern" — which is what the
+/// Submissions tile wants, since a late booking from a closed month says
+/// nothing about whether this month is closed.
 ///
 /// Report content, the readiness gate and the dashboard tile all go through
 /// this one filter, so what the tile counts is exactly what the PDF contains.
@@ -137,7 +137,7 @@ pub async fn payroll_members(
     to: NaiveDate,
     excluded_user_ids: &[i64],
     everyone_needs_recorded_time: bool,
-    carry_over_before: Option<NaiveDate>,
+    carried: Option<&CarriedDays>,
 ) -> AppResult<Vec<User>> {
     // Neither set is role-filtered — they cover every user with activity in
     // the period, which is what lets the same lookup serve the assistant-only
@@ -157,12 +157,15 @@ pub async fn payroll_members(
     // Somebody who worked only in an already-reported month and booked it late
     // has no activity in this period at all, so nothing else would bring them
     // in — and the hours the report exists to carry would be dropped again.
-    let late_members = match carry_over_before {
-        Some(before) => {
+    let late_members = match carried {
+        Some(carried) => {
             app_state
                 .db
                 .reports
-                .users_with_unreported_time_entries_before(before)
+                .users_with_carried_time_entries_before(
+                    carried.reported_as.as_deref(),
+                    carried.before,
+                )
                 .await?
         }
         None => Vec::new(),
@@ -233,6 +236,24 @@ pub async fn period_delivered(pool: &crate::db::DatabasePool, period: &str) -> A
         .iter()
         .any(|queued| queued == period);
     Ok(!still_queued)
+}
+
+/// Which days from earlier months a report shows in its catch-up section.
+#[derive(Debug, Clone)]
+pub struct CarriedDays {
+    /// Only days before this date. Always the reported month's own start, and
+    /// never reaching into a month whose own report is still owed — see
+    /// [`carry_over_boundary`].
+    pub before: NaiveDate,
+    /// `None` asks what a report produced now would carry. `Some(period)` asks
+    /// what that period's report actually carried, read back from the mark it
+    /// left.
+    ///
+    /// The difference matters for a month that has already gone out: asking the
+    /// first question about it would list days booked *since* the send as
+    /// though the tax office had received them, when they are in fact still
+    /// waiting for the next report.
+    pub reported_as: Option<String>,
 }
 
 /// The first day whose hours a *later* report still has to carry.
@@ -463,16 +484,33 @@ pub async fn build_content(
     }
 
     let sent = period_delivered(&app_state.pool, &period).await?;
-    // One boundary for the member set and the document alike, so the tile
-    // cannot show a carried day the report would not print.
-    let carry_over_before = carry_over_boundary(&app_state.pool, from).await?;
+    // One description of the carried days for the member set and the document
+    // alike, so the tile cannot show a day the report would not print.
+    //
+    // For a month that has already gone out the question is what its report
+    // *did* carry, not what a report assembled today would: a day booked since
+    // the send belongs to the next report, and showing it here under "what this
+    // month's report contained" would say the tax office already has it.
+    let carried = if sent {
+        Some(CarriedDays {
+            before: from,
+            reported_as: Some(period.clone()),
+        })
+    } else {
+        carry_over_boundary(&app_state.pool, from)
+            .await?
+            .map(|before| CarriedDays {
+                before,
+                reported_as: None,
+            })
+    };
     let members = payroll_members(
         app_state,
         from,
         to,
         &config.excluded_user_ids,
         in_progress,
-        carry_over_before,
+        carried.as_ref(),
     )
     .await?;
 
@@ -512,7 +550,7 @@ pub async fn build_content(
             to,
             interim: in_progress,
             created_on: today,
-            carry_over_before,
+            carried,
         },
         &members,
         &config,
@@ -627,8 +665,8 @@ pub async fn build_submission_status(
     // The tile counts everybody the month covers, including people who have
     // not booked anything yet — showing who still owes something is the whole
     // point of the card, so it never uses the snapshot's narrower filter.
-    // No carry-over boundary: this tile asks who has closed *this* month, and a
-    // late booking from a month already reported cannot answer that.
+    // No carried days: this tile asks who has closed *this* month, and a late
+    // booking from a month already reported cannot answer that.
     let members =
         payroll_members(app_state, from, to, &config.excluded_user_ids, false, None).await?;
     // The tile's colours always require full approval, for every person — see
@@ -885,7 +923,7 @@ pub fn format_excluded_ids(ids: &[i64]) -> String {
 /// The three travel together everywhere: `to` is the month end for a finished
 /// month but only today for an interim look, and `interim` decides which rows
 /// carry meaning at that point.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ReportWindow {
     pub from: NaiveDate,
     /// Last day covered. Today rather than the month end while `interim`.
@@ -898,15 +936,14 @@ pub struct ReportWindow {
     /// so every part of one document agrees on the date — for an interim look
     /// `to` is derived from this very day.
     pub created_on: NaiveDate,
-    /// Days *before* this date may still be carried into the report as late
-    /// bookings; see [`carry_over_boundary`], which is where every caller gets
-    /// it from. `None` carries nothing.
+    /// Days from earlier months this report carries; see [`CarriedDays`].
+    /// `None` carries nothing.
     ///
     /// Passed in rather than looked up inside the builder so that the send path
     /// records exactly the days the document printed: it uses this one value
     /// for the member set, for the document, and for marking those days as
     /// reported afterwards.
-    pub carry_over_before: Option<NaiveDate>,
+    pub carried: Option<CarriedDays>,
 }
 
 /// Absence categories the payroll report includes automatically — sick-like
@@ -965,7 +1002,7 @@ pub async fn build_report_data(
         to,
         interim,
         created_on,
-        carry_over_before,
+        carried,
     } = window;
     let organization_name =
         settings::load_setting(&app_state.pool, settings::ORGANIZATION_NAME_KEY, "").await?;
@@ -1006,7 +1043,7 @@ pub async fn build_report_data(
     // would print. An interim snapshot shows them too — it is explicitly a
     // preview, and the final report will carry the same rows.
     let late_entry_rows =
-        build_late_entry_rows(app_state, carry_over_before, members, config).await?;
+        build_late_entry_rows(app_state, carried.as_ref(), members, config).await?;
 
     Ok(PayrollReportData {
         // `from` is the first day of the reported month, so it carries the
@@ -1035,11 +1072,11 @@ pub async fn build_report_data(
 /// else in the app.
 async fn build_late_entry_rows(
     app_state: &AppState,
-    boundary: Option<NaiveDate>,
+    carried: Option<&CarriedDays>,
     members: &[User],
     config: &PayrollReportConfig,
 ) -> AppResult<Vec<PayrollLateEntryRow>> {
-    let Some(boundary) = boundary else {
+    let Some(carried) = carried else {
         return Ok(Vec::new());
     };
     let printed: std::collections::HashMap<i64, &User> = members
@@ -1054,7 +1091,7 @@ async fn build_late_entry_rows(
     let entries = app_state
         .db
         .reports
-        .unreported_time_entries_before(boundary)
+        .carried_time_entries_before(carried.reported_as.as_deref(), carried.before)
         .await?;
 
     // Group per person and day first: the automatic break deduction is a
@@ -1067,6 +1104,8 @@ async fn build_late_entry_rows(
         let Some(member) = printed.get(&user_id) else {
             continue;
         };
+        // Belt and braces: the query already drops days before the start date,
+        // and it must, or the marking and the reading would disagree.
         if entry_date < member.start_date {
             continue;
         }

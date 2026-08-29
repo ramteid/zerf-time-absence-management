@@ -1201,16 +1201,33 @@ impl TimeEntryDb {
         )
     }
 
-    /// Record that the payroll report for `period` accounted for these entries.
+    /// Record what the payroll report for `period` did with these entries.
     ///
-    /// Marks two groups, which together are exactly what that report covered:
-    /// every entry dated inside the reported month, whatever its status, and
-    /// every approved entry from before `carry_over_before` that was still
-    /// unmarked — the late bookings the report printed in its own section.
+    /// The mark means one thing only: **this entry existed when the report for
+    /// its month was produced.** Not "these hours were paid" — whether they
+    /// were depends on settings that can be changed later, and a marker whose
+    /// meaning moves with a setting is useless.
     ///
-    /// An *unapproved* entry from an earlier month is deliberately left alone:
-    /// it was in no report, and once somebody approves it, it has to be able to
-    /// reach the next one.
+    /// Two groups get it, and the difference between them is the whole point:
+    ///
+    /// * every entry dated inside the reported month, whatever its status and
+    ///   whoever it belongs to. The month has been through the report; nothing
+    ///   in it arrived late. This is what keeps switching on *List employees'
+    ///   working hours* from dumping years of history into the next report.
+    /// * approved entries from before `carry_over_before` belonging to
+    ///   `carried_user_ids` — the people whose hours this report actually
+    ///   printed, so these are the catch-up days it carried.
+    ///
+    /// Everybody else's older entries stay unmarked on purpose. An employee's
+    /// day booked late while only assistants' hours are printed has been in no
+    /// report at all, and marking it would destroy the only evidence of that:
+    /// were the setting turned on later, the day could never be caught up. The
+    /// two clauses therefore answer different questions — "was this month
+    /// reported" and "did this report print this day".
+    ///
+    /// Days before the person's start date, and entries in categories that do
+    /// not count as work, are left out of the second group for the same reason:
+    /// the report never printed them either.
     ///
     /// Already-marked rows keep the period they went out with, so re-running
     /// this cannot rewrite history.
@@ -1220,20 +1237,28 @@ impl TimeEntryDb {
         period_start: NaiveDate,
         period_end: NaiveDate,
         carry_over_before: Option<NaiveDate>,
+        carried_user_ids: &[i64],
     ) -> AppResult<u64> {
         let result = sqlx::query(
-            // A NULL boundary makes the comparison NULL rather than true, so
-            // "no carry-over happened" marks the month's own entries and
-            // nothing else — exactly what such a report contained.
-            "UPDATE time_entries SET payroll_reported_period=$1 \
-             WHERE payroll_reported_period IS NULL \
-             AND (entry_date BETWEEN $2 AND $3 \
-                  OR (status='approved' AND entry_date < $4::date))",
+            // A NULL boundary makes the comparison NULL rather than true, and
+            // an empty id list matches nobody, so a report that carried nothing
+            // marks its own month and not one day more.
+            "UPDATE time_entries AS z SET payroll_reported_period=$1 \
+             WHERE z.payroll_reported_period IS NULL \
+             AND (z.entry_date BETWEEN $2 AND $3 \
+                  OR (z.status='approved' \
+                      AND z.entry_date < $4::date \
+                      AND z.user_id = ANY($5) \
+                      AND z.entry_date >= \
+                          (SELECT u.start_date FROM users u WHERE u.id = z.user_id) \
+                      AND EXISTS (SELECT 1 FROM categories c \
+                                  WHERE c.id = z.category_id AND c.counts_as_work)))",
         )
         .bind(period)
         .bind(period_start)
         .bind(period_end)
         .bind(carry_over_before.map(|boundary| boundary.min(period_start)))
+        .bind(carried_user_ids)
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected())

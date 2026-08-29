@@ -372,13 +372,19 @@ async fn process_period(
     // one, so whoever holds such a day belongs to the member set even when they
     // did nothing in this period.
     let carry_over_before = payroll_report::carry_over_boundary(&state.pool, from).await?;
+    // A report being produced now asks what it still has to carry, never what
+    // an earlier one already did.
+    let carried = carry_over_before.map(|before| payroll_report::CarriedDays {
+        before,
+        reported_as: None,
+    });
     let members = payroll_report::payroll_members(
         state,
         from,
         to,
         &config.excluded_user_ids,
         mode == SendMode::ManualSnapshot,
-        carry_over_before,
+        carried.as_ref(),
     )
     .await?;
 
@@ -441,7 +447,9 @@ async fn process_period(
                     // Settled counts as accounted for: without the mark, this
                     // month's entries would look like late bookings to every
                     // later report.
-                    if mark_reported_entries(state, period, from, month_end, carry_over_before)
+                    // Nothing was printed, so no older day was carried: only
+                    // this month's own entries may be marked.
+                    if mark_reported_entries(state, period, from, month_end, carry_over_before, &[])
                         .await
                     {
                         state.db.payroll_queue.delete_entry(period).await?;
@@ -498,7 +506,7 @@ async fn process_period(
             to,
             interim: mode == SendMode::ManualSnapshot,
             created_on: today,
-            carry_over_before,
+            carried,
         },
         &included,
         config,
@@ -536,7 +544,7 @@ async fn process_period(
             // Same as the covers-nobody branch: a period that will never be
             // sent is still done with, and its entries must not resurface as
             // catch-up days next month.
-            if mark_reported_entries(state, period, from, month_end, carry_over_before).await {
+            if mark_reported_entries(state, period, from, month_end, carry_over_before, &[]).await {
                 state.db.payroll_queue.delete_entry(period).await?;
             }
         }
@@ -635,7 +643,26 @@ async fn process_period(
         // again next month; failing to mark costs a duplicated line there,
         // which is why it is only logged and never fails an already-sent
         // report.
-        if mark_reported_entries(state, period, from, month_end, carry_over_before).await {
+        // Only the people whose hours this document actually printed may have
+        // an older day marked as carried. Marking anybody else's would claim a
+        // report accounted for hours it never showed — and would make a genuine
+        // late booking uncatchable if the setting that prints them is ever
+        // switched on.
+        let carried_user_ids: Vec<i64> = included
+            .iter()
+            .filter(|member| config.includes_hours_for(&member.role))
+            .map(|member| member.id)
+            .collect();
+        if mark_reported_entries(
+            state,
+            period,
+            from,
+            month_end,
+            carry_over_before,
+            &carried_user_ids,
+        )
+        .await
+        {
             delete_payroll_period_with_retry(state, period).await?;
         }
         tracing::info!(
@@ -665,12 +692,19 @@ async fn mark_reported_entries(
     period_start: NaiveDate,
     period_end: NaiveDate,
     carry_over_before: Option<NaiveDate>,
+    carried_user_ids: &[i64],
 ) -> bool {
     for attempt in 1..=DELETE_RETRY_ATTEMPTS {
         match state
             .db
             .time_entries
-            .mark_payroll_reported(period, period_start, period_end, carry_over_before)
+            .mark_payroll_reported(
+                period,
+                period_start,
+                period_end,
+                carry_over_before,
+                carried_user_ids,
+            )
             .await
         {
             Ok(marked) => {
