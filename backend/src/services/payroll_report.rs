@@ -526,7 +526,16 @@ pub async fn build_submission_status(
     // The tile's colours always require full approval, for every person — see
     // the doc comment on `evaluate_members` — and, unlike the payroll gate, a
     // week nobody handed in is exactly what this tile is here to show.
-    let evaluated = evaluate_members(app_state, &members, from, to, |_role| true, true).await?;
+    let evaluated = evaluate_members(
+        app_state,
+        &members,
+        from,
+        to,
+        |_role| true,
+        true,
+        crate::services::reports::PendingAbsences::Any,
+    )
+    .await?;
 
     // Team leads only see the names of their own people; everybody else on the
     // tile is counted but anonymized.
@@ -689,6 +698,7 @@ pub async fn evaluate_members(
     to: NaiveDate,
     require_full_approval: impl Fn(&str) -> bool,
     require_week_submission: bool,
+    pending_absences: crate::services::reports::PendingAbsences,
 ) -> AppResult<Vec<MemberReadiness>> {
     let mut evaluated = Vec::with_capacity(members.len());
     for member in members {
@@ -699,6 +709,7 @@ pub async fn evaluate_members(
             to,
             require_full_approval(&member.role),
             require_week_submission,
+            pending_absences,
         )
         .await?;
         evaluated.push(MemberReadiness {
@@ -919,6 +930,12 @@ async fn build_absence_rows(
     // merging can group by person rather than by a name two people may share.
     let mut rows: Vec<(usize, String, i64, PayrollAbsenceRow)> = Vec::new();
     for member in members {
+        // Assistants are paid by the hour: continued pay does not apply to
+        // them, so their absences are none of payroll's business. Only their
+        // worked hours are, and those are a different table.
+        if is_assistant_role(&member.role) {
+            continue;
+        }
         let medical_certificate_required = if any_medical_certificate_category {
             crate::services::medical_certificate::required_map_for_user(app_state, member.id)
                 .await?

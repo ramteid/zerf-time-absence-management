@@ -628,6 +628,7 @@ async fn payroll_report_never_reports_missing_submissions_as_a_technical_error()
             to,
             false,
             true,
+            zerf::services::reports::PendingAbsences::Any,
         )
         .await
         .expect("readiness")
@@ -2301,6 +2302,7 @@ async fn only_provable_gaps_hold_the_payroll_report_back() {
                 to,
                 require_full_approval,
                 false,
+                zerf::services::reports::PendingAbsences::PayrollRelevant,
             )
             .await
             .expect("readiness")
@@ -2332,6 +2334,70 @@ async fn only_provable_gaps_hold_the_payroll_report_back() {
     assert!(
         readiness_of(assistant_id, true).await.is_ready(),
         "once decided, the month is final for them"
+    );
+
+    // An undecided holiday request never reaches the document, so it cannot
+    // change it — and must not delay it either.
+    let vacation = absence_cat(&app.state.pool, "vacation").await;
+    app.state
+        .db
+        .absences
+        .create(
+            emp_id,
+            vacation.id,
+            true,
+            from + Duration::days(10),
+            from + Duration::days(11),
+            None,
+            "requested",
+        )
+        .await
+        .expect("pending holiday request");
+    assert!(
+        readiness_of(emp_id, false).await.is_ready(),
+        "an undecided holiday request is not in the report and must not hold it"
+    );
+
+    // An undecided sick note is: those days are printed, and only once decided.
+    let sick = absence_cat(&app.state.pool, "sick").await;
+    app.state
+        .db
+        .absences
+        .create(
+            emp_id,
+            sick.id,
+            true,
+            from + Duration::days(17),
+            from + Duration::days(18),
+            None,
+            "requested",
+        )
+        .await
+        .expect("pending sick note");
+    assert!(
+        !readiness_of(emp_id, false).await.is_ready(),
+        "an undecided sick note changes the document and has to be waited for"
+    );
+
+    // The same sick note from an assistant does not: they are paid by the
+    // hour, so their absences are none of payroll's business.
+    app.state
+        .db
+        .absences
+        .create(
+            assistant_id,
+            sick.id,
+            true,
+            from + Duration::days(17),
+            from + Duration::days(18),
+            None,
+            "requested",
+        )
+        .await
+        .expect("assistant sick note");
+    assert!(
+        readiness_of(assistant_id, true).await.is_ready(),
+        "an assistant's absence is not in the report and must not hold it"
     );
 
     app.cleanup().await;

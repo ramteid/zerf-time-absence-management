@@ -1954,13 +1954,19 @@ previous month is prepared; if the month is not final yet the report waits and i
 retried every day until it can be sent. A month counts as final when, for
 everyone it covers:
 
-- no absence request is still undecided — sick days are in the report, but only
-  once they are approved,
+- no absence request that the report would print is still undecided — sick and
+  unpaid days are in it, but only once they are approved. An undecided holiday
+  request never appears in the report and does not hold it back, and neither
+  does an assistant's absence of any kind,
 - for everyone whose hours are in the report, all time entries of that month are
   approved — payroll pays by those hours, so a month that is only submitted would
   understate them, and
 - no stored entries or absences lie before a person's start date, because those
   days are hidden from every report and would make the figures too low.
+
+Assistants' absences are not part of the report at all. They are paid for the
+hours they work, so continued pay does not apply to them — only their working
+days and hours appear.
 
 A week nobody handed in does **not** hold the report back. It cannot prove
 anything is missing: an assistant works irregularly and may simply not have

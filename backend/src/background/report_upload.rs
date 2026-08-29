@@ -30,7 +30,9 @@ use crate::background::schedule;
 use crate::error::{AppError, AppResult};
 use crate::services::{
     nextcloud,
-    reports::{build_timesheet_section, month_export_readiness, MonthExportReadiness},
+    reports::{
+        build_timesheet_section, month_export_readiness, MonthExportReadiness, PendingAbsences,
+    },
     settings,
     users::repo_user_to_auth_user,
 };
@@ -237,7 +239,19 @@ async fn process_one_entry(
     // submitted month would archive too few hours.
     // The archive is this person's own month, so a week nobody handed in
     // leaves a hole in the document and has to hold it back.
-    match month_export_readiness(&state.pool, &user, from, to, true, true).await? {
+    match month_export_readiness(
+        &state.pool,
+        &user,
+        from,
+        to,
+        true,
+        true,
+        // The archive prints every absence, so any undecided request would
+        // change it.
+        PendingAbsences::Any,
+    )
+    .await?
+    {
         MonthExportReadiness::Ready => {}
         MonthExportReadiness::PreStartContent => {
             let params: Vec<(&str, String)> = vec![

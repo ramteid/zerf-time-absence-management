@@ -183,8 +183,12 @@ whom. The blocked path itself still neither errors nor retries differently.
 unhanded-in week proves nothing for payroll — an assistant works irregularly and
 may not have worked it, and a salaried employee's hours are not printed in the
 document at all. An existing booking that is not approved yet, an undecided
-absence request, and data hidden before a start date do block, because there
-waiting demonstrably changes the document. `reports::JudgedDays` clamps a
+absence request the document would print, and data hidden before a start date do
+block, because there waiting demonstrably changes the document. Which absence
+requests count is `reports::PendingAbsences`: the timesheet archive takes `Any`,
+payroll takes `PayrollRelevant` — a sick-like or unpaid category, and never an
+assistant's, since assistants are paid by the hour and their absences are left
+out of the document entirely (`build_absence_rows` skips them). `reports::JudgedDays` clamps a
 week-level check to the days of one month, which is what lets the straddling
 week be settled by its in-month days alone.
 

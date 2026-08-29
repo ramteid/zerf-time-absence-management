@@ -2167,6 +2167,20 @@ impl MonthExportReadiness {
     }
 }
 
+/// Which undecided absence requests hold an export back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingAbsences {
+    /// Any of them. The timesheet PDF prints every absence the month holds, so
+    /// a decision still to come would change the document whatever it is.
+    Any,
+    /// Only the ones the payroll report would print: a payroll-relevant
+    /// category, and never an assistant's. Assistants are paid by the hour —
+    /// continued pay does not apply to them, their absences are not in the
+    /// document, and holding the report for an undecided holiday request that
+    /// would never have appeared in it delays a document that cannot change.
+    PayrollRelevant,
+}
+
 /// Evaluate the shared month-finality gate for one user.
 ///
 /// Historical-only accounts (archived, or time tracking switched off) cannot
@@ -2205,6 +2219,7 @@ pub async fn month_export_readiness(
     to: NaiveDate,
     require_full_approval: bool,
     require_week_submission: bool,
+    pending_absences: PendingAbsences,
 ) -> AppResult<MonthExportReadiness> {
     let reports_db = crate::repository::ReportDb::new(pool.clone());
 
@@ -2239,12 +2254,24 @@ pub async fn month_export_readiness(
         return Ok(MonthExportReadiness::Ready);
     }
 
-    // Pending absences block export regardless of submission obligation – a payroll-relevant
-    // requested absence means the month is not settled, even for assistants/zero-hour users.
-    if reports_db
-        .has_requested_absences_in_period(user.id, from, judged_to)
-        .await?
-    {
+    // Pending absences block export regardless of submission obligation: an
+    // undecided request means the month is not settled, even for
+    // assistants/zero-hour users. Which requests count depends on what the
+    // document prints — see [`PendingAbsences`].
+    let undecided_absence = match pending_absences {
+        PendingAbsences::Any => {
+            reports_db
+                .has_requested_absences_in_period(user.id, from, judged_to)
+                .await?
+        }
+        PendingAbsences::PayrollRelevant => {
+            !crate::roles::is_assistant_role(&user.role)
+                && reports_db
+                    .has_requested_payroll_absences_in_period(user.id, from, judged_to)
+                    .await?
+        }
+    };
+    if undecided_absence {
         return Ok(MonthExportReadiness::PendingAbsenceRequests);
     }
 

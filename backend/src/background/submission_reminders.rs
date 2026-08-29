@@ -514,33 +514,36 @@ pub async fn run_month_weeks_reminder(
             .iter()
             .map(|monday| crate::i18n::format_week_label(&language, *monday))
             .collect();
-        let text = crate::i18n::notification_event_text(
-            &language,
-            "month_weeks_reminder",
-            &[
-                ("month", month_label.clone()),
-                ("deadline", deadline_label.clone()),
-                ("weeks", labels.join(", ")),
-            ],
-        );
-        let email_body = crate::i18n::notification_email_body(
-            &language,
-            "month_weeks_reminder",
-            &[
-                ("month", month_label.clone()),
-                ("deadline", deadline_label.clone()),
-                ("weeks", labels.join("\n")),
-            ],
-        );
+        // Past the deadline the reminder keeps going — the weeks are still
+        // owed — but it stops naming a date that has already gone by, and
+        // falls back to the plain "these weeks are missing" message.
+        let (kind, params) = if today <= deadline {
+            (
+                "month_weeks_reminder",
+                vec![
+                    ("month", month_label.clone()),
+                    ("deadline", deadline_label.clone()),
+                    ("weeks", labels.join(", ")),
+                ],
+            )
+        } else {
+            ("submission_reminder", vec![("weeks", labels.join(", "))])
+        };
+        let mut email_params = params.clone();
+        if let Some(weeks) = email_params.iter_mut().find(|(key, _)| *key == "weeks") {
+            weeks.1 = labels.join("\n");
+        }
+        let text = crate::i18n::notification_event_text(&language, kind, &params);
+        let email_body = crate::i18n::notification_email_body(&language, kind, &email_params);
         // Per day: the loop wakes hourly, and the list must not be re-sent each
         // hour while somebody is working through it.
-        let dedupe_key = format!("month_weeks_reminder:{today}");
+        let dedupe_key = format!("{kind}:{today}");
         crate::services::notifications::deliver(
             state,
             &crate::services::notifications::Outgoing::new(
                 user_id,
                 &language,
-                "month_weeks_reminder",
+                kind,
                 &text.title,
                 &text.body,
             )

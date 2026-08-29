@@ -410,6 +410,35 @@ impl ReportDb {
         Ok(rows.into_iter().map(|(id,)| id).collect())
     }
 
+    /// Whether an undecided absence request in the period falls into a category
+    /// the payroll report actually prints — sick-like or unpaid.
+    ///
+    /// The plain [`Self::has_requested_absences_in_period`] answers a different
+    /// question and is right for the timesheet PDF, which shows every absence.
+    /// For payroll it would hold the report back over an undecided holiday
+    /// request that would never have appeared in the document.
+    pub async fn has_requested_payroll_absences_in_period(
+        &self,
+        user_id: i64,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<bool> {
+        Ok(sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS ( \
+                SELECT 1 FROM absences a \
+                JOIN absence_categories c ON c.id = a.category_id \
+                WHERE a.user_id=$1 AND a.status='requested' \
+                AND (c.auto_approve_past=TRUE OR c.unpaid=TRUE) \
+                AND a.end_date >= $2 AND a.start_date <= $3 \
+             )",
+        )
+        .bind(user_id)
+        .bind(from)
+        .bind(to)
+        .fetch_one(&self.pool)
+        .await?)
+    }
+
     /// Returns true when the current start date would cause the PDF renderer to
     /// hide existing report content in this period.
     pub async fn has_report_content_before_start_date(

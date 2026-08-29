@@ -406,6 +406,8 @@ async fn process_period(
                 to,
                 |role| config.includes_hours_for(role),
                 false,
+                // Only what this document would actually print.
+                crate::services::reports::PendingAbsences::PayrollRelevant,
             )
             .await?;
             let (ready, pending): (Vec<_>, Vec<_>) = readiness
