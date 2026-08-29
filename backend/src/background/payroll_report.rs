@@ -248,8 +248,7 @@ async fn process_pending_periods(
             );
             continue;
         }
-        if let Err(e) =
-            process_period(state, &period, config, &language, SendMode::Scheduled).await
+        if let Err(e) = process_period(state, &period, config, &language, SendMode::Scheduled).await
         {
             tracing::warn!("Payroll report: skipping period {period}: {e}");
         }
@@ -369,12 +368,17 @@ async fn process_period(
     // any recorded hours in this month. A snapshot of the running month drops
     // everyone who has not booked yet, not just assistants — see
     // [`payroll_report::payroll_members`].
+    // Days booked after their own month's report went out are carried by this
+    // one, so whoever holds such a day belongs to the member set even when they
+    // did nothing in this period.
+    let carry_over_before = payroll_report::carry_over_boundary(&state.pool, from).await?;
     let members = payroll_report::payroll_members(
         state,
         from,
         to,
         &config.excluded_user_ids,
         mode == SendMode::ManualSnapshot,
+        carry_over_before,
     )
     .await?;
 
@@ -434,7 +438,14 @@ async fn process_period(
                 // drop the period from the queue for good, and the scheduled
                 // run would never deliver it once the data did arrive.
                 if !mode.is_manual() {
-                    state.db.payroll_queue.delete_entry(period).await?;
+                    // Settled counts as accounted for: without the mark, this
+                    // month's entries would look like late bookings to every
+                    // later report.
+                    if mark_reported_entries(state, period, from, month_end, carry_over_before)
+                        .await
+                    {
+                        state.db.payroll_queue.delete_entry(period).await?;
+                    }
                 }
                 tracing::info!("Payroll report: period {period} covers nobody; nothing to send");
                 return Ok(SendOutcome::Skipped(SkipReason::CoversNobody));
@@ -487,6 +498,7 @@ async fn process_period(
             to,
             interim: mode == SendMode::ManualSnapshot,
             created_on: today,
+            carry_over_before,
         },
         &included,
         config,
@@ -521,7 +533,12 @@ async fn process_period(
         // sent, so a failed delete costs one wasted retry tomorrow rather than
         // risking a second copy reaching the tax office.
         if !mode.is_manual() {
-            state.db.payroll_queue.delete_entry(period).await?;
+            // Same as the covers-nobody branch: a period that will never be
+            // sent is still done with, and its entries must not resurface as
+            // catch-up days next month.
+            if mark_reported_entries(state, period, from, month_end, carry_over_before).await {
+                state.db.payroll_queue.delete_entry(period).await?;
+            }
         }
         tracing::info!("Payroll report: period {period} has nothing to report; nothing sent");
         return Ok(SendOutcome::Skipped(reason));
@@ -548,7 +565,9 @@ async fn process_period(
     let Some(smtp) = settings::load_smtp_config(&state.pool).await else {
         // SMTP disabled after queue listing – leave queued for next cycle
         // (mirrors email_queue worker behavior).
-        tracing::info!("Payroll report: SMTP not configured at send time, deferring period {period}");
+        tracing::info!(
+            "Payroll report: SMTP not configured at send time, deferring period {period}"
+        );
         return Ok(SendOutcome::Skipped(SkipReason::EmailUnavailable));
     };
 
@@ -571,10 +590,7 @@ async fn process_period(
             // can legitimately be sent more than once — an interim snapshot
             // and later the final report — and the recipient must not have two
             // identically named attachments whose contents differ.
-            filename: format!(
-                "{period}_payroll_report_{}.pdf",
-                today.format("%Y-%m-%d")
-            ),
+            filename: format!("{period}_payroll_report_{}.pdf", today.format("%Y-%m-%d")),
             content_type: "application/pdf".to_string(),
             bytes,
         },
@@ -613,13 +629,69 @@ async fn process_period(
         // the tax office / payroll accountant a second time tomorrow, so
         // retry the (idempotent) delete a few times before accepting that
         // risk.
-        delete_payroll_period_with_retry(state, period).await?;
+        // Record what this report accounted for before the period leaves the
+        // queue, so the two agree even if the delete below has to be retried.
+        // Marking is what stops the catch-up days above from being printed
+        // again next month; failing to mark costs a duplicated line there,
+        // which is why it is only logged and never fails an already-sent
+        // report.
+        if mark_reported_entries(state, period, from, month_end, carry_over_before).await {
+            delete_payroll_period_with_retry(state, period).await?;
+        }
         tracing::info!(
             "Payroll report: sent period {period} to {}",
             config.recipients.join(", ")
         );
     }
     Ok(SendOutcome::Sent)
+}
+
+/// Mark every time entry this period's report accounted for.
+///
+/// Retried like the queue delete and for the same reason: the email is already
+/// gone, and an unmarked entry would show up as a late booking in next month's
+/// report even though the tax office has it. Returns whether it succeeded, and
+/// the caller leaves the period queued if it did not: a duplicate copy of the
+/// same month is something the recipient can recognise, whereas the same hours
+/// appearing again a month later under an older date reads like new work and
+/// could be paid twice.
+///
+/// This cannot loop for long. Reaching this point means dozens of queries
+/// building the report already succeeded, so a failure here is a momentary one;
+/// the next run re-sends the identical document and settles the period.
+async fn mark_reported_entries(
+    state: &AppState,
+    period: &str,
+    period_start: NaiveDate,
+    period_end: NaiveDate,
+    carry_over_before: Option<NaiveDate>,
+) -> bool {
+    for attempt in 1..=DELETE_RETRY_ATTEMPTS {
+        match state
+            .db
+            .time_entries
+            .mark_payroll_reported(period, period_start, period_end, carry_over_before)
+            .await
+        {
+            Ok(marked) => {
+                tracing::debug!(
+                    "Payroll report: marked {marked} time entries as reported for {period}"
+                );
+                return true;
+            }
+            Err(e) if attempt < DELETE_RETRY_ATTEMPTS => {
+                tracing::warn!(
+                    "Payroll report: marking period {period} failed (attempt {attempt}): {e}"
+                );
+                tokio::time::sleep(DELETE_RETRY_DELAY).await;
+            }
+            Err(e) => tracing::error!(
+                "Payroll report: could not mark period {period} as reported: {e}. \
+                 The period stays queued so nothing is silently paid twice."
+            ),
+        }
+    }
+    false
 }
 
 /// Delay between delete attempts. Short: this only needs to ride out a

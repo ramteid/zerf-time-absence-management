@@ -7,9 +7,13 @@
   export let content;
   export let onClose;
 
-  // Absences first, then the hours tables — the order the report itself prints.
+  // Absences first, then the hours tables, then the catch-up days — the order
+  // the report itself prints.
   $: absences = (content?.rows ?? []).filter((row) => row.kind === "absence");
   $: hours = (content?.rows ?? []).filter((row) => row.kind === "hours");
+  $: lateHours = (content?.rows ?? []).filter(
+    (row) => row.kind === "late_hours",
+  );
 </script>
 
 <Dialog title={$t("Payroll Report")} {onClose}>
@@ -29,7 +33,7 @@
     {/if}
   </div>
 
-  {#if absences.length === 0 && hours.length === 0}
+  {#if absences.length === 0 && hours.length === 0 && lateHours.length === 0}
     <div class="payroll-empty">{$t("Nothing to report for this month.")}</div>
   {:else}
     {#if absences.length > 0}
@@ -62,6 +66,26 @@
             <span class="payroll-detail">
               {$t("{days} days").replace("{days}", row.days)}
             </span>
+            <span class="payroll-amount">{minToHM(row.minutes ?? 0)}</span>
+          </div>
+        {/each}
+      </div>
+    {/if}
+
+    {#if lateHours.length > 0}
+      <div class="report-subheading">{$t("Booked later")}</div>
+      <div class="fs-13 text-tertiary mb-12">
+        {$t(
+          "Days recorded after the report for their own month had already been sent. They go into this month's report with the day they were worked.",
+        )}
+      </div>
+      <div class="payroll-rows">
+        {#each lateHours as row, index (`late-${index}`)}
+          <div class="payroll-row">
+            <span class="payroll-name" class:payroll-hidden={!row.name}>
+              {row.name ?? $t("Not visible to you")}
+            </span>
+            <span class="payroll-detail">{fmtDate(row.from)}</span>
             <span class="payroll-amount">{minToHM(row.minutes ?? 0)}</span>
           </div>
         {/each}

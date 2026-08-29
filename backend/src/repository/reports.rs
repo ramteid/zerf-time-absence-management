@@ -392,6 +392,58 @@ impl ReportDb {
         Ok(rows.into_iter().map(|(user_id,)| user_id).collect())
     }
 
+    /// People holding an approved, work-crediting time entry from before
+    /// `before` that no payroll report has accounted for yet.
+    ///
+    /// Returns whole user rows rather than ids because the payroll report has
+    /// to be able to add somebody its period-scoped member query never saw: an
+    /// assistant who left in the reported month is no longer active and has no
+    /// activity in the month now being reported, so nothing else would bring
+    /// them back — and the hours they are still owed would be dropped.
+    pub async fn users_with_unreported_time_entries_before(
+        &self,
+        before: NaiveDate,
+    ) -> AppResult<Vec<User>> {
+        Ok(sqlx::query_as(
+            "SELECT DISTINCT u.id, u.email, u.password_hash, u.first_name, u.last_name, u.role, \
+             u.weekly_hours, u.workdays_per_week, u.start_date, u.hire_date, u.active, \
+             u.must_change_password, u.created_at, u.allow_reopen_without_approval, \
+             u.allow_submission_without_approval, u.dark_mode, u.tracks_time, u.archived_at, \
+             u.receives_error_notifications \
+             FROM users u \
+             JOIN time_entries z ON z.user_id = u.id \
+             JOIN categories c ON c.id = z.category_id \
+             WHERE z.payroll_reported_period IS NULL \
+             AND z.entry_date < $1 AND z.status='approved' AND c.counts_as_work",
+        )
+        .bind(before)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Approved, work-crediting time entries from before `before` that no
+    /// payroll report has accounted for — the raw material for the report's
+    /// late-entries section.
+    ///
+    /// Returns (user_id, entry_date, start_time, end_time) so the caller can
+    /// compute minutes with the same helpers the regular hours use, including
+    /// the automatic break deduction.
+    pub async fn unreported_time_entries_before(
+        &self,
+        before: NaiveDate,
+    ) -> AppResult<Vec<(i64, NaiveDate, String, String)>> {
+        Ok(sqlx::query_as(
+            "SELECT z.user_id, z.entry_date, z.start_time, z.end_time FROM time_entries z \
+             JOIN categories c ON c.id = z.category_id \
+             WHERE z.payroll_reported_period IS NULL \
+             AND z.entry_date < $1 AND z.status='approved' AND c.counts_as_work \
+             ORDER BY z.user_id, z.entry_date, z.start_time",
+        )
+        .bind(before)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     /// User IDs with payroll-relevant absences (auto_approve_past OR unpaid) in period.
     pub async fn user_ids_with_payroll_absences_in_range(
         &self,

@@ -117,6 +117,7 @@ async fn payroll_report_marks_absences_required_once_a_connected_chain_crosses_t
             to,
             interim: false,
             created_on: to,
+            carry_over_before: None,
         },
         &members,
         &payroll_report_config(),

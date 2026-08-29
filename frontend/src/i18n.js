@@ -117,6 +117,9 @@ const TRANSLATIONS = {
       "What this month's report will contain.",
     "Nothing to report for this month.": "Nothing to report for this month.",
     "Working days and hours": "Working days and hours",
+    "Booked later": "Booked later",
+    "Days recorded after the report for their own month had already been sent. They go into this month's report with the day they were worked.":
+      "Days recorded after the report for their own month had already been sent. They go into this month's report with the day they were worked.",
     "{days} days": "{days} days",
     "{submitted} of {total} weeks": "{submitted} of {total} weeks",
     "Current week: still open": "Current week: still open",
@@ -1323,6 +1326,9 @@ const TRANSLATIONS = {
     "Nothing to report for this month.":
       "F\u00fcr diesen Monat gibt es nichts zu melden.",
     "Working days and hours": "Arbeitstage und Stunden",
+    "Booked later": "Nachtr\u00e4glich erfasst",
+    "Days recorded after the report for their own month had already been sent. They go into this month's report with the day they were worked.":
+      "Tage, die erst erfasst wurden, nachdem die Meldung f\u00fcr ihren eigenen Monat schon verschickt war. Sie kommen mit dem Tag, an dem gearbeitet wurde, in die Meldung dieses Monats.",
     "{days} days": "{days} Tage",
     "{submitted} of {total} weeks": "{submitted} von {total} Wochen",
     "Current week: still open": "Aktuelle Woche: noch offen",

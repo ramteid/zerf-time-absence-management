@@ -10,6 +10,7 @@
 //! Column layouts (both sum to the 180 mm content width):
 //!   Absences: Employee 60 | Category 40 | From 25 | To 25 | Days 30
 //!   Hours:    Employee 70 | Work days 30 | Hours 40 | Hours (decimal) 40
+//!   Late:     Employee 70 | Date 30 | Hours 40 | Hours (decimal) 40
 
 use super::{format_minutes, Align, Column, Renderer};
 use crate::i18n::{self, Language};
@@ -87,6 +88,38 @@ const HOURS_WORK_DAYS_COLUMN: usize = 1;
 const HOURS_HOURS_COLUMN: usize = 2;
 const HOURS_DECIMAL_COLUMN: usize = 3;
 
+/// Late-entries table: one row per person and day booked after that day's own
+/// month had already been reported. Same widths as [`HOURS_COLUMNS`], with the
+/// day itself in place of the work-day count — the date is the whole point of
+/// the section, because payroll has to book the hours into the month they were
+/// worked in, not the one that ships them.
+const LATE_ENTRY_COLUMNS: &[Column] = &[
+    Column {
+        header_key: "pdf_payroll_column_employee",
+        width_mm: 70.0,
+        align: Align::Left,
+    },
+    Column {
+        header_key: "pdf_column_date",
+        width_mm: 30.0,
+        align: Align::Left,
+    },
+    Column {
+        header_key: "pdf_payroll_column_hours",
+        width_mm: 40.0,
+        align: Align::Left,
+    },
+    Column {
+        header_key: "pdf_payroll_column_hours_decimal",
+        width_mm: 40.0,
+        align: Align::Left,
+    },
+];
+
+const LATE_ENTRY_DATE_COLUMN: usize = 1;
+const LATE_ENTRY_HOURS_COLUMN: usize = 2;
+const LATE_ENTRY_DECIMAL_COLUMN: usize = 3;
+
 /// One absence period of one employee within the reported month.
 pub struct PayrollAbsenceRow {
     pub employee: String,
@@ -116,6 +149,17 @@ pub struct PayrollHoursSection {
     /// Translation key of the section heading.
     pub heading_key: &'static str,
     pub rows: Vec<PayrollHoursRow>,
+}
+
+/// One day of work that belongs to an already-reported month.
+///
+/// It carries its own date rather than being folded into the month's totals:
+/// the hours were earned in that earlier month and payroll books them there.
+pub struct PayrollLateEntryRow {
+    pub employee: String,
+    /// The day actually worked — always before the reported month.
+    pub date: NaiveDate,
+    pub minutes: i64,
 }
 
 /// One person the report had to leave out, with the reason in the report
@@ -156,6 +200,11 @@ pub struct PayrollReportData {
     pub absence_rows: Option<Vec<PayrollAbsenceRow>>,
     /// Empty when neither hours section is enabled.
     pub hours_sections: Vec<PayrollHoursSection>,
+    /// Days from earlier, already-reported months that were booked too late to
+    /// reach their own report. Empty on almost every report, and the section is
+    /// then left out entirely rather than printed as an empty table — an extra
+    /// heading on every document would only train the reader to skip it.
+    pub late_entry_rows: Vec<PayrollLateEntryRow>,
     /// The day the document was assembled. Printed under the title and used in
     /// the attachment's filename: the same month can be sent more than once
     /// (an interim snapshot, then the final report), so the recipient needs to
@@ -193,6 +242,9 @@ pub fn render_payroll_report_pdf(data: &PayrollReportData, language: &Language) 
     }
     for section in &data.hours_sections {
         render_hours_table(&mut renderer, language, section);
+    }
+    if !data.late_entry_rows.is_empty() {
+        render_late_entry_table(&mut renderer, language, &data.late_entry_rows);
     }
 
     super::build_pdf(renderer.finish())
@@ -327,6 +379,60 @@ fn render_hours_table(renderer: &mut Renderer, language: &Language, section: &Pa
     );
 }
 
+/// Draw the "booked after the fact" table, with a line of explanation above it.
+///
+/// The note matters more than the table: without it the payroll accountant sees
+/// dates from a month they have already filed and has no way to know whether
+/// this is a correction, a duplicate, or something they were never sent.
+fn render_late_entry_table(
+    renderer: &mut Renderer,
+    language: &Language,
+    rows: &[PayrollLateEntryRow],
+) {
+    renderer.set_columns(LATE_ENTRY_COLUMNS);
+    renderer.draw_section_heading(&i18n::translate(
+        language,
+        "pdf_payroll_late_entries_heading",
+        &[],
+    ));
+    renderer.draw_note(&i18n::translate(
+        language,
+        "pdf_payroll_late_entries_note",
+        &[],
+    ));
+
+    renderer.draw_table_header();
+    for (index, row) in rows.iter().enumerate() {
+        renderer.draw_row(
+            &[
+                (0, row.employee.clone()),
+                (
+                    LATE_ENTRY_DATE_COLUMN,
+                    i18n::format_date(language, row.date),
+                ),
+                (LATE_ENTRY_HOURS_COLUMN, format_minutes(row.minutes)),
+                (
+                    LATE_ENTRY_DECIMAL_COLUMN,
+                    format_decimal_hours(row.minutes, language),
+                ),
+            ],
+            index % 2 == 1,
+        );
+    }
+
+    let total_minutes: i64 = rows.iter().map(|row| row.minutes).sum();
+    renderer.draw_total_row(
+        &i18n::translate(language, "pdf_payroll_total", &[]),
+        &[
+            (LATE_ENTRY_HOURS_COLUMN, format_minutes(total_minutes)),
+            (
+                LATE_ENTRY_DECIMAL_COLUMN,
+                format_decimal_hours(total_minutes, language),
+            ),
+        ],
+    );
+}
+
 /// Decimal separator of the report language — payroll software and accountants
 /// read these numbers directly, so a German report must print `7,50`.
 fn decimal_separator(language: &Language) -> char {
@@ -411,6 +517,13 @@ mod tests {
                     minutes: 930,
                 }],
             }],
+            // A day from April that only reached the system in May, so the
+            // catch-up table is laid out at least once here.
+            late_entry_rows: vec![PayrollLateEntryRow {
+                employee: "Doe, Jane".into(),
+                date: date(2026, 4, 28),
+                minutes: 240,
+            }],
             created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
             provisional: None,
         };
@@ -429,6 +542,7 @@ mod tests {
                 organization_name: "Example GmbH".into(),
                 absence_rows: Some(vec![]),
                 hours_sections: vec![],
+                late_entry_rows: Vec::new(),
                 created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
                 provisional: Some(ProvisionalNotice {
                     included: 8,
@@ -456,6 +570,7 @@ mod tests {
                 organization_name: "Example GmbH".into(),
                 absence_rows: Some(vec![]),
                 hours_sections: vec![],
+                late_entry_rows: Vec::new(),
                 created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
                 provisional: Some(ProvisionalNotice {
                     included: 5,
@@ -480,6 +595,7 @@ mod tests {
                 heading_key: "pdf_payroll_assistant_hours_heading",
                 rows: vec![],
             }],
+            late_entry_rows: Vec::new(),
             created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
             provisional: None,
         };

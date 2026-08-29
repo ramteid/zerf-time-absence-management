@@ -1201,6 +1201,44 @@ impl TimeEntryDb {
         )
     }
 
+    /// Record that the payroll report for `period` accounted for these entries.
+    ///
+    /// Marks two groups, which together are exactly what that report covered:
+    /// every entry dated inside the reported month, whatever its status, and
+    /// every approved entry from before `carry_over_before` that was still
+    /// unmarked — the late bookings the report printed in its own section.
+    ///
+    /// An *unapproved* entry from an earlier month is deliberately left alone:
+    /// it was in no report, and once somebody approves it, it has to be able to
+    /// reach the next one.
+    ///
+    /// Already-marked rows keep the period they went out with, so re-running
+    /// this cannot rewrite history.
+    pub async fn mark_payroll_reported(
+        &self,
+        period: &str,
+        period_start: NaiveDate,
+        period_end: NaiveDate,
+        carry_over_before: Option<NaiveDate>,
+    ) -> AppResult<u64> {
+        let result = sqlx::query(
+            // A NULL boundary makes the comparison NULL rather than true, so
+            // "no carry-over happened" marks the month's own entries and
+            // nothing else — exactly what such a report contained.
+            "UPDATE time_entries SET payroll_reported_period=$1 \
+             WHERE payroll_reported_period IS NULL \
+             AND (entry_date BETWEEN $2 AND $3 \
+                  OR (status='approved' AND entry_date < $4::date))",
+        )
+        .bind(period)
+        .bind(period_start)
+        .bind(period_end)
+        .bind(carry_over_before.map(|boundary| boundary.min(period_start)))
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
     pub fn parse_time_pub(s: &str) -> AppResult<NaiveTime> {
         parse_time(s)
     }

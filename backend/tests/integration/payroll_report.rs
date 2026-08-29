@@ -377,6 +377,7 @@ async fn payroll_report_lists_absence_days_and_assistant_hours() {
             to,
             interim: false,
             created_on: to,
+            carry_over_before: None,
         },
         &members,
         &config(true, false),
@@ -542,6 +543,7 @@ async fn payroll_report_absence_rows_are_grouped_by_category_then_name_then_date
             to,
             interim: false,
             created_on: to,
+            carry_over_before: None,
         },
         &members,
         &config(false, false),
@@ -813,7 +815,7 @@ async fn payroll_members_drops_inactive_assistants_and_excluded_people() {
         "create draft assistant entry: {body}"
     );
 
-    let covered = payroll_report::payroll_members(&app.state, from, to, &[], false)
+    let covered = payroll_report::payroll_members(&app.state, from, to, &[], false, None)
         .await
         .expect("covered payroll members");
     assert!(
@@ -835,7 +837,7 @@ async fn payroll_members_drops_inactive_assistants_and_excluded_people() {
 
     // Excluding an employee and an assistant removes exactly those two.
     let narrowed =
-        payroll_report::payroll_members(&app.state, from, to, &[emp_id, assistant_id], false)
+        payroll_report::payroll_members(&app.state, from, to, &[emp_id, assistant_id], false, None)
             .await
             .expect("narrowed payroll members");
     assert!(!narrowed.iter().any(|member| member.id == emp_id));
@@ -849,7 +851,7 @@ async fn payroll_members_drops_inactive_assistants_and_excluded_people() {
     // something" rule from assistants to everybody: only the assistant who
     // actually recorded time survives, while the lead and employee — who have
     // an empty month but owe nothing yet — drop out.
-    let snapshot = payroll_report::payroll_members(&app.state, from, to, &[], true)
+    let snapshot = payroll_report::payroll_members(&app.state, from, to, &[], true, None)
         .await
         .expect("snapshot payroll members");
     assert!(
@@ -1534,7 +1536,11 @@ async fn payroll_snapshot_of_the_running_month_is_never_sent_empty() {
         .post("/api/v1/settings/payroll-report/send-now", &json!({}))
         .await;
     assert_eq!(status, StatusCode::OK, "nothing to send is not an error");
-    assert_eq!(body["sent"], json!(0), "an empty month sends nothing: {body}");
+    assert_eq!(
+        body["sent"],
+        json!(0),
+        "an empty month sends nothing: {body}"
+    );
 
     let Some(workday) = current_month_workday_up_to_today(today) else {
         // The month has not reached a weekday yet; there is nothing further to
@@ -1664,7 +1670,11 @@ async fn disabling_smtp_switches_the_payroll_report_off() {
     let (status, body) = admin
         .post("/api/v1/settings/payroll-report/send-now", &json!({}))
         .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "send-now is refused: {body}");
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "send-now is refused: {body}"
+    );
 
     app.cleanup().await;
 }
@@ -1766,8 +1776,9 @@ async fn payroll_snapshot_with_employee_hours_never_reports_empty_rows() {
         to: today,
         interim: true,
         created_on: today,
+        carry_over_before: None,
     };
-    let members = payroll_report::payroll_members(&app.state, from, today, &[], true)
+    let members = payroll_report::payroll_members(&app.state, from, today, &[], true, None)
         .await
         .expect("members");
     let data = payroll_report::build_report_data(
@@ -1892,9 +1903,10 @@ async fn scheduled_run_settles_a_month_with_nothing_to_report() {
     // Guard the premise: the month must genuinely cover somebody, or this
     // would only be re-testing the older "covers nobody" path.
     let (from, to) = zerf::background::schedule::period_bounds(&previous).expect("bounds");
-    let covered = payroll_report::payroll_members(&app.state, from, to, &[lead_id, emp_id], false)
-        .await
-        .expect("members");
+    let covered =
+        payroll_report::payroll_members(&app.state, from, to, &[lead_id, emp_id], false, None)
+            .await
+            .expect("members");
     assert!(
         !covered.is_empty(),
         "the month has to cover the zero-hours employee for this test to mean anything"
@@ -1941,7 +1953,15 @@ async fn payroll_report_merges_back_to_back_sick_notes_into_one_row() {
     app.state
         .db
         .absences
-        .create(emp_id, sick.id, true, monday, monday + Duration::days(1), None, "approved")
+        .create(
+            emp_id,
+            sick.id,
+            true,
+            monday,
+            monday + Duration::days(1),
+            None,
+            "approved",
+        )
         .await
         .expect("first sick note");
     app.state
@@ -1959,7 +1979,7 @@ async fn payroll_report_merges_back_to_back_sick_notes_into_one_row() {
         .await
         .expect("second sick note");
 
-    let members = payroll_report::payroll_members(&app.state, from, to, &[], false)
+    let members = payroll_report::payroll_members(&app.state, from, to, &[], false, None)
         .await
         .expect("members");
     let data = payroll_report::build_report_data(
@@ -1969,6 +1989,7 @@ async fn payroll_report_merges_back_to_back_sick_notes_into_one_row() {
             to,
             interim: false,
             created_on: to,
+            carry_over_before: None,
         },
         &members,
         &config(false, false),
@@ -1988,7 +2009,9 @@ async fn payroll_report_merges_back_to_back_sick_notes_into_one_row() {
         rows.len(),
         1,
         "back-to-back sick notes are one illness, so one row: {:?}",
-        rows.iter().map(|r| (r.from, r.to, r.days)).collect::<Vec<_>>()
+        rows.iter()
+            .map(|r| (r.from, r.to, r.days))
+            .collect::<Vec<_>>()
     );
     assert_eq!(rows[0].from, monday, "the row starts where the illness did");
     assert_eq!(
@@ -1996,7 +2019,10 @@ async fn payroll_report_merges_back_to_back_sick_notes_into_one_row() {
         monday + Duration::days(3),
         "and ends where it did"
     );
-    assert_eq!(rows[0].days, 4.0, "days are the whole period, not one filing");
+    assert_eq!(
+        rows[0].days, 4.0,
+        "days are the whole period, not one filing"
+    );
     assert_eq!(
         rows[0].medical_certificate_required,
         Some(true),
@@ -2021,6 +2047,7 @@ async fn payroll_report_merges_back_to_back_sick_notes_into_one_row() {
             to,
             interim: false,
             created_on: to,
+            carry_over_before: None,
         },
         &members,
         &config(false, false),
@@ -2045,7 +2072,6 @@ async fn payroll_report_merges_back_to_back_sick_notes_into_one_row() {
 
     app.cleanup().await;
 }
-
 
 /// A month held back because somebody has not finished it is not an error, so
 /// the nightly run stays quiet about it — but the send day has passed by then,
@@ -2166,7 +2192,6 @@ async fn a_held_back_scheduled_report_tells_the_admins_once() {
     app.cleanup().await;
 }
 
-
 /// The payroll card is assembled by the very code that builds the document, so
 /// what it lists is what the report prints: an employee's sick note and an
 /// assistant's working hours, and nothing else.
@@ -2179,12 +2204,7 @@ async fn the_payroll_card_lists_what_the_report_will_print() {
         bootstrap_team_with_suffix(&app, &admin, false, "payroll-card").await;
     let lead = login_change_pw(&app, "lead-payroll-card@example.com", &lead_pw).await;
     let (_assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "payroll-card").await;
-    let assistant = login_change_pw(
-        &app,
-        "aushilfe-payroll-card@example.com",
-        &assistant_pw,
-    )
-    .await;
+    let assistant = login_change_pw(&app, "aushilfe-payroll-card@example.com", &assistant_pw).await;
 
     let (status, _) = admin
         .put(
@@ -2264,7 +2284,6 @@ async fn the_payroll_card_lists_what_the_report_will_print() {
     app.cleanup().await;
 }
 
-
 /// The rule the payroll report now lives by: a week nobody handed in proves
 /// nothing and holds nothing back, while a booking that exists and is not
 /// approved yet is proof that hours are missing from the document.
@@ -2277,8 +2296,7 @@ async fn only_provable_gaps_hold_the_payroll_report_back() {
         bootstrap_team_with_suffix(&app, &admin, false, "payroll-gate").await;
     let lead = login_change_pw(&app, "lead-payroll-gate@example.com", &lead_pw).await;
     let (assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "payroll-gate").await;
-    let assistant =
-        login_change_pw(&app, "aushilfe-payroll-gate@example.com", &assistant_pw).await;
+    let assistant = login_change_pw(&app, "aushilfe-payroll-gate@example.com", &assistant_pw).await;
 
     let today = zerf::services::settings::app_today(&app.state.pool).await;
     let previous = zerf::background::schedule::previous_period(today);
@@ -2286,36 +2304,39 @@ async fn only_provable_gaps_hold_the_payroll_report_back() {
 
     let pool = app.state.pool.clone();
     let users = app.state.db.users.clone();
-    let readiness_of = move |user_id: i64,
-                             unapproved: zerf::services::reports::UnapprovedEntries| {
-        let pool = pool.clone();
-        let users = users.clone();
-        async move {
-            let user = users
-                .find_by_id(user_id)
+    let readiness_of =
+        move |user_id: i64, unapproved: zerf::services::reports::UnapprovedEntries| {
+            let pool = pool.clone();
+            let users = users.clone();
+            async move {
+                let user = users
+                    .find_by_id(user_id)
+                    .await
+                    .expect("load user")
+                    .expect("user exists");
+                zerf::services::reports::month_export_readiness(
+                    &pool,
+                    &user,
+                    from,
+                    to,
+                    unapproved,
+                    false,
+                    zerf::services::reports::PendingAbsences::PayrollRelevant,
+                )
                 .await
-                .expect("load user")
-                .expect("user exists");
-            zerf::services::reports::month_export_readiness(
-                &pool,
-                &user,
-                from,
-                to,
-                unapproved,
-                false,
-                zerf::services::reports::PendingAbsences::PayrollRelevant,
-            )
-            .await
-            .expect("readiness")
-        }
-    };
+                .expect("readiness")
+            }
+        };
 
     // The employee booked nothing at all in the reported month. Their hours are
     // not printed anyway, so nothing about the document is missing.
     assert!(
-        readiness_of(emp_id, zerf::services::reports::UnapprovedEntries::NotRequired)
-            .await
-            .is_ready(),
+        readiness_of(
+            emp_id,
+            zerf::services::reports::UnapprovedEntries::NotRequired
+        )
+        .await
+        .is_ready(),
         "an unhanded-in month must not hold the report back"
     );
 
@@ -2323,9 +2344,12 @@ async fn only_provable_gaps_hold_the_payroll_report_back() {
     let day = (from + Duration::days(9)).format("%Y-%m-%d").to_string();
     let entry_id = create_and_submit_entry(&assistant, &day, cat_id).await;
     assert!(
-        !readiness_of(assistant_id, zerf::services::reports::UnapprovedEntries::AnyUnsettled)
-            .await
-            .is_ready(),
+        !readiness_of(
+            assistant_id,
+            zerf::services::reports::UnapprovedEntries::AnyUnsettled
+        )
+        .await
+        .is_ready(),
         "a booking that exists and is not approved is proof of hours the report would miss"
     );
 
@@ -2337,9 +2361,12 @@ async fn only_provable_gaps_hold_the_payroll_report_back() {
         .await;
     assert_eq!(status, StatusCode::OK, "approve the assistant's day");
     assert!(
-        readiness_of(assistant_id, zerf::services::reports::UnapprovedEntries::AnyUnsettled)
-            .await
-            .is_ready(),
+        readiness_of(
+            assistant_id,
+            zerf::services::reports::UnapprovedEntries::AnyUnsettled
+        )
+        .await
+        .is_ready(),
         "once decided, the month is final for them"
     );
 
@@ -2361,9 +2388,12 @@ async fn only_provable_gaps_hold_the_payroll_report_back() {
         .await
         .expect("pending holiday request");
     assert!(
-        readiness_of(emp_id, zerf::services::reports::UnapprovedEntries::NotRequired)
-            .await
-            .is_ready(),
+        readiness_of(
+            emp_id,
+            zerf::services::reports::UnapprovedEntries::NotRequired
+        )
+        .await
+        .is_ready(),
         "an undecided holiday request is not in the report and must not hold it"
     );
 
@@ -2384,9 +2414,12 @@ async fn only_provable_gaps_hold_the_payroll_report_back() {
         .await
         .expect("pending sick note");
     assert!(
-        !readiness_of(emp_id, zerf::services::reports::UnapprovedEntries::NotRequired)
-            .await
-            .is_ready(),
+        !readiness_of(
+            emp_id,
+            zerf::services::reports::UnapprovedEntries::NotRequired
+        )
+        .await
+        .is_ready(),
         "an undecided sick note changes the document and has to be waited for"
     );
 
@@ -2407,9 +2440,12 @@ async fn only_provable_gaps_hold_the_payroll_report_back() {
         .await
         .expect("assistant sick note");
     assert!(
-        readiness_of(assistant_id, zerf::services::reports::UnapprovedEntries::AnyUnsettled)
-            .await
-            .is_ready(),
+        readiness_of(
+            assistant_id,
+            zerf::services::reports::UnapprovedEntries::AnyUnsettled
+        )
+        .await
+        .is_ready(),
         "an assistant's absence is not in the report and must not hold it"
     );
 
@@ -2445,12 +2481,7 @@ async fn the_month_card_is_settled_by_the_months_own_days() {
         .await;
     assert_eq!(status, StatusCode::OK, "create boundary employee: {body}");
     let boundary_id = id(&body);
-    let boundary = login_change_pw(
-        &app,
-        "boundary-month-days@example.com",
-        &temp_pw(&body),
-    )
-    .await;
+    let boundary = login_change_pw(&app, "boundary-month-days@example.com", &temp_pw(&body)).await;
 
     let december_status = || async {
         let (status, card) = admin.get("/api/v1/reports/submission-status").await;
@@ -2503,6 +2534,242 @@ async fn the_month_card_is_settled_by_the_months_own_days() {
         december_status().await,
         "ready",
         "what is booked in January must not make December look unfinished"
+    );
+
+    app.cleanup().await;
+}
+
+/// Hours an assistant books only after their month has already been reported
+/// have to reach the payroll accountant with the day they were worked on — the
+/// month they belong to is closed, and nothing else would ever pay them.
+#[tokio::test]
+async fn hours_booked_after_a_month_was_reported_reach_the_next_report() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "payroll-late").await;
+    let lead = login_change_pw(&app, "lead-payroll-late@example.com", &lead_pw).await;
+    let (assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "late").await;
+    let assistant = login_change_pw(&app, "aushilfe-late@example.com", &assistant_pw).await;
+
+    let monday = anchor_monday();
+    let (from, to) = month_bounds(monday);
+    let period = from.format("%Y-%m").to_string();
+
+    // A day the month's own report carried.
+    let on_time =
+        create_and_submit_entry(&assistant, &monday.format("%Y-%m-%d").to_string(), cat_id).await;
+    let (status, _) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids":[on_time]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the on-time day");
+
+    // That report goes out: everything it accounted for is recorded as sent,
+    // and the period leaves the queue.
+    app.state
+        .db
+        .time_entries
+        .mark_payroll_reported(&period, from, to, None)
+        .await
+        .expect("mark the reported month");
+    app.state
+        .db
+        .settings
+        .save_setting(
+            zerf::services::settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+            &period,
+        )
+        .await
+        .expect("record the queued period");
+
+    // Only afterwards does the assistant remember a second day of that month.
+    let late_day = monday + Duration::days(1);
+    let late =
+        create_and_submit_entry(&assistant, &late_day.format("%Y-%m-%d").to_string(), cat_id).await;
+    let (status, _) = lead
+        .post("/api/v1/time-entries/batch-approve", &json!({"ids":[late]}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the late day");
+
+    // And they have left since: an assistant who is gone is exactly who forgets
+    // a shift, and the month now being reported knows nothing about them.
+    let (status, body) = admin
+        .post(&format!("/api/v1/users/{assistant_id}/archive"), &json!({}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "archive the assistant: {body}");
+
+    let (next_from, next_to) = month_bounds(to + Duration::days(1));
+    let next_period = next_from.format("%Y-%m").to_string();
+    let boundary = payroll_report::carry_over_boundary(&app.state.pool, next_from)
+        .await
+        .expect("carry-over boundary");
+    assert_eq!(
+        boundary,
+        Some(next_from),
+        "the reported month is closed, so any of its days may still be carried"
+    );
+
+    let members =
+        payroll_report::payroll_members(&app.state, next_from, next_to, &[], false, boundary)
+            .await
+            .expect("members");
+    assert!(
+        members.iter().any(|member| member.id == assistant_id),
+        "an assistant who has left still has to be paid for the day they booked"
+    );
+
+    let language = zerf::i18n::Language::from_setting("en");
+    let data = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from: next_from,
+            to: next_to,
+            interim: false,
+            created_on: next_to,
+            carry_over_before: boundary,
+        },
+        &members,
+        &config(true, false),
+        &language,
+        None,
+    )
+    .await
+    .expect("build the next month's report");
+
+    assert_eq!(
+        data.late_entry_rows.len(),
+        1,
+        "only the day booked after the report counts as a catch-up"
+    );
+    assert_eq!(
+        data.late_entry_rows[0].date, late_day,
+        "the day that was worked, not the month that reports it"
+    );
+    assert_eq!(data.late_entry_rows[0].minutes, 240);
+    assert!(
+        data.hours_sections
+            .iter()
+            .all(|section| section.rows.is_empty()),
+        "nobody worked in the reporting month itself"
+    );
+
+    // This report goes out in turn and records what it carried.
+    app.state
+        .db
+        .time_entries
+        .mark_payroll_reported(&next_period, next_from, next_to, boundary)
+        .await
+        .expect("mark the carried day");
+    let again = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from: next_from,
+            to: next_to,
+            interim: false,
+            created_on: next_to,
+            carry_over_before: boundary,
+        },
+        &members,
+        &config(true, false),
+        &language,
+        None,
+    )
+    .await
+    .expect("rebuild after sending");
+    assert!(
+        again.late_entry_rows.is_empty(),
+        "a day already carried must never be paid a second time"
+    );
+
+    app.cleanup().await;
+}
+
+/// A month whose own report is still outstanding must not have its days pulled
+/// into a later one: that report is still coming, and the hours would be
+/// reported twice.
+#[tokio::test]
+async fn a_month_still_awaiting_its_own_report_is_not_carried_into_the_next() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "payroll-wait").await;
+    let lead = login_change_pw(&app, "lead-payroll-wait@example.com", &lead_pw).await;
+    let (assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "wait").await;
+    let assistant = login_change_pw(&app, "aushilfe-wait@example.com", &assistant_pw).await;
+
+    let monday = anchor_monday();
+    let (from, to) = month_bounds(monday);
+    let period = from.format("%Y-%m").to_string();
+
+    let entry =
+        create_and_submit_entry(&assistant, &monday.format("%Y-%m-%d").to_string(), cat_id).await;
+    let (status, _) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids":[entry]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the day");
+
+    // The month reached the queue but its report has not gone out yet.
+    app.state
+        .db
+        .payroll_queue
+        .enqueue(&period)
+        .await
+        .expect("queue the period");
+    app.state
+        .db
+        .settings
+        .save_setting(
+            zerf::services::settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+            &period,
+        )
+        .await
+        .expect("record the queued period");
+
+    let (next_from, next_to) = month_bounds(to + Duration::days(1));
+    let boundary = payroll_report::carry_over_boundary(&app.state.pool, next_from)
+        .await
+        .expect("carry-over boundary");
+    assert_eq!(
+        boundary,
+        Some(from),
+        "nothing from the month still owed may be carried"
+    );
+
+    let members =
+        payroll_report::payroll_members(&app.state, next_from, next_to, &[], false, boundary)
+            .await
+            .expect("members");
+    assert!(
+        !members.iter().any(|member| member.id == assistant_id),
+        "an unreported day of a month still owed says nothing about the next one"
+    );
+
+    let language = zerf::i18n::Language::from_setting("en");
+    let data = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from: next_from,
+            to: next_to,
+            interim: false,
+            created_on: next_to,
+            carry_over_before: boundary,
+        },
+        &members,
+        &config(true, false),
+        &language,
+        None,
+    )
+    .await
+    .expect("build the next month's report");
+    assert!(
+        data.late_entry_rows.is_empty(),
+        "the day belongs to the report that is still to come"
     );
 
     app.cleanup().await;

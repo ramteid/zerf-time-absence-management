@@ -217,7 +217,7 @@ fn target_minutes_per_day(weekly_hours: f64, workdays_per_week: i16) -> i64 {
 /// Returns `Some(rules)` when the feature is enabled and at least tier-1 is valid,
 /// or `None` when the feature is off. Rules are sorted ascending by threshold so the
 /// highest applicable rule can be found by scanning from the end.
-async fn load_auto_break_config(
+pub(crate) async fn load_auto_break_config(
     pool: &crate::db::DatabasePool,
 ) -> AppResult<Option<Vec<(i64, i64)>>> {
     use crate::services::settings::{

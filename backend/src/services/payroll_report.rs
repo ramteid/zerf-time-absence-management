@@ -16,7 +16,7 @@
 use crate::error::AppResult;
 use crate::i18n::{self, Language};
 use crate::report_pdf::{
-    PayrollAbsenceRow, PayrollHoursRow, PayrollHoursSection, PayrollReportData,
+    PayrollAbsenceRow, PayrollHoursRow, PayrollHoursSection, PayrollLateEntryRow, PayrollReportData,
 };
 use crate::repository::{AbsenceCategory, AbsenceCategoryDb, User};
 use crate::roles::is_assistant_role;
@@ -24,7 +24,7 @@ use crate::services::reports::MonthExportReadiness;
 use crate::services::settings;
 use crate::time_calc::count_workdays;
 use crate::AppState;
-use chrono::{Datelike, NaiveDate};
+use chrono::{Datelike, Duration, NaiveDate, NaiveTime};
 
 /// Heading translation key of the assistants' working-hours table.
 pub const ASSISTANT_HOURS_HEADING_KEY: &str = "pdf_payroll_assistant_hours_heading";
@@ -123,6 +123,12 @@ pub async fn load_config(pool: &crate::db::DatabasePool) -> AppResult<PayrollRep
 /// true: an employee with an empty month still owes a declaration, so they
 /// stay in and the default (`false`) keeps them.
 ///
+/// `carry_over_before` additionally admits people who booked a day of an
+/// already-reported month too late for that month's report (see
+/// [`carry_over_boundary`]). `None` asks the plain question "who does this
+/// period concern" — which is what the Submissions tile wants, since a late
+/// booking from a closed month says nothing about whether this month is closed.
+///
 /// Report content, the readiness gate and the dashboard tile all go through
 /// this one filter, so what the tile counts is exactly what the PDF contains.
 pub async fn payroll_members(
@@ -131,6 +137,7 @@ pub async fn payroll_members(
     to: NaiveDate,
     excluded_user_ids: &[i64],
     everyone_needs_recorded_time: bool,
+    carry_over_before: Option<NaiveDate>,
 ) -> AppResult<Vec<User>> {
     // Neither set is role-filtered — they cover every user with activity in
     // the period, which is what lets the same lookup serve the assistant-only
@@ -147,11 +154,42 @@ pub async fn payroll_members(
         .reports
         .user_ids_with_payroll_absences_in_range(from, to)
         .await?;
-    let members = app_state
+    // Somebody who worked only in an already-reported month and booked it late
+    // has no activity in this period at all, so nothing else would bring them
+    // in — and the hours the report exists to carry would be dropped again.
+    let late_members = match carry_over_before {
+        Some(before) => {
+            app_state
+                .db
+                .reports
+                .users_with_unreported_time_entries_before(before)
+                .await?
+        }
+        None => Vec::new(),
+    };
+    let users_with_late_entries: std::collections::HashSet<i64> =
+        late_members.iter().map(|member| member.id).collect();
+    let mut members = app_state
         .db
         .reports
         .timesheet_members_for_period(from, to)
         .await?;
+    // The period-scoped query only knows people who are still active or who
+    // have activity in the period, so an assistant who has left since is
+    // missing from it. Their unpaid day is exactly what this is for.
+    let known: std::collections::HashSet<i64> = members.iter().map(|member| member.id).collect();
+    members.extend(
+        late_members
+            .into_iter()
+            .filter(|member| !known.contains(&member.id)),
+    );
+    // Restore the surname ordering the caller relies on for the printed lists.
+    members.sort_by(|left, right| {
+        left.last_name
+            .cmp(&right.last_name)
+            .then_with(|| left.first_name.cmp(&right.first_name))
+            .then_with(|| left.id.cmp(&right.id))
+    });
 
     Ok(members
         .into_iter()
@@ -162,6 +200,7 @@ pub async fn payroll_members(
             // print it, which for an assistant it never does — they are paid by
             // the hour, so only recorded time can bring them in.
             let has_relevant_data = users_with_entries.contains(&member.id)
+                || users_with_late_entries.contains(&member.id)
                 || (!is_assistant && users_with_payroll_absences.contains(&member.id));
             !crate::roles::is_admin_role(&member.role)
                 && !excluded_user_ids.contains(&member.id)
@@ -194,6 +233,43 @@ pub async fn period_delivered(pool: &crate::db::DatabasePool, period: &str) -> A
         .iter()
         .any(|queued| queued == period);
     Ok(!still_queued)
+}
+
+/// The first day whose hours a *later* report still has to carry.
+///
+/// An approved time entry is a late booking only when the report for its own
+/// month has already gone out. Everything from `period_start` onwards belongs
+/// to the month being reported right now, and everything in a month that is
+/// still queued will be covered by that month's own report — carrying either
+/// would report the same hours twice.
+///
+/// So the boundary is the earlier of the reported month's start and the start
+/// of the oldest month still owed. `None` means no report has ever been
+/// delivered, and nothing can be a late booking yet.
+pub async fn carry_over_boundary(
+    pool: &crate::db::DatabasePool,
+    period_start: NaiveDate,
+) -> AppResult<Option<NaiveDate>> {
+    // Nothing ever reached the queue, so no month has been reported and no
+    // entry can have missed its report.
+    let queued_through =
+        settings::load_setting(pool, settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY, "").await?;
+    if queued_through.is_empty() {
+        return Ok(None);
+    }
+
+    let pending = crate::repository::PayrollReportQueueDb::new(pool.clone())
+        .list_pending()
+        .await?;
+    // "YYYY-MM" sorts chronologically, so the minimum is the oldest month whose
+    // report is still to come.
+    let first_unreported = match pending.iter().min() {
+        Some(period) => crate::background::schedule::period_bounds(period)?.0,
+        // Nothing outstanding: every month up to and including `queued_through`
+        // is reported, so the first uncovered day is the one after it.
+        None => crate::background::schedule::period_bounds(&queued_through)?.1 + Duration::days(1),
+    };
+    Ok(Some(period_start.min(first_unreported)))
 }
 
 /// The month an admin's "Send now" targets.
@@ -303,7 +379,8 @@ pub struct SubmissionStatus {
 #[derive(serde::Serialize)]
 pub struct PayrollContentRow {
     pub name: Option<String>,
-    /// `absence` or `hours`.
+    /// `absence`, `hours`, or `late_hours` for a day carried over from an
+    /// already-reported month.
     pub kind: &'static str,
     /// Localized absence category; `None` on an hours line.
     pub category: Option<String>,
@@ -386,12 +463,16 @@ pub async fn build_content(
     }
 
     let sent = period_delivered(&app_state.pool, &period).await?;
+    // One boundary for the member set and the document alike, so the tile
+    // cannot show a carried day the report would not print.
+    let carry_over_before = carry_over_boundary(&app_state.pool, from).await?;
     let members = payroll_members(
         app_state,
         from,
         to,
         &config.excluded_user_ids,
         in_progress,
+        carry_over_before,
     )
     .await?;
 
@@ -431,6 +512,7 @@ pub async fn build_content(
             to,
             interim: in_progress,
             created_on: today,
+            carry_over_before,
         },
         &members,
         &config,
@@ -454,11 +536,14 @@ pub async fn build_content(
             medical_certificate_required: absence.medical_certificate_required,
         });
     }
-    let mut people_with_hours = 0;
+    // Counted by name, not by row: a catch-up day is a second row for somebody
+    // who may already have an hours line, and one person must not make the
+    // tile read "2 people".
+    let mut people_with_hours: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut minutes = 0;
     for section in data.hours_sections {
         for row in section.rows {
-            people_with_hours += 1;
+            people_with_hours.insert(row.employee.clone());
             minutes += row.minutes;
             rows.push(PayrollContentRow {
                 name: show_name(&row.employee),
@@ -472,6 +557,23 @@ pub async fn build_content(
             });
         }
     }
+    // Catch-up days from earlier months. Each carries its own date, and the
+    // hours count towards the total the tile shows — they are hours this
+    // report pays out.
+    for row in data.late_entry_rows {
+        people_with_hours.insert(row.employee.clone());
+        minutes += row.minutes;
+        rows.push(PayrollContentRow {
+            name: show_name(&row.employee),
+            kind: "late_hours",
+            category: None,
+            from: Some(row.date),
+            to: Some(row.date),
+            days: 1.0,
+            minutes: Some(row.minutes),
+            medical_certificate_required: None,
+        });
+    }
 
     Ok(PayrollContent {
         enabled: true,
@@ -483,7 +585,7 @@ pub async fn build_content(
         day_of_month: config.day_of_month,
         in_progress,
         absence_count,
-        people_with_hours,
+        people_with_hours: people_with_hours.len(),
         minutes,
         rows,
     })
@@ -525,7 +627,10 @@ pub async fn build_submission_status(
     // The tile counts everybody the month covers, including people who have
     // not booked anything yet — showing who still owes something is the whole
     // point of the card, so it never uses the snapshot's narrower filter.
-    let members = payroll_members(app_state, from, to, &config.excluded_user_ids, false).await?;
+    // No carry-over boundary: this tile asks who has closed *this* month, and a
+    // late booking from a month already reported cannot answer that.
+    let members =
+        payroll_members(app_state, from, to, &config.excluded_user_ids, false, None).await?;
     // The tile's colours always require full approval, for every person — see
     // the doc comment on `evaluate_members` — and, unlike the payroll gate, a
     // week nobody handed in is exactly what this tile is here to show.
@@ -793,6 +898,15 @@ pub struct ReportWindow {
     /// so every part of one document agrees on the date — for an interim look
     /// `to` is derived from this very day.
     pub created_on: NaiveDate,
+    /// Days *before* this date may still be carried into the report as late
+    /// bookings; see [`carry_over_boundary`], which is where every caller gets
+    /// it from. `None` carries nothing.
+    ///
+    /// Passed in rather than looked up inside the builder so that the send path
+    /// records exactly the days the document printed: it uses this one value
+    /// for the member set, for the document, and for marking those days as
+    /// reported afterwards.
+    pub carry_over_before: Option<NaiveDate>,
 }
 
 /// Absence categories the payroll report includes automatically — sick-like
@@ -851,6 +965,7 @@ pub async fn build_report_data(
         to,
         interim,
         created_on,
+        carry_over_before,
     } = window;
     let organization_name =
         settings::load_setting(&app_state.pool, settings::ORGANIZATION_NAME_KEY, "").await?;
@@ -886,6 +1001,13 @@ pub async fn build_report_data(
         });
     }
 
+    // Days from earlier months whose own report has already gone out. They are
+    // built for every mode, so the dashboard card shows exactly what the PDF
+    // would print. An interim snapshot shows them too — it is explicitly a
+    // preview, and the final report will carry the same rows.
+    let late_entry_rows =
+        build_late_entry_rows(app_state, carry_over_before, members, config).await?;
+
     Ok(PayrollReportData {
         // `from` is the first day of the reported month, so it carries the
         // period the heading needs without passing the raw "YYYY-MM" string
@@ -894,9 +1016,102 @@ pub async fn build_report_data(
         organization_name,
         absence_rows,
         hours_sections,
+        late_entry_rows,
         created_on,
         provisional,
     })
+}
+
+/// Working days from already-reported months that reached the system too late
+/// for their own report.
+///
+/// One row per person and day: an assistant is paid per day worked, and payroll
+/// has to book those hours into the month they were earned in, so the day
+/// cannot be folded into the reported month's totals.
+///
+/// Only people whose hours this report prints can have such a row — the
+/// document never carried anybody else's hours, so there is nothing to catch
+/// up on. Days before a person's start date are dropped here as everywhere
+/// else in the app.
+async fn build_late_entry_rows(
+    app_state: &AppState,
+    boundary: Option<NaiveDate>,
+    members: &[User],
+    config: &PayrollReportConfig,
+) -> AppResult<Vec<PayrollLateEntryRow>> {
+    let Some(boundary) = boundary else {
+        return Ok(Vec::new());
+    };
+    let printed: std::collections::HashMap<i64, &User> = members
+        .iter()
+        .filter(|member| config.includes_hours_for(&member.role))
+        .map(|member| (member.id, member))
+        .collect();
+    if printed.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let entries = app_state
+        .db
+        .reports
+        .unreported_time_entries_before(boundary)
+        .await?;
+
+    // Group per person and day first: the automatic break deduction is a
+    // property of the day, not of a single booking.
+    let mut minutes_by_day: std::collections::HashMap<
+        (i64, NaiveDate),
+        Vec<(NaiveTime, NaiveTime)>,
+    > = std::collections::HashMap::new();
+    for (user_id, entry_date, start_time, end_time) in entries {
+        let Some(member) = printed.get(&user_id) else {
+            continue;
+        };
+        if entry_date < member.start_date {
+            continue;
+        }
+        minutes_by_day
+            .entry((user_id, entry_date))
+            .or_default()
+            .push((
+                crate::services::reports::parse_report_time(&start_time)?,
+                crate::services::reports::parse_report_time(&end_time)?,
+            ));
+    }
+
+    let auto_break = crate::services::reports::load_auto_break_config(&app_state.pool).await?;
+    let mut rows: Vec<PayrollLateEntryRow> = Vec::new();
+    for ((user_id, date), times) in minutes_by_day {
+        let raw_minutes: i64 = times
+            .iter()
+            .map(|(start, end)| (*end - *start).num_minutes())
+            .sum();
+        // The break is computed over the late bookings alone. On the rare day
+        // that already had reported hours this deducts a second break, which
+        // errs downwards — the alternative, restating the whole day, would
+        // change hours the payroll accountant has already filed.
+        let deduction = auto_break
+            .as_deref()
+            .map(|rules| crate::time_calc::compute_day_auto_break(&times, rules))
+            .unwrap_or(0);
+        let minutes = (raw_minutes - deduction).max(0);
+        if minutes <= 0 {
+            continue;
+        }
+        rows.push(PayrollLateEntryRow {
+            employee: employee_name(printed[&user_id]),
+            date,
+            minutes,
+        });
+    }
+    // Person first, then chronological, so one person's catch-up days stay
+    // together — the order the reader books them in.
+    rows.sort_by(|left, right| {
+        left.employee
+            .cmp(&right.employee)
+            .then_with(|| left.date.cmp(&right.date))
+    });
+    Ok(rows)
 }
 
 /// One row per absence period of a payroll-relevant category, clamped to the
@@ -925,8 +1140,9 @@ async fn build_absence_rows(
         .collect();
     // Skip the per-member AU chain lookup entirely when no selected category
     // tracks it — the common case for orgs that haven't opted into the flag.
-    let any_medical_certificate_category =
-        relevant_categories.iter().any(|c| c.medical_certificate_relevant);
+    let any_medical_certificate_category = relevant_categories
+        .iter()
+        .any(|c| c.medical_certificate_relevant);
 
     let holidays = app_state.db.reports.holiday_set(from, to).await?;
 
@@ -982,8 +1198,12 @@ async fn build_absence_rows(
                     from: row_from,
                     to: row_to,
                     days,
-                    medical_certificate_required: tracks_medical_certificate
-                        .then(|| medical_certificate_required.get(&absence_id).copied().unwrap_or(false)),
+                    medical_certificate_required: tracks_medical_certificate.then(|| {
+                        medical_certificate_required
+                            .get(&absence_id)
+                            .copied()
+                            .unwrap_or(false)
+                    }),
                 },
             ));
         }
@@ -1135,6 +1355,9 @@ pub fn people_in_report(data: &PayrollReportData) -> usize {
     for section in &data.hours_sections {
         names.extend(section.rows.iter().map(|row| row.employee.as_str()));
     }
+    // A month whose only content is somebody's catch-up day is still worth
+    // sending — without this it would count as empty and be settled unsent.
+    names.extend(data.late_entry_rows.iter().map(|row| row.employee.as_str()));
     names.len()
 }
 
@@ -1296,6 +1519,7 @@ mod tests {
                 heading_key: ASSISTANT_HOURS_HEADING_KEY,
                 rows: vec![],
             }],
+            late_entry_rows: Vec::new(),
             created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
             provisional: None,
         };
@@ -1326,8 +1550,9 @@ mod tests {
                 organization_name: String::new(),
                 absence_rows: Some(vec![]),
                 hours_sections: vec![],
+                late_entry_rows: Vec::new(),
                 created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
-            provisional: None,
+                provisional: None,
             }
         };
         assert_eq!(
