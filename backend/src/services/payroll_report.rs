@@ -24,7 +24,7 @@ use crate::services::reports::MonthExportReadiness;
 use crate::services::settings;
 use crate::time_calc::count_workdays;
 use crate::AppState;
-use chrono::{Datelike, Duration, NaiveDate, NaiveTime};
+use chrono::{Datelike, NaiveDate, NaiveTime};
 
 /// Heading translation key of the assistants' working-hours table.
 pub const ASSISTANT_HOURS_HEADING_KEY: &str = "pdf_payroll_assistant_hours_heading";
@@ -164,7 +164,9 @@ pub async fn payroll_members(
                 .reports
                 .users_with_carried_time_entries_before(
                     carried.reported_as.as_deref(),
+                    carried.since,
                     carried.before,
+                    &carried.owed_periods,
                 )
                 .await?
         }
@@ -239,12 +241,29 @@ pub async fn period_delivered(pool: &crate::db::DatabasePool, period: &str) -> A
 }
 
 /// Which days from earlier months a report shows in its catch-up section.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CarriedDays {
-    /// Only days before this date. Always the reported month's own start, and
-    /// never reaching into a month whose own report is still owed — see
-    /// [`carry_over_boundary`].
+    /// Never below this date. Always the start of the very first period the
+    /// payroll report ever queued (`PAYROLL_REPORT_FIRST_PERIOD_KEY`), fixed
+    /// forever once that first period exists. Without it, an installation's
+    /// first-ever report would treat "nothing has been queued before" as "no
+    /// lower limit at all", sweeping in every approved entry created between
+    /// the `payroll_reported_period` migration and the day payroll reporting
+    /// was actually turned on — which for an org that already used Zerf for
+    /// time tracking could be months of unrelated history.
+    pub since: NaiveDate,
+    /// Only days before this date — always the reported month's own start,
+    /// since everything from there on belongs to its regular sections.
     pub before: NaiveDate,
+    /// Months ("YYYY-MM") whose own report has not gone out yet. Days in them
+    /// are skipped: that report will print them itself, and carrying them here
+    /// as well would send the same hours twice.
+    ///
+    /// A list rather than a single "oldest owed" cut-off, because the queue can
+    /// have gaps. With March stuck behind a late approval while April and May
+    /// were delivered, a cut-off at March would also freeze a genuine late
+    /// booking in April — for as long as March stayed stuck.
+    pub owed_periods: Vec<String>,
     /// `None` asks what a report produced now would carry. `Some(period)` asks
     /// what that period's report actually carried, read back from the mark it
     /// left.
@@ -279,7 +298,7 @@ pub struct CarriedDays {
 pub async fn carry_over_boundary(
     pool: &crate::db::DatabasePool,
     period_start: NaiveDate,
-) -> AppResult<Option<NaiveDate>> {
+) -> AppResult<Option<CarriedDays>> {
     // Nothing ever reached the queue, so no month has been reported and no
     // entry can have missed its report.
     let queued_through =
@@ -288,19 +307,59 @@ pub async fn carry_over_boundary(
         return Ok(None);
     }
 
-    let pending = crate::repository::PayrollReportQueueDb::new(pool.clone())
+    // Months whose own report is still to come. Their days must not be raided
+    // — that report will print them itself — but they are named individually
+    // rather than collapsed into "everything from the oldest one onwards":
+    // the queue can have gaps. One month stuck behind a late approval, with
+    // later months already delivered, must not freeze carry-over for those
+    // later months too, possibly for as long as the stuck month lasts.
+    let owed_periods = crate::repository::PayrollReportQueueDb::new(pool.clone())
         .list_pending()
         .await?;
-    // "YYYY-MM" sorts chronologically, so the minimum is the oldest month whose
-    // report is still to come.
-    let first_unreported = match pending.iter().min() {
-        Some(period) => crate::background::schedule::period_bounds(period)?.0,
-        // Nothing outstanding: every month up to and including `queued_through`
-        // is reported, so the first uncovered day is the one after it.
-        None => crate::background::schedule::period_bounds(&queued_through)?.1 + Duration::days(1),
-    };
-    Ok(Some(period_start.min(first_unreported)))
+
+    Ok(Some(CarriedDays {
+        since: carry_over_floor(pool).await?,
+        // Everything from the reported month onwards belongs to its regular
+        // sections, not to the catch-up one.
+        before: period_start,
+        owed_periods,
+        reported_as: None,
+    }))
 }
+
+/// The start of the very first period the payroll report ever queued — the
+/// permanent lower bound nothing may ever be carried past. See
+/// [`CarriedDays::since`] for why this exists.
+///
+/// Falls back to `before` (making the caller's range empty) when the floor is
+/// somehow unset while this is asked for anyway — reachable only if
+/// `PAYROLL_REPORT_QUEUE_PERIOD_KEY` is set without `PAYROLL_REPORT_FIRST_PERIOD_KEY`
+/// (an installation upgraded mid-flight, before either setting existed);
+/// refusing to carry anything is the safe direction to fail in.
+async fn carry_over_floor(pool: &crate::db::DatabasePool) -> AppResult<NaiveDate> {
+    let first_period =
+        settings::load_setting(pool, settings::PAYROLL_REPORT_FIRST_PERIOD_KEY, "").await?;
+    if first_period.is_empty() {
+        // An installation that was already sending payroll reports before this
+        // floor existed. There is nothing to protect it from: migration 044
+        // marked every entry that existed when the carry-over feature arrived,
+        // so no pre-existing history can be mistaken for a late booking. The
+        // floor must therefore be permissive here — a restrictive fallback
+        // would silently switch carry-over off for exactly the installations
+        // that have been running longest.
+        return Ok(NO_CARRY_OVER_FLOOR);
+    }
+    crate::background::schedule::period_bounds(&first_period).map(|(start, _)| start)
+}
+
+/// Lower bound that excludes nothing, for installations predating
+/// [`settings::PAYROLL_REPORT_FIRST_PERIOD_KEY`]. Earlier than any date this
+/// application can hold: a time entry cannot precede its owner's start date,
+/// and no real employment record reaches back this far.
+const NO_CARRY_OVER_FLOOR: NaiveDate = match NaiveDate::from_ymd_opt(1970, 1, 1) {
+    Some(date) => date,
+    None => unreachable!(),
+};
 
 /// The month an admin's "Send now" targets.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -501,17 +560,19 @@ pub async fn build_content(
     // the send belongs to the next report, and showing it here under "what this
     // month's report contained" would say the tax office already has it.
     let carried = if sent {
+        // An exact match on the mark (`reported_as: Some(period)`) already
+        // scopes this precisely, so `since` only has to be a value the mark
+        // could actually have used — the feature's own floor always is.
         Some(CarriedDays {
+            since: carry_over_floor(&app_state.pool).await?,
             before: from,
+            // Reading history back: the mark alone says what went out, and a
+            // month owed *now* has no bearing on what that send did months ago.
+            owed_periods: Vec::new(),
             reported_as: Some(period.clone()),
         })
     } else {
-        carry_over_boundary(&app_state.pool, from)
-            .await?
-            .map(|before| CarriedDays {
-                before,
-                reported_as: None,
-            })
+        carry_over_boundary(&app_state.pool, from).await?
     };
     let members = payroll_members(
         app_state,
@@ -1112,7 +1173,12 @@ async fn build_late_entry_rows(
     let entries = app_state
         .db
         .reports
-        .carried_time_entries_before(carried.reported_as.as_deref(), carried.before)
+        .carried_time_entries_before(
+            carried.reported_as.as_deref(),
+            carried.since,
+            carried.before,
+            &carried.owed_periods,
+        )
         .await?;
     let net_by_day = net_minutes_by_day(app_state, entries, &printed).await?;
 

@@ -201,6 +201,16 @@ pub async fn run_now(state: &AppState) -> AppResult<RunSummary> {
 
 /// Queue every month from the last recorded one through the previous month.
 async fn queue_previous_month(state: &AppState, today: NaiveDate) -> AppResult<()> {
+    // Read before the backfill runs: an empty marker here means nothing has
+    // ever been queued before, so whatever this call queues is, by
+    // definition, the earliest period the feature has ever considered. That
+    // period becomes the permanent floor `carry_over_boundary` clamps to, so
+    // the very first report this installation ever sends cannot reach back
+    // into pre-existing history it was never meant to carry.
+    let first_run = settings::load_setting(&state.pool, settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY, "")
+        .await?
+        .is_empty();
+
     schedule::queue_periods_through_previous_month(
         state,
         settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
@@ -211,7 +221,25 @@ async fn queue_previous_month(state: &AppState, today: NaiveDate) -> AppResult<(
             Ok(())
         },
     )
-    .await
+    .await?;
+
+    if first_run {
+        // The floor is set once and never touched again — an idempotent
+        // insert-only write, not tied to whether this particular call ended
+        // up queuing anything (a re-run against an already-populated queue
+        // must not move the floor).
+        let floor = settings::load_setting(&state.pool, settings::PAYROLL_REPORT_FIRST_PERIOD_KEY, "")
+            .await?;
+        if floor.is_empty() {
+            let earliest = schedule::previous_period(today);
+            state
+                .db
+                .settings
+                .save_setting(settings::PAYROLL_REPORT_FIRST_PERIOD_KEY, &earliest)
+                .await?;
+        }
+    }
+    Ok(())
 }
 
 /// Send every queued period that is due and ready; leave the rest queued.
@@ -370,14 +398,10 @@ async fn process_period(
     // [`payroll_report::payroll_members`].
     // Days booked after their own month's report went out are carried by this
     // one, so whoever holds such a day belongs to the member set even when they
-    // did nothing in this period.
-    let carry_over_before = payroll_report::carry_over_boundary(&state.pool, from).await?;
-    // A report being produced now asks what it still has to carry, never what
-    // an earlier one already did.
-    let carried = carry_over_before.map(|before| payroll_report::CarriedDays {
-        before,
-        reported_as: None,
-    });
+    // did nothing in this period. `carry_over_boundary` already asks what a
+    // report produced now would still have to carry, never what an earlier
+    // one already did.
+    let carried = payroll_report::carry_over_boundary(&state.pool, from).await?;
     let members = payroll_report::payroll_members(
         state,
         from,
@@ -449,7 +473,7 @@ async fn process_period(
                     // later report.
                     // Nothing was printed, so no older day was carried: only
                     // this month's own entries may be marked.
-                    if mark_reported_entries(state, period, from, month_end, carry_over_before, &[])
+                    if mark_reported_entries(state, period, from, month_end, carried.as_ref(), &[])
                         .await
                     {
                         state.db.payroll_queue.delete_entry(period).await?;
@@ -506,7 +530,7 @@ async fn process_period(
             to,
             interim: mode == SendMode::ManualSnapshot,
             created_on: today,
-            carried,
+            carried: carried.clone(),
         },
         &included,
         config,
@@ -544,7 +568,7 @@ async fn process_period(
             // Same as the covers-nobody branch: a period that will never be
             // sent is still done with, and its entries must not resurface as
             // catch-up days next month.
-            if mark_reported_entries(state, period, from, month_end, carry_over_before, &[]).await {
+            if mark_reported_entries(state, period, from, month_end, carried.as_ref(), &[]).await {
                 state.db.payroll_queue.delete_entry(period).await?;
             }
         }
@@ -658,7 +682,7 @@ async fn process_period(
             period,
             from,
             month_end,
-            carry_over_before,
+            carried.as_ref(),
             &carried_user_ids,
         )
         .await
@@ -691,7 +715,7 @@ async fn mark_reported_entries(
     period: &str,
     period_start: NaiveDate,
     period_end: NaiveDate,
-    carry_over_before: Option<NaiveDate>,
+    carried: Option<&payroll_report::CarriedDays>,
     carried_user_ids: &[i64],
 ) -> bool {
     for attempt in 1..=DELETE_RETRY_ATTEMPTS {
@@ -702,8 +726,14 @@ async fn mark_reported_entries(
                 period,
                 period_start,
                 period_end,
-                carry_over_before,
-                carried_user_ids,
+                crate::repository::PayrollCarryScope {
+                    since: carried.map(|c| c.since),
+                    before: carried.map(|c| c.before),
+                    owed_periods: carried
+                        .map(|c| c.owed_periods.as_slice())
+                        .unwrap_or(&[]),
+                    user_ids: carried_user_ids,
+                },
             )
             .await
         {

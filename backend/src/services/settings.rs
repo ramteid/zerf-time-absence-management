@@ -73,6 +73,16 @@ pub const PAYROLL_REPORT_EXCLUDED_USERS_KEY: &str = "payroll_report_excluded_use
 /// `services::payroll_report::build_status`.
 pub const PAYROLL_REPORT_QUEUE_PERIOD_KEY: &str = "payroll_report_queue_period";
 
+/// The first period ("YYYY-MM") the payroll report ever queued, set once and
+/// never overwritten. Nothing dated before this period's start may ever be
+/// carried into a later report — see
+/// `services::payroll_report::carry_over_boundary`. Without this floor, the
+/// very first report an installation ever sends would treat "no report has
+/// been delivered yet" as "carry everything", sweeping in every approved
+/// entry created between the `payroll_reported_period` migration and the day
+/// payroll reporting was actually turned on, however long that gap was.
+pub const PAYROLL_REPORT_FIRST_PERIOD_KEY: &str = "payroll_report_first_period";
+
 /// Newest period ("YYYY-MM") whose held-back payroll report was already
 /// reported to the administrators. The nightly loop re-reaches a blocked period
 /// every night, so without this marker the same warning would be raised every

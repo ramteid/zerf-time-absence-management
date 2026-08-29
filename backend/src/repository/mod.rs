@@ -44,7 +44,7 @@ pub use reports::ReportDb;
 pub use sessions::SessionDb;
 pub use settings::SettingsDb;
 pub use system_metadata::SystemMetadataDb;
-pub use time_entries::{NewEntryData, TimeEntry, TimeEntryDb};
+pub use time_entries::{NewEntryData, PayrollCarryScope, TimeEntry, TimeEntryDb};
 pub use timesheet_export_queue::{ExportQueueEntry, TimesheetExportQueueDb};
 pub use users::{
     ActiveUserRow, LeaveAccountDefinition, User, UserDb, UserLeaveAccountDetails,

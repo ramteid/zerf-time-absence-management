@@ -84,6 +84,30 @@ fn duration_min(start: &str, end: &str) -> AppResult<i64> {
     Ok((e - s).num_minutes())
 }
 
+/// The catch-up half of one payroll report's mark: which older days it
+/// printed, and therefore which ones it may record as accounted for.
+///
+/// Bundled rather than passed loose because every field has to agree with
+/// `ReportDb::carried_time_entries_before`, which selects the very same rows
+/// for the document. A mark that is scoped differently from the document
+/// silently either loses a day or reports it twice.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PayrollCarryScope<'a> {
+    /// Permanent floor: the start of the very first period the payroll report
+    /// ever queued, so a first-ever report cannot reach into pre-existing
+    /// history. `None` carries nothing.
+    pub since: Option<NaiveDate>,
+    /// Exclusive upper bound — the reported month's own start. `None` carries
+    /// nothing.
+    pub before: Option<NaiveDate>,
+    /// Months ("YYYY-MM") whose own report is still to come; their days belong
+    /// to that report, not this one.
+    pub owed_periods: &'a [String],
+    /// The people whose hours this document actually printed. Nobody else's
+    /// older day may be marked — it was in no report at all.
+    pub user_ids: &'a [i64],
+}
+
 const TE_SELECT: &str =
     "SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, \
      submitted_at, reviewed_by, reviewed_at, rejection_reason, \
@@ -740,9 +764,20 @@ impl TimeEntryDb {
         }
         validate_entry(&mut tx, prev.user_id, entry, Some(entry_id)).await?;
         sqlx::query(
+            // Moving a day to a different month invalidates any payroll mark it
+            // carries: the mark records the month whose report accounted for
+            // this entry, and after the move that is no longer the month the
+            // entry is in. Leaving it would make the day invisible to both
+            // months' read-back — the old one no longer contains its date, the
+            // new one does not carry its mark — so it is cleared and the entry
+            // becomes catchable again. An edit inside the same month keeps its
+            // mark: that report really did account for the day.
             "UPDATE time_entries \
              SET entry_date=$1, start_time=$2, end_time=$3, category_id=$4, \
-                 comment=$5, updated_at=CURRENT_TIMESTAMP \
+                 comment=$5, updated_at=CURRENT_TIMESTAMP, \
+                 payroll_reported_period = CASE \
+                     WHEN to_char($1::date, 'YYYY-MM') = to_char(entry_date, 'YYYY-MM') \
+                     THEN payroll_reported_period ELSE NULL END \
              WHERE id=$6",
         )
         .bind(entry.entry_date)
@@ -1214,9 +1249,13 @@ impl TimeEntryDb {
     ///   whoever it belongs to. The month has been through the report; nothing
     ///   in it arrived late. This is what keeps switching on *List employees'
     ///   working hours* from dumping years of history into the next report.
-    /// * approved entries from before `carry_over_before` belonging to
-    ///   `carried_user_ids` — the people whose hours this report actually
+    /// * approved entries in `[carry_over_since, carry_over_before)` belonging
+    ///   to `carried_user_ids` — the people whose hours this report actually
     ///   printed, so these are the catch-up days it carried.
+    ///   `carry_over_since` is a permanent floor (the start of the very first
+    ///   period the payroll report ever queued) so that an installation's
+    ///   first-ever report cannot reach into pre-existing history it was never
+    ///   meant to carry.
     ///
     /// Everybody else's older entries stay unmarked on purpose. An employee's
     /// day booked late while only assistants' hours are printed has been in no
@@ -1224,6 +1263,15 @@ impl TimeEntryDb {
     /// were the setting turned on later, the day could never be caught up. The
     /// two clauses therefore answer different questions — "was this month
     /// reported" and "did this report print this day".
+    ///
+    /// The first clause deliberately covers admins and people on the exclusion
+    /// list as well, even though the document never printed them. The mark is a
+    /// statement about time, not about printing: their month *did* go through a
+    /// report. The consequence is the same one the employee-hours toggle has —
+    /// taking somebody off the exclusion list applies from then on and does not
+    /// reach back to pull in months that were reported while they were out.
+    /// Anything else would mean an admin edit silently mailing the tax office a
+    /// person's entire history.
     ///
     /// Days before the person's start date, and entries in categories that do
     /// not count as work, are left out of the second group for the same reason:
@@ -1236,19 +1284,29 @@ impl TimeEntryDb {
         period: &str,
         period_start: NaiveDate,
         period_end: NaiveDate,
-        carry_over_before: Option<NaiveDate>,
-        carried_user_ids: &[i64],
+        carried: PayrollCarryScope<'_>,
     ) -> AppResult<u64> {
+        let PayrollCarryScope {
+            since: carry_over_since,
+            before: carry_over_before,
+            owed_periods,
+            user_ids: carried_user_ids,
+        } = carried;
         let result = sqlx::query(
-            // A NULL boundary makes the comparison NULL rather than true, and
-            // an empty id list matches nobody, so a report that carried nothing
-            // marks its own month and not one day more.
+            // A NULL bound makes the comparison NULL rather than true, and an
+            // empty id list matches nobody, so a report that carried nothing
+            // marks its own month and not one day more. The carry clause has to
+            // match `ReportDb::carried_time_entries_before` condition for
+            // condition, or the document and the mark disagree about what went
+            // out.
             "UPDATE time_entries AS z SET payroll_reported_period=$1 \
              WHERE z.payroll_reported_period IS NULL \
              AND (z.entry_date BETWEEN $2 AND $3 \
                   OR (z.status='approved' \
-                      AND z.entry_date < $4::date \
-                      AND z.user_id = ANY($5) \
+                      AND z.entry_date >= $4::date \
+                      AND z.entry_date < $5::date \
+                      AND to_char(z.entry_date, 'YYYY-MM') <> ALL($6) \
+                      AND z.user_id = ANY($7) \
                       AND z.entry_date >= \
                           (SELECT u.start_date FROM users u WHERE u.id = z.user_id) \
                       AND EXISTS (SELECT 1 FROM categories c \
@@ -1257,7 +1315,9 @@ impl TimeEntryDb {
         .bind(period)
         .bind(period_start)
         .bind(period_end)
+        .bind(carry_over_since)
         .bind(carry_over_before.map(|boundary| boundary.min(period_start)))
+        .bind(owed_periods)
         .bind(carried_user_ids)
         .execute(&self.pool)
         .await?;

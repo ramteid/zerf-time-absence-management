@@ -229,14 +229,40 @@ older date read like new work. Manual sends never mark — the scheduled copy is
 still to come. An approved, work-crediting entry with no mark is therefore
 provably a day no report has printed. Migration 044 backfills every pre-existing
 entry with its own month, so enabling the feature cannot dump history into the
-next report.
+next report. Editing an entry's date *out of* its month clears the mark
+(`TimeEntryDb::update`): the mark names the month whose report accounted for the
+entry, and after such a move that is no longer the month the entry is in — a
+stale mark would hide the day from both months' read-back. An edit inside the
+same month keeps it.
 
 `services::payroll_report::carry_over_boundary` decides how far back that
-reaches: the earlier of the reported month's start and the start of the oldest
-month still in `payroll_report_queue`. A month whose own report is still owed is
-never raided — that report will print those days itself. The boundary travels in `ReportWindow::carried`
-(`CarriedDays`), so the member set, the document and the marking afterwards all
-use one value. `CarriedDays::reported_as` picks the direction: `None` asks what a
+reaches, and returns the whole `CarriedDays` scope rather than a single date.
+Three bounds, each guarding a different way of getting it wrong:
+
+* `before` — the reported month's own start. Everything from there on belongs
+  to its regular sections.
+* `owed_periods` — every month still in `payroll_report_queue`, skipped
+  individually rather than collapsed into "everything from the oldest one
+  onwards". The queue can have gaps: one month stuck behind a late approval
+  while later months were delivered must not freeze carry-over for those later
+  months too, possibly for as long as the stuck month lasts.
+* `since` — the start of the very first period ever queued
+  (`payroll_report_first_period`, written once by `queue_previous_month`).
+  Without it the *first* report an installation ever sends would sweep in every
+  approved entry created between migration 044 and the day payroll reporting was
+  switched on: `queue_previous_month` runs before anything asks
+  "has a report been delivered?", so the "nothing queued yet → carry nothing"
+  branch is already unreachable by then. Installations predating this key fall
+  back to a permissive floor — migration 044 already marked everything that
+  existed for them, so there is no history to protect them from, and a
+  restrictive fallback would silently switch carry-over off for exactly the
+  installations that have been running longest.
+
+The scope travels in `ReportWindow::carried`, and `TimeEntryDb::mark_payroll_reported`
+takes the same three bounds as a `PayrollCarryScope`, so the member set, the
+document and the marking afterwards cannot disagree about which days were meant.
+Every condition in `ReportDb::carried_time_entries_before` has a twin in the mark
+query for that reason. `CarriedDays::reported_as` picks the direction: `None` asks what a
 report produced now would carry, `Some(period)` asks what that period's send
 actually carried, read back from the mark. The dashboard card uses the second
 form for a month already delivered — asking the first would list days booked
@@ -253,7 +279,7 @@ the send still inflates a delivered month's card. That gap is deliberate and
 unrelated to what this feature was asked to solve — entries only. `payroll_members` takes it too, because
 somebody who worked only in the closed month has no activity in the month now
 being reported (and may since have been deactivated, hence
-`users_with_unreported_time_entries_before` returning whole user rows). The
+`users_with_carried_time_entries_before` returning whole user rows). The
 Submissions tile passes `None`: a late day from a closed month says nothing about
 whether *this* month is closed. Absences are deliberately out of scope — an
 assistant's absence never appears in the report at all.

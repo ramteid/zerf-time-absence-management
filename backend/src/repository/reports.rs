@@ -405,7 +405,9 @@ impl ReportDb {
     pub async fn users_with_carried_time_entries_before(
         &self,
         reported_as: Option<&str>,
+        since: NaiveDate,
         before: NaiveDate,
+        owed_periods: &[String],
     ) -> AppResult<Vec<User>> {
         Ok(sqlx::query_as(
             "SELECT DISTINCT u.id, u.email, u.password_hash, u.first_name, u.last_name, u.role, \
@@ -418,11 +420,15 @@ impl ReportDb {
              JOIN categories c ON c.id = z.category_id \
              WHERE ((($1::text) IS NULL AND z.payroll_reported_period IS NULL) \
                     OR z.payroll_reported_period = $1) \
-             AND z.entry_date < $2 AND z.status='approved' AND c.counts_as_work \
+             AND z.entry_date >= $2 AND z.entry_date < $3 \
+             AND to_char(z.entry_date, 'YYYY-MM') <> ALL($4) \
+             AND z.status='approved' AND c.counts_as_work \
              AND z.entry_date >= u.start_date",
         )
         .bind(reported_as)
+        .bind(since)
         .bind(before)
+        .bind(owed_periods)
         .fetch_all(&self.pool)
         .await?)
     }
@@ -442,25 +448,30 @@ impl ReportDb {
     pub async fn carried_time_entries_before(
         &self,
         reported_as: Option<&str>,
+        since: NaiveDate,
         before: NaiveDate,
+        owed_periods: &[String],
     ) -> AppResult<Vec<(i64, NaiveDate, String, String)>> {
         Ok(sqlx::query_as(
-            // The start-date and counts-as-work conditions have to match
-            // `TimeEntryDb::mark_payroll_reported` exactly. A day this query
-            // returns but that one never marks would keep its owner in the
-            // report's member set month after month, waiting to be carried by a
-            // report that can never print it.
+            // Every condition here has to match `TimeEntryDb::mark_payroll_reported`
+            // exactly. A day this query returns but that one never marks would
+            // keep its owner in the report's member set month after month,
+            // waiting to be carried by a report that can never print it.
             "SELECT z.user_id, z.entry_date, z.start_time, z.end_time FROM time_entries z \
              JOIN categories c ON c.id = z.category_id \
              JOIN users u ON u.id = z.user_id \
              WHERE ((($1::text) IS NULL AND z.payroll_reported_period IS NULL) \
                     OR z.payroll_reported_period = $1) \
-             AND z.entry_date < $2 AND z.status='approved' AND c.counts_as_work \
+             AND z.entry_date >= $2 AND z.entry_date < $3 \
+             AND to_char(z.entry_date, 'YYYY-MM') <> ALL($4) \
+             AND z.status='approved' AND c.counts_as_work \
              AND z.entry_date >= u.start_date \
              ORDER BY z.user_id, z.entry_date, z.start_time",
         )
         .bind(reported_as)
+        .bind(since)
         .bind(before)
+        .bind(owed_periods)
         .fetch_all(&self.pool)
         .await?)
     }

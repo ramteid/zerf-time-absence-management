@@ -2572,7 +2572,7 @@ async fn hours_booked_after_a_month_was_reported_reach_the_next_report() {
     app.state
         .db
         .time_entries
-        .mark_payroll_reported(&period, from, to, None, &[])
+        .mark_payroll_reported(&period, from, to, Default::default())
         .await
         .expect("mark the reported month");
     app.state
@@ -2603,18 +2603,14 @@ async fn hours_booked_after_a_month_was_reported_reach_the_next_report() {
 
     let (next_from, next_to) = month_bounds(to + Duration::days(1));
     let next_period = next_from.format("%Y-%m").to_string();
-    let boundary = payroll_report::carry_over_boundary(&app.state.pool, next_from)
+    let carried = payroll_report::carry_over_boundary(&app.state.pool, next_from)
         .await
         .expect("carry-over boundary");
     assert_eq!(
-        boundary,
+        carried.as_ref().map(|c| c.before),
         Some(next_from),
         "the reported month is closed, so any of its days may still be carried"
     );
-    let carried = boundary.map(|before| payroll_report::CarriedDays {
-        before,
-        reported_as: None,
-    });
 
     let members = payroll_report::payroll_members(
         &app.state,
@@ -2670,7 +2666,20 @@ async fn hours_booked_after_a_month_was_reported_reach_the_next_report() {
     app.state
         .db
         .time_entries
-        .mark_payroll_reported(&next_period, next_from, next_to, boundary, &[assistant_id])
+        .mark_payroll_reported(
+            &next_period,
+            next_from,
+            next_to,
+            zerf::repository::PayrollCarryScope {
+                since: carried.as_ref().map(|c| c.since),
+                before: carried.as_ref().map(|c| c.before),
+                owed_periods: carried
+                    .as_ref()
+                    .map(|c| c.owed_periods.as_slice())
+                    .unwrap_or(&[]),
+                user_ids: &[assistant_id],
+            },
+        )
         .await
         .expect("mark the carried day");
     let again = payroll_report::build_report_data(
@@ -2742,18 +2751,14 @@ async fn a_month_still_awaiting_its_own_report_is_not_carried_into_the_next() {
         .expect("record the queued period");
 
     let (next_from, next_to) = month_bounds(to + Duration::days(1));
-    let boundary = payroll_report::carry_over_boundary(&app.state.pool, next_from)
+    let carried = payroll_report::carry_over_boundary(&app.state.pool, next_from)
         .await
         .expect("carry-over boundary");
     assert_eq!(
-        boundary,
+        carried.as_ref().map(|c| c.before),
         Some(from),
         "nothing from the month still owed may be carried"
     );
-    let carried = boundary.map(|before| payroll_report::CarriedDays {
-        before,
-        reported_as: None,
-    });
 
     let members = payroll_report::payroll_members(
         &app.state,
@@ -2828,7 +2833,7 @@ async fn a_day_no_report_printed_is_not_recorded_as_reported() {
     app.state
         .db
         .time_entries
-        .mark_payroll_reported(&period, from, to, None, &[])
+        .mark_payroll_reported(&period, from, to, Default::default())
         .await
         .expect("mark the reported month");
     app.state
@@ -2852,13 +2857,9 @@ async fn a_day_no_report_printed_is_not_recorded_as_reported() {
 
     let (next_from, next_to) = month_bounds(to + Duration::days(1));
     let next_period = next_from.format("%Y-%m").to_string();
-    let boundary = payroll_report::carry_over_boundary(&app.state.pool, next_from)
+    let carried = payroll_report::carry_over_boundary(&app.state.pool, next_from)
         .await
         .expect("carry-over boundary");
-    let carried = boundary.map(|before| payroll_report::CarriedDays {
-        before,
-        reported_as: None,
-    });
 
     // With employee hours switched on, the day is a catch-up like any other.
     let language = zerf::i18n::Language::from_setting("en");
@@ -2918,7 +2919,20 @@ async fn a_day_no_report_printed_is_not_recorded_as_reported() {
     app.state
         .db
         .time_entries
-        .mark_payroll_reported(&next_period, next_from, next_to, boundary, &[])
+        .mark_payroll_reported(
+            &next_period,
+            next_from,
+            next_to,
+            zerf::repository::PayrollCarryScope {
+                since: carried.as_ref().map(|c| c.since),
+                before: carried.as_ref().map(|c| c.before),
+                owed_periods: carried
+                    .as_ref()
+                    .map(|c| c.owed_periods.as_slice())
+                    .unwrap_or(&[]),
+                user_ids: &[],
+            },
+        )
         .await
         .expect("mark what that report accounted for");
 
@@ -2928,7 +2942,12 @@ async fn a_day_no_report_printed_is_not_recorded_as_reported() {
         .state
         .db
         .reports
-        .carried_time_entries_before(None, next_from)
+        .carried_time_entries_before(
+            None,
+            NaiveDate::from_ymd_opt(2000, 1, 1).unwrap(),
+            next_from,
+            &[],
+        )
         .await
         .expect("outstanding days");
     assert!(
@@ -3002,7 +3021,17 @@ async fn a_sent_month_shows_the_days_it_carried_and_not_the_ones_since() {
     app.state
         .db
         .time_entries
-        .mark_payroll_reported(&period, from, to, Some(from), &[_assistant_id])
+        .mark_payroll_reported(
+            &period,
+            from,
+            to,
+            zerf::repository::PayrollCarryScope {
+                since: Some(earlier_from),
+                before: Some(from),
+                owed_periods: &[],
+                user_ids: &[_assistant_id],
+            },
+        )
         .await
         .expect("mark the sent report");
     app.state
@@ -3096,7 +3125,7 @@ async fn a_sent_months_hours_do_not_grow_after_the_fact() {
     app.state
         .db
         .time_entries
-        .mark_payroll_reported(&period, from, to, None, &[])
+        .mark_payroll_reported(&period, from, to, Default::default())
         .await
         .expect("mark what the send accounted for");
     app.state
@@ -3204,7 +3233,7 @@ async fn a_sent_months_employee_zero_row_survives_the_marker_based_read() {
     app.state
         .db
         .time_entries
-        .mark_payroll_reported(&period, from, to, None, &[])
+        .mark_payroll_reported(&period, from, to, Default::default())
         .await
         .expect("mark the reported month");
     app.state
@@ -3240,6 +3269,387 @@ async fn a_sent_months_employee_zero_row_survives_the_marker_based_read() {
     assert_eq!(
         zero_rows, 2,
         "the employee and the lead, both with no bookings, must still print as 0-day rows: {hours_rows:?}"
+    );
+
+    app.cleanup().await;
+}
+
+/// An installation that has been tracking time for a while and only *then*
+/// switches the payroll report on must not have its entire back-catalogue
+/// swept into the very first report as catch-up days.
+///
+/// The first scheduled run is the moment `payroll_report_queue_period` stops
+/// being empty, so by the time anything asks "has a report ever been
+/// delivered?" the answer is already yes. Without a floor recorded at that
+/// same moment, the first report would treat every approved entry older than
+/// its own month — however old — as a day that missed its report.
+#[tokio::test]
+async fn the_first_report_ever_sent_does_not_sweep_up_the_back_catalogue() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    configure_unreachable_smtp(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "first-run").await;
+    let lead = login_change_pw(&app, "lead-first-run@example.com", &lead_pw).await;
+    let (assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "first-run").await;
+    let assistant = login_change_pw(&app, "aushilfe-first-run@example.com", &assistant_pw).await;
+
+    let today = zerf::services::settings::app_today(&app.state.pool).await;
+    let period = zerf::background::schedule::previous_period(today);
+    let (from, _to) = zerf::background::schedule::period_bounds(&period).expect("bounds");
+    // Two months before the first reported month: history from before payroll
+    // reporting was ever enabled.
+    let (older_from, _older_to) = month_bounds(from - Duration::days(1));
+    let (oldest_from, _oldest_to) = month_bounds(older_from - Duration::days(1));
+
+    // Approved work in that back-catalogue. Nothing has ever marked it,
+    // because the payroll report has never run.
+    let ancient_day = oldest_from + Duration::days(9);
+    let ancient = create_and_submit_entry(
+        &assistant,
+        &ancient_day.format("%Y-%m-%d").to_string(),
+        cat_id,
+    )
+    .await;
+    let (status, _) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids":[ancient]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the historical day");
+
+    // Sanity: nothing has ever been queued, so nothing can be a late booking.
+    assert_eq!(
+        zerf::services::settings::load_setting(
+            &app.state.pool,
+            zerf::services::settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+            "",
+        )
+        .await
+        .expect("queue marker"),
+        "",
+        "this installation has never queued a payroll period"
+    );
+
+    // Now the admin switches the payroll report on and the first scheduled run
+    // happens — queueing the previous month and recording the floor.
+    let (status, _) = admin
+        .put(
+            "/api/v1/settings/payroll-report",
+            &json!({
+                "payroll_report_enabled": true,
+                "payroll_report_recipients": ["payroll@example.com"],
+                "payroll_report_day_of_month": 1,
+                "payroll_report_include_assistant_hours": true,
+                "payroll_report_include_employee_hours": false,
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "enable the payroll report");
+    zerf::background::payroll_report::run_once(&app.state)
+        .await
+        .expect("first scheduled run");
+
+    // The floor is now the first period this installation ever queued.
+    let floor = zerf::services::settings::load_setting(
+        &app.state.pool,
+        zerf::services::settings::PAYROLL_REPORT_FIRST_PERIOD_KEY,
+        "",
+    )
+    .await
+    .expect("floor");
+    assert_eq!(floor, period, "the first queued period becomes the floor");
+
+    // The decisive assertion: a report built now carries nothing from before
+    // the floor, however much approved history is sitting there.
+    let carried = payroll_report::carry_over_boundary(&app.state.pool, from)
+        .await
+        .expect("carry-over boundary")
+        .expect("a period has been queued, so carrying is possible in principle");
+    assert_eq!(
+        carried.since, from,
+        "nothing before the first ever reported month may be carried"
+    );
+
+    let members = payroll_report::payroll_members(
+        &app.state,
+        from,
+        from + Duration::days(27),
+        &[],
+        false,
+        Some(&carried),
+    )
+    .await
+    .expect("members");
+    assert!(
+        !members.iter().any(|member| member.id == assistant_id),
+        "a pre-history day must not drag its owner into the first report either"
+    );
+
+    let language = zerf::i18n::Language::from_setting("en");
+    let data = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from,
+            to: from + Duration::days(27),
+            interim: false,
+            created_on: from + Duration::days(27),
+            carried: Some(carried),
+        },
+        &members,
+        &config(true, false),
+        &language,
+        None,
+    )
+    .await
+    .expect("build the first report");
+    assert!(
+        data.late_entry_rows.is_empty(),
+        "the first report ever sent carries no pre-history: {:?}",
+        data.late_entry_rows
+            .iter()
+            .map(|row| row.date)
+            .collect::<Vec<_>>()
+    );
+
+    app.cleanup().await;
+}
+
+/// One month stuck behind a late approval must not freeze carry-over for the
+/// months after it that were already delivered.
+///
+/// The queue can have gaps: March held up while April went out. A day booked
+/// late in April is owed to whoever comes next, and holding it back until
+/// March finally clears — which may be never — would leave those hours unpaid
+/// for a reason that has nothing to do with them.
+#[tokio::test]
+async fn a_stuck_month_does_not_freeze_carry_over_for_the_months_after_it() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "stuck-gap").await;
+    let lead = login_change_pw(&app, "lead-stuck-gap@example.com", &lead_pw).await;
+    let (assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "stuck-gap").await;
+    let assistant = login_change_pw(&app, "aushilfe-stuck-gap@example.com", &assistant_pw).await;
+
+    // Three consecutive months: `stuck` is never delivered, `delivered` is,
+    // and `reporting` is the one being assembled now.
+    let reporting_monday = anchor_monday();
+    let (reporting_from, _reporting_to) = month_bounds(reporting_monday);
+    let (delivered_from, delivered_to) = month_bounds(reporting_from - Duration::days(1));
+    let (stuck_from, _stuck_to) = month_bounds(delivered_from - Duration::days(1));
+    let stuck_period = stuck_from.format("%Y-%m").to_string();
+    let delivered_period = delivered_from.format("%Y-%m").to_string();
+
+    // A day in the stuck month, whose own report is still owed.
+    let stuck_day = stuck_from + Duration::days(9);
+    let stuck_entry = create_and_submit_entry(
+        &assistant,
+        &stuck_day.format("%Y-%m-%d").to_string(),
+        cat_id,
+    )
+    .await;
+    let (status, _) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids":[stuck_entry]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the stuck month's day");
+
+    // The delivered month goes out first, recording everything that existed
+    // in it at that moment.
+    app.state
+        .db
+        .time_entries
+        .mark_payroll_reported(
+            &delivered_period,
+            delivered_from,
+            delivered_to,
+            Default::default(),
+        )
+        .await
+        .expect("mark the delivered month");
+
+    // Only afterwards is a day of that month booked and approved — a genuine
+    // catch-up, owed to whichever report comes next.
+    let late_day = delivered_from + Duration::days(9);
+    let late =
+        create_and_submit_entry(&assistant, &late_day.format("%Y-%m-%d").to_string(), cat_id).await;
+    let (status, _) = lead
+        .post("/api/v1/time-entries/batch-approve", &json!({"ids":[late]}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the late day");
+
+    // The stuck month is still queued behind it.
+    app.state
+        .db
+        .payroll_queue
+        .enqueue(&stuck_period)
+        .await
+        .expect("the stuck month is still owed");
+    app.state
+        .db
+        .settings
+        .save_setting(
+            zerf::services::settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+            &delivered_period,
+        )
+        .await
+        .expect("record the queued period");
+    app.state
+        .db
+        .settings
+        .save_setting(
+            zerf::services::settings::PAYROLL_REPORT_FIRST_PERIOD_KEY,
+            &stuck_period,
+        )
+        .await
+        .expect("record the floor");
+
+    let carried = payroll_report::carry_over_boundary(&app.state.pool, reporting_from)
+        .await
+        .expect("carry-over boundary")
+        .expect("a period has been queued");
+    let language = zerf::i18n::Language::from_setting("en");
+    let members = payroll_report::payroll_members(
+        &app.state,
+        reporting_from,
+        reporting_from + Duration::days(27),
+        &[],
+        false,
+        Some(&carried),
+    )
+    .await
+    .expect("members");
+    assert!(
+        members.iter().any(|member| member.id == assistant_id),
+        "the late day from the delivered month still brings its owner in"
+    );
+
+    let data = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from: reporting_from,
+            to: reporting_from + Duration::days(27),
+            interim: false,
+            created_on: reporting_from + Duration::days(27),
+            carried: Some(carried),
+        },
+        &members,
+        &config(true, false),
+        &language,
+        None,
+    )
+    .await
+    .expect("build the report");
+
+    let carried_dates: Vec<NaiveDate> = data.late_entry_rows.iter().map(|row| row.date).collect();
+    assert_eq!(
+        carried_dates,
+        vec![late_day],
+        "the delivered month's late day is carried; the stuck month's is not"
+    );
+
+    app.cleanup().await;
+}
+
+/// Moving an already-reported day into a different month must clear its
+/// payroll mark. The mark names the month whose report accounted for the
+/// entry; after the move that is no longer the month the entry is in, and a
+/// stale mark makes the day invisible to both — the old month no longer
+/// contains its date, the new month does not carry its mark.
+#[tokio::test]
+async fn moving_a_reported_day_to_another_month_makes_it_catchable_again() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "moved-day").await;
+    let lead = login_change_pw(&app, "lead-moved-day@example.com", &lead_pw).await;
+    let (assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "moved-day").await;
+    let assistant = login_change_pw(&app, "aushilfe-moved-day@example.com", &assistant_pw).await;
+
+    let monday = anchor_monday();
+    let (from, to) = month_bounds(monday);
+    let period = from.format("%Y-%m").to_string();
+
+    let entry_id =
+        create_and_submit_entry(&assistant, &monday.format("%Y-%m-%d").to_string(), cat_id).await;
+    let (status, _) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids":[entry_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the day");
+
+    // The month's report goes out and records the day.
+    app.state
+        .db
+        .time_entries
+        .mark_payroll_reported(&period, from, to, Default::default())
+        .await
+        .expect("mark the reported month");
+    let reported_as: Option<String> =
+        sqlx::query_scalar("SELECT payroll_reported_period FROM time_entries WHERE id = $1")
+            .bind(entry_id)
+            .fetch_one(&app.state.pool)
+            .await
+            .expect("read the mark");
+    assert_eq!(
+        reported_as,
+        Some(period.clone()),
+        "the day went out with its own month's report"
+    );
+
+    // An admin corrects the date into the previous month.
+    let (earlier_from, _earlier_to) = month_bounds(from - Duration::days(1));
+    let corrected_day = earlier_from + Duration::days(9);
+    let (status, body) = admin
+        .put(
+            &format!("/api/v1/time-entries/{entry_id}"),
+            &json!({
+                "entry_date": corrected_day.format("%Y-%m-%d").to_string(),
+                "start_time": "08:00",
+                "end_time": "12:00",
+                "category_id": cat_id,
+                "comment": "moved",
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "admin corrects the date: {body}");
+
+    let reported_as: Option<String> =
+        sqlx::query_scalar("SELECT payroll_reported_period FROM time_entries WHERE id = $1")
+            .bind(entry_id)
+            .fetch_one(&app.state.pool)
+            .await
+            .expect("read the mark again");
+    assert_eq!(
+        reported_as, None,
+        "a day moved out of its reported month is no longer accounted for by it"
+    );
+
+    // Which means it is a catch-up candidate again, rather than a day no
+    // report will ever show.
+    let outstanding = app
+        .state
+        .db
+        .reports
+        .carried_time_entries_before(
+            None,
+            NaiveDate::from_ymd_opt(2000, 1, 1).unwrap(),
+            from,
+            &[],
+        )
+        .await
+        .expect("outstanding days");
+    assert!(
+        outstanding
+            .iter()
+            .any(|(user_id, date, _, _)| *user_id == assistant_id && *date == corrected_day),
+        "the moved day can be carried into a later report"
     );
 
     app.cleanup().await;
