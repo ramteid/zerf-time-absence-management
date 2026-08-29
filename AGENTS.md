@@ -112,7 +112,12 @@ let user = UserDb::new(pool.clone()).find_by_id(id).await?;
 - Auth cleanup: purge expired sessions and login attempts (hourly)
 - Notification cleanup: delete notifications older than 90 days (daily)
 - Holiday scheduler: ensure current and next year holidays exist (weekly, Monday noon)
-- Submission reminder scheduler
+- Submission reminder scheduler (also carries the **month-end pass** on the 1st:
+  everyone still holding unsubmitted days of the finished month is reminded once
+  per period, assistants included — it asks "were these days handed in", not
+  "is this week complete", so the role exemption does not apply)
+- Approval reminder scheduler (weekly, plus a **month-end pass** on the 3rd for
+  days of the finished month that are handed in but undecided)
 - Monthly timesheet PDF upload to Nextcloud (daily, after midnight)
 - Monthly payroll report email to the tax office (daily, after midnight)
 - Error-notification worker: drains `error_notification_queue` and alerts opted-in admins in-app + by email (poll every 10s)
@@ -123,7 +128,13 @@ math, queue backfill through the previous month, day-of-month deferral) and the
 `services::reports::month_export_readiness` gate, so they judge "this month is
 final" by the same rules.
 
-**Weeks, never days.** Every completeness/finality judgement in the app works on
+**Weeks, never days.** Submitting and approving are week-level operations in the
+product, not day-level: `Submit Week` hands in every draft of that week and the
+approver decides a `(user, week)` group as one block (`buildPendingWeeks`). No
+UI can approve a single entry, and `roles::has_submission_obligation` does *not*
+carve anyone out of that workflow — assistants submit and get approved like
+everyone else; the flag only says whose weeks may be *demanded* to be complete.
+Every completeness/finality judgement in the app works on
 whole ISO weeks. `reports::week_is_accounted_for` is the single implementation:
 one day carrying the required status (submitted/approved) hands in the whole
 week, regardless of how many days the person worked and regardless of
@@ -146,6 +157,16 @@ stay off for a finished month — on the 5th, August's trailing week (Aug 31-Sep
 is still running, and judging it would block every month-end report for days.
 `reports::judged_period_end` matches that window: a running period is judged
 through the Sunday of the current week, a finished one in full.
+A month boundary is where the week rule and the calendar collide: a month ending
+on a Monday puts its last day in a week that is not over until after the payroll
+report is due, so nobody would submit those days in time on their own. Nothing in
+the model needed changing — `Submit Week` hands in whatever drafts exist, and the
+approver sees them as their own week block — but three nudges make it happen:
+the two month-end reminder passes above, and `background::payroll_report`'s
+`notify_admins_of_hold`, which tells the admins once per period
+(`PAYROLL_REPORT_BLOCKED_NOTIFIED_KEY`) that a scheduled report is waiting and on
+whom. The blocked path itself still neither errors nor retries differently.
+
 `reports::weeks_submission_counts` counts the same weeks for the personal
 report's Submissions tile ("x of y weeks", month *and* custom range) — it hangs
 off `build_month` and `build_range_for_page` only, never the plain

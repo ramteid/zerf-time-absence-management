@@ -132,7 +132,92 @@ pub async fn run_check(state: &crate::AppState) {
     }
 }
 
-/// Background loop: sleep until the next Monday at 07:00 local time, then run check.
+/// Day of the new month on which approvers are asked for the finished month's
+/// still-undecided days. Two days after the employee reminder, and before the
+/// default payroll send day (5), so there is room to act between the three.
+const MONTH_END_REMINDER_DAY: u32 = 3;
+
+/// True on [`MONTH_END_REMINDER_DAY`] of a month, from 07:00 local time.
+fn month_end_reminder_is_due_now(now: chrono::DateTime<chrono_tz::Tz>) -> bool {
+    now.date_naive().day() == MONTH_END_REMINDER_DAY && now.hour() >= 7
+}
+
+/// Ask approvers for the finished month specifically.
+///
+/// The weekly reminder above is not enough for a month boundary: it fires on
+/// Mondays, and the days that decide whether the monthly exports can go out are
+/// handed in on the 1st — which can be a Tuesday, leaving the decision sitting
+/// until after the payroll report was due. This pass asks once, for one month,
+/// and names it.
+pub async fn run_month_end_check(state: &crate::AppState) {
+    let pool = &state.pool;
+
+    let reminders_enabled = load_setting(pool, APPROVAL_REMINDERS_ENABLED_KEY, "true")
+        .await
+        .unwrap_or_else(|_| "true".to_string());
+    if reminders_enabled == "false" {
+        return;
+    }
+
+    let language = crate::i18n::load_ui_language(pool)
+        .await
+        .unwrap_or_default();
+    let today = app_today(pool).await;
+    let period = crate::background::schedule::previous_period(today);
+    let Ok((from, to)) = crate::background::schedule::period_bounds(&period) else {
+        return;
+    };
+    let month_label = crate::i18n::format_month(&language, from.year(), from.month());
+
+    let waiting_user_ids = match state
+        .db
+        .reports
+        .user_ids_with_submitted_time_entries_in_range(from, to)
+        .await
+    {
+        Ok(ids) => ids,
+        Err(e) => {
+            tracing::warn!(target:"zerf::approval_reminders", "month-end query failed: {e}");
+            return;
+        }
+    };
+
+    // One reminder per approver, carrying how many of their people are waiting.
+    let mut waiting_per_approver: std::collections::HashMap<i64, usize> =
+        std::collections::HashMap::new();
+    for user_id in waiting_user_ids {
+        for approver_id in crate::services::auth::user_approver_ids(pool, user_id).await {
+            *waiting_per_approver.entry(approver_id).or_default() += 1;
+        }
+    }
+
+    for (approver_id, waiting) in waiting_per_approver {
+        let count = waiting.to_string();
+        let params = [("month", month_label.clone()), ("count", count)];
+        let text =
+            crate::i18n::notification_event_text(&language, "month_end_approval_reminder", &params);
+        let email_body =
+            crate::i18n::notification_email_body(&language, "month_end_approval_reminder", &params);
+        // Once per month per approver: the count must stay out of the key, or
+        // approving one person would re-send the reminder for the rest.
+        let dedupe_key = format!("month_end_approval_reminder:{period}");
+        crate::services::notifications::deliver(
+            state,
+            &crate::services::notifications::Outgoing::new(
+                approver_id,
+                &language,
+                "month_end_approval_reminder",
+                &text.title,
+                &text.body,
+            )
+            .email_body(&email_body)
+            .dedupe_key(&dedupe_key),
+        )
+        .await;
+    }
+}
+
+/// Background loop: sleep until the next Monday at 07:00 local time, then run check./// Background loop: sleep until the next Monday at 07:00 local time, then run check.
 /// Fixed due-first so restart after 07:00 on Monday still fires.
 pub async fn run_loop(state: crate::AppState) {
     loop {
@@ -146,6 +231,14 @@ pub async fn run_loop(state: crate::AppState) {
         if approval_reminder_is_due_now(now_local) {
             tracing::info!(target:"zerf::approval_reminders", "Running approval reminder check");
             run_check(&state).await;
+        }
+        // The month-end pass rides the same hourly wake-up (the sleep below is
+        // capped at one hour), so it fires on its own day regardless of which
+        // weekday that is. Repeats within the day are collapsed by the
+        // per-period dedupe key.
+        if month_end_reminder_is_due_now(now_local) {
+            tracing::info!(target:"zerf::approval_reminders", "Running month-end approval reminder check");
+            run_month_end_check(&state).await;
         }
         let wait = duration_until_next_monday_7am(Utc::now().with_timezone(&tz));
         let sleep_for = scheduler_sleep_duration(wait);
@@ -163,6 +256,25 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
     use chrono_tz::Europe::Berlin;
+
+    /// Approvers are asked on the 3rd — after the employees were asked on the
+    /// 1st, and before the default payroll send day — on whatever weekday that
+    /// happens to be.
+    #[test]
+    fn month_end_reminder_fires_on_the_third_from_seven() {
+        assert!(month_end_reminder_is_due_now(
+            Berlin.with_ymd_and_hms(2026, 9, 3, 7, 0, 0).unwrap()
+        ));
+        assert!(!month_end_reminder_is_due_now(
+            Berlin.with_ymd_and_hms(2026, 9, 3, 6, 0, 0).unwrap()
+        ));
+        assert!(!month_end_reminder_is_due_now(
+            Berlin.with_ymd_and_hms(2026, 9, 1, 9, 0, 0).unwrap()
+        ));
+        assert!(!month_end_reminder_is_due_now(
+            Berlin.with_ymd_and_hms(2026, 9, 4, 9, 0, 0).unwrap()
+        ));
+    }
 
     #[test]
     fn monday_before_7am_targets_today() {

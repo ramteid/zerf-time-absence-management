@@ -37,7 +37,7 @@ use crate::repository::User;
 use crate::services::payroll_report::{self, PayrollReportConfig};
 use crate::services::settings;
 use crate::AppState;
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 use std::time::Duration;
 
 /// How much a single send waits for, and what it does to the queue afterwards.
@@ -256,6 +256,79 @@ async fn process_pending_periods(
     }
 }
 
+/// Tell the administrators once that a scheduled report is being held back.
+///
+/// Once per period, never per night: the loop reaches a blocked period again
+/// every day until the month is finished, and a warning that repeats daily is
+/// one nobody reads. The dashboard card carries the live picture; this is the
+/// nudge that makes somebody go and look at it.
+async fn notify_admins_of_hold(
+    state: &AppState,
+    period: &str,
+    language: &Language,
+    ready: usize,
+    pending: &[payroll_report::MemberReadiness],
+) {
+    let already_reported = settings::load_setting(
+        &state.pool,
+        settings::PAYROLL_REPORT_BLOCKED_NOTIFIED_KEY,
+        "",
+    )
+    .await
+    .unwrap_or_default();
+    if already_reported == period {
+        return;
+    }
+
+    let month_label = match schedule::period_bounds(period) {
+        Ok((from, _)) => crate::i18n::format_month(language, from.year(), from.month()),
+        Err(_) => period.to_string(),
+    };
+    let names = pending
+        .iter()
+        .map(|member| format!("{} {}", member.user.first_name, member.user.last_name))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let params = [
+        ("month", month_label),
+        ("count", pending.len().to_string()),
+        ("total", (ready + pending.len()).to_string()),
+        ("names", names),
+    ];
+    let text = crate::i18n::notification_event_text(language, "payroll_report_blocked", &params);
+    let email_body =
+        crate::i18n::notification_email_body(language, "payroll_report_blocked", &params);
+
+    let admin_ids = state.db.users.active_admin_ids().await.unwrap_or_default();
+    for admin_id in admin_ids {
+        crate::services::notifications::deliver(
+            state,
+            &crate::services::notifications::Outgoing::new(
+                admin_id,
+                language,
+                "payroll_report_blocked",
+                &text.title,
+                &text.body,
+            )
+            .email_body(&email_body)
+            .dedupe_key(&format!("payroll_report_blocked:{period}")),
+        )
+        .await;
+    }
+
+    // Recorded even when there are no admins to tell: the marker says "this
+    // period has been handled", and re-running the lookup nightly for an
+    // installation without admins would achieve nothing.
+    if let Err(e) = state
+        .db
+        .settings
+        .save_setting(settings::PAYROLL_REPORT_BLOCKED_NOTIFIED_KEY, period)
+        .await
+    {
+        tracing::warn!("Payroll report: failed to record the hold notice for {period}: {e}");
+    }
+}
+
 /// Build and send one period's report.
 ///
 /// Returns [`SendOutcome`]: either it went out, or why it did not.
@@ -346,14 +419,17 @@ async fn process_period(
                 return Ok(SendOutcome::Skipped(SkipReason::CoversNobody));
             }
             if !pending.is_empty() && !mode.is_manual() {
-                // Not an error — people just have not finished their month.
-                // Stay silent and retry tomorrow; the dashboard tile shows who
-                // is missing.
+                // Not an error — people just have not finished their month, and
+                // the period simply stays queued and is retried tomorrow. But
+                // the send day has passed by the time we get here (a deferred
+                // period never reaches this far), so the administrators are
+                // told once that the report is on hold and who is holding it.
                 tracing::info!(
                     "Payroll report: period {period} still waiting for {} of {} people",
                     pending.len(),
                     ready.len() + pending.len()
                 );
+                notify_admins_of_hold(state, period, language, ready.len(), &pending).await;
                 return Ok(SendOutcome::Skipped(SkipReason::NobodyFinal));
             }
             if ready.is_empty() {

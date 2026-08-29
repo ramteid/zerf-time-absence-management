@@ -695,3 +695,100 @@ async fn submission_reminders_treat_cancellation_pending_absence_as_covered_week
 
     app.cleanup().await;
 }
+
+
+/// The month-end pass chases whoever still holds days of the finished month
+/// that were never handed in — assistants included. They have no completeness
+/// obligation, but their unsubmitted days hold the monthly exports up exactly
+/// like everybody else's, and at a month boundary nobody would submit them on
+/// their own: the week carrying the month's last day is not over yet.
+#[tokio::test]
+async fn month_end_reminder_chases_unsubmitted_days_including_assistants() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, _lead_pw, _emp_id, emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "month-end").await;
+    let emp = login_change_pw(&app, "emp-month-end@example.com", &emp_pw).await;
+
+    let (status, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "aushilfe-month-end@example.com",
+                "first_name": "Alex",
+                "last_name": "AssistMonthEnd",
+                "role": "assistant",
+                "weekly_hours": 0,
+                "start_date": "2024-01-01",
+                "approver_ids": [lead_id],
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create assistant: {body}");
+    let assistant = login_change_pw(
+        &app,
+        "aushilfe-month-end@example.com",
+        &temp_pw(&body),
+    )
+    .await;
+
+    // A day in the middle of the finished month, left as a draft by both.
+    let ref_date = reference_date();
+    let first_of_month = ref_date.with_day(1).expect("first of month");
+    let in_previous_month = (first_of_month - chrono::Duration::days(1))
+        .with_day(15)
+        .expect("15th of the previous month")
+        .format("%Y-%m-%d")
+        .to_string();
+    for client in [&emp, &assistant] {
+        let (status, _) = client
+            .post(
+                "/api/v1/time-entries",
+                &json!({
+                    "entry_date": in_previous_month,
+                    "start_time": "08:00",
+                    "end_time": "12:00",
+                    "category_id": cat_id,
+                }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "create draft in the finished month");
+        let (status, _) = client.delete("/api/v1/notifications").await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    zerf::background::submission_reminders::run_month_end_check(&app.state).await;
+
+    for (client, who) in [(&emp, "employee"), (&assistant, "assistant")] {
+        let (status, body) = client.get("/api/v1/notifications").await;
+        assert_eq!(status, StatusCode::OK);
+        let reminders: Vec<_> = body
+            .as_array()
+            .expect("notifications array")
+            .iter()
+            .filter(|item| item["kind"] == "month_end_submission_reminder")
+            .collect();
+        assert_eq!(
+            reminders.len(),
+            1,
+            "{who} must be reminded about the finished month exactly once: {body}"
+        );
+    }
+
+    // A second pass on the same month must not nag again — somebody working
+    // through their backlog would otherwise be reminded on every wake-up.
+    zerf::background::submission_reminders::run_month_end_check(&app.state).await;
+    let (status, body) = emp.get("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body.as_array()
+            .expect("notifications array")
+            .iter()
+            .filter(|item| item["kind"] == "month_end_submission_reminder")
+            .count(),
+        1,
+        "the month-end reminder must be sent once per month"
+    );
+
+    app.cleanup().await;
+}

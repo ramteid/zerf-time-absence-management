@@ -73,6 +73,12 @@ pub const PAYROLL_REPORT_EXCLUDED_USERS_KEY: &str = "payroll_report_excluded_use
 /// `services::payroll_report::build_status`.
 pub const PAYROLL_REPORT_QUEUE_PERIOD_KEY: &str = "payroll_report_queue_period";
 
+/// Last period ("YYYY-MM") whose held-back payroll report was already reported
+/// to the administrators. The nightly loop re-reaches a blocked period every
+/// night, so without this marker the same warning would be mailed every day
+/// until the month is finished.
+pub const PAYROLL_REPORT_BLOCKED_NOTIFIED_KEY: &str = "payroll_report_blocked_notified_period";
+
 // Nextcloud upload — DB backup (backup container reads these via psql; app writes them).
 pub const BACKUP_UPLOAD_ENABLED_KEY: &str = "backup_upload_enabled";
 pub const BACKUP_UPLOAD_URL_KEY: &str = "backup_upload_url";

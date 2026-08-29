@@ -67,14 +67,22 @@ pub fn can_approve_non_admin_subjects(role: &str, active: bool) -> bool {
     active && is_lead_role(role)
 }
 
-/// Returns true when a user is expected to submit weekly timesheets at all.
-/// Assistants have no fixed target schedule and no mandatory submission
-/// workflow; users with `weekly_hours <= 0` are non-booking users by the same
-/// policy the submission-reminder scheduler already uses (see
-/// `UserDb::get_active_non_assistant_users`). Week-completeness checks
-/// (Submissions tile, team report, monthly PDF upload gating) must use the
-/// same exemption the reminder uses — otherwise a zero-hour user is nagged by
-/// "weeks missing" indicators for a reminder that will never actually fire.
+/// Returns true when the app may *demand* that a user's weeks be accounted
+/// for — nothing more.
+///
+/// This does **not** say who submits. Everybody records, submits and has their
+/// weeks approved through the same week-level workflow, assistants included:
+/// entries are submitted a week at a time and approved a week at a time, and
+/// until that has happened the hours count nowhere — which is exactly what the
+/// payroll report's approval gate relies on.
+///
+/// What assistants and zero-hour users lack is a target schedule. There is no
+/// amount of booked time anybody can require of them, so nothing about their
+/// week can be called "missing": no submission reminder, and no "weeks missing"
+/// verdict on the Submissions tile, in the team report, or in the monthly PDF
+/// and payroll gates. Those checks must use the same exemption the reminder
+/// uses (see `UserDb::get_active_non_assistant_users`) — otherwise a zero-hour
+/// user is nagged by an indicator for a reminder that will never fire.
 #[inline]
 pub fn has_submission_obligation(role: &str, weekly_hours: f64) -> bool {
     !is_assistant_role(role) && weekly_hours > 0.0

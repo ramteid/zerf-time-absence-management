@@ -24,6 +24,7 @@ Use this document if you are:
 - [Time entry workflow](#time-entry-workflow)
   - [Status lifecycle](#status-lifecycle)
   - [Weekly process](#weekly-process)
+  - [Month end](#month-end)
   - [Time-entry summary tiles](#time-entry-summary-tiles)
   - [Understanding crediting vs. non-crediting entries](#understanding-crediting-vs-non-crediting-entries)
   - [Important workflow rule](#important-workflow-rule)
@@ -204,6 +205,11 @@ inferred from role alone.
   and work. Their weekly hours are set to `0` by convention, but the role, not
   the zero, is what defines them: the "no target, no flextime" behaviour is
   strictly role-based and is never inferred from weekly hours being zero.
+  Assistants submit their weeks and have them approved exactly like everybody
+  else — their hours only count, and only reach the payroll report, once the
+  week is approved. What they are exempt from is the *demand*: nobody can
+  require a certain amount of booked time from them, so they are never flagged
+  for "weeks missing" and never receive a submission reminder.
 - A non-assistant with weekly hours set to `0` is a non-booking user: approval
   logic still applies to anything they do book, but they are exempt from
   monthly submission reminders and from week-completeness requirements (the
@@ -304,9 +310,36 @@ submission policy](#team-settings-submission-policy)).
 3. Approver accepts or rejects the week in batch.
 4. Approved entries remain valid unless the whole week is reopened via a new edit request.
 
+**Submitting and approving always happen on whole weeks.** There is no way to
+submit or approve a single day: `Submit Week` hands in everything you have in
+that week, and an approver sees and decides that week as one block. This is the
+same for every role, assistants included.
+
 A submitted week is treated atomically. Individual entries inside a submitted,
 approved, or rejected week cannot be clicked or edited any more — the only way
 to correct them is to reopen the whole week (see "Changes after submission").
+
+### Month end
+
+Weeks and months rarely end on the same day. When a month ends on a Monday, the
+week carrying its last day does not finish until the Sunday after — long after
+the monthly reports are prepared.
+
+So at the start of a new month, hand in the days of the month that just ended,
+even though their week is still running. `Submit Week` hands in exactly what you
+have booked so far; the rest of that week is booked and submitted as usual once
+it is over. Approvers see those days as their own small week block.
+
+Nobody has to remember this on their own:
+
+- On the **1st** of a month, everyone who still has unsubmitted days in the
+  month that just ended receives a reminder — assistants included.
+- On the **3rd**, approvers are reminded of days from that month that are handed
+  in but still waiting for a decision.
+- If the payroll report cannot be sent on its send day because somebody's month
+  is not finished, the administrators are told once, with the names. The report
+  then goes out automatically as soon as the month is complete — it is never
+  sent incomplete, and it is never sent twice.
 
 ### Time-entry summary tiles
 
@@ -655,7 +688,8 @@ A week is considered **complete** when:
   date — a full-vacation week, for example.)
 
 For users with role `assistant`, past-week completeness is always treated as
-complete.
+complete. That only switches off the demand — they still submit their weeks and
+still need an approver's decision before their hours count anywhere.
 
 A week is considered **incomplete** when:
 
@@ -753,7 +787,10 @@ is configured when Zerf creates the notification.
 - absence is approved or rejected,
 - absence cancellation is approved or rejected,
 - reopen request is approved or rejected,
-- a monthly submission reminder is triggered on the configured deadline day (lists past weeks that are still not submitted).
+- a monthly submission reminder is triggered on the configured deadline day (lists past weeks that are still not submitted),
+- **on the 1st of a month**, if any day of the month that just ended has not
+  been submitted (see [Month end](#month-end)). This one reaches everybody who
+  has such a day, assistants included.
 
 If an admin approves or rejects their own item, Zerf records the audit event
 and sends an in-app-only notification (no email) back to the same user.
@@ -764,7 +801,10 @@ and sends an in-app-only notification (no email) back to the same user.
 - an absence request is submitted (the notification and email include the
   employee's comment, if one was added),
 - a reopen request is submitted,
-- a weekly approval reminder is triggered (pending items awaiting review).
+- a weekly approval reminder is triggered (pending items awaiting review),
+- **on the 3rd of a month**, if people they approve have handed in days of the
+  month that just ended that are still waiting for a decision (see
+  [Month end](#month-end)).
 
 ### Exception: auto-approved submissions and reopen requests are silent
 
@@ -1903,11 +1943,21 @@ everyone it covers:
 - no stored entries or absences lie before a person's start date, because those
   days are hidden from every report and would make the figures too low.
 
-A month that is still open is a normal situation, not a fault — nobody is
-emailed about it. Instead, the **Payroll Report** card on the dashboard shows
-team leads and admins how far the month is, and who is still missing. If the
-feature was switched off for a while, or the server missed a month boundary,
-all intervening months are prepared as soon as it is switched on again.
+A month that is still open is a normal situation, not a fault. The **Payroll
+Report** card on the dashboard shows team leads and admins how far the month is
+and who is still missing. Once the send day has passed and the report is being
+held back, the administrators additionally receive **one** notification naming
+the people it is waiting for — once per month, not once per night. The report is
+then sent by itself as soon as everybody's month is final.
+
+The most common reason for a wait is the calendar: when a month ends early in a
+week, the days at its end belong to a week that is not over on the send day. The
+reminders described under [Month end](#month-end) are there to get exactly those
+days handed in and approved in time.
+
+If the feature was switched off for a while, or the server missed a month
+boundary, all intervening months are prepared as soon as it is switched on
+again.
 
 #### Sending a report right away
 

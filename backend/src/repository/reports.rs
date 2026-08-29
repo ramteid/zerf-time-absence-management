@@ -332,6 +332,46 @@ impl ReportDb {
             .await?)
     }
 
+    /// User IDs who still hold time entries in the period that they have not
+    /// handed in — drafts, or rejected rows nobody corrected. Drives the
+    /// month-end reminder: these are the people whose finished month keeps the
+    /// monthly exports waiting.
+    pub async fn user_ids_with_unsubmitted_time_entries_in_range(
+        &self,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<Vec<i64>> {
+        let sql = format!(
+            "SELECT DISTINCT te.user_id FROM time_entries te \
+             WHERE te.entry_date BETWEEN $1 AND $2 \
+             AND (te.status = 'draft' OR ({EFFECTIVE_REJECTED_TIME_ENTRY_CONDITION}))"
+        );
+        // AssertSqlSafe: the formatted fragment is a compile-time status predicate.
+        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+            .bind(from)
+            .bind(to)
+            .fetch_all(&self.pool)
+            .await?)
+    }
+
+    /// User IDs whose time entries in the period are handed in but still
+    /// waiting for an approver. The other half of the month-end reminder: here
+    /// the employee has done their part and the decision is owed.
+    pub async fn user_ids_with_submitted_time_entries_in_range(
+        &self,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<Vec<i64>> {
+        Ok(sqlx::query_scalar(
+            "SELECT DISTINCT user_id FROM time_entries \
+             WHERE entry_date BETWEEN $1 AND $2 AND status = 'submitted'",
+        )
+        .bind(from)
+        .bind(to)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     /// User IDs with at least one time entry in the period, regardless of its
     /// workflow status. Payroll uses this to ignore assistants who did not
     /// work at all in a given month while retaining every assistant who has

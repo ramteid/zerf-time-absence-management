@@ -2028,3 +2028,104 @@ async fn payroll_report_merges_back_to_back_sick_notes_into_one_row() {
 
     app.cleanup().await;
 }
+
+
+/// A month held back because somebody has not finished it is not an error, so
+/// the nightly run stays quiet about it — but the send day has passed by then,
+/// and nobody would learn that the tax office is still waiting. The
+/// administrators are told once, and only once, however many nights the month
+/// stays open.
+#[tokio::test]
+async fn a_held_back_scheduled_report_tells_the_admins_once() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    configure_unreachable_smtp(&app).await;
+    let (_lead_id, _lead_pw, _emp_id, _emp_pw, _monday, _cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "payroll-hold").await;
+
+    let (status, _) = admin
+        .put(
+            "/api/v1/settings/payroll-report",
+            &json!({
+                "payroll_report_enabled": true,
+                "payroll_report_recipients": ["payroll@example.com"],
+                "payroll_report_day_of_month": 1,
+                "payroll_report_include_assistant_hours": true,
+                "payroll_report_include_employee_hours": false,
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "enable payroll report");
+
+    let today = zerf::services::settings::app_today(&app.state.pool).await;
+    let previous = zerf::background::schedule::previous_period(today);
+    app.state
+        .db
+        .payroll_queue
+        .enqueue(&previous)
+        .await
+        .expect("enqueue previous");
+    app.state
+        .db
+        .settings
+        .save_setting(
+            zerf::services::settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+            &previous,
+        )
+        .await
+        .expect("record queue period");
+
+    let (status, _) = admin.delete("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Nobody has booked or submitted anything, so the covered employee holds
+    // the month up and the period stays queued.
+    zerf::background::payroll_report::run_once(&app.state)
+        .await
+        .expect("scheduled run");
+
+    let queued = app
+        .state
+        .db
+        .payroll_queue
+        .list_pending()
+        .await
+        .expect("queue");
+    assert!(
+        queued.contains(&previous),
+        "an unfinished month stays queued: {queued:?}"
+    );
+
+    let (status, body) = admin.get("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::OK);
+    let notices: Vec<_> = body
+        .as_array()
+        .expect("notifications array")
+        .iter()
+        .filter(|item| item["kind"] == "payroll_report_blocked")
+        .collect();
+    assert_eq!(
+        notices.len(),
+        1,
+        "the admin has to learn that the report is on hold: {body}"
+    );
+
+    // Every following night reaches the same period again; the warning must
+    // not be repeated.
+    zerf::background::payroll_report::run_once(&app.state)
+        .await
+        .expect("second scheduled run");
+    let (status, body) = admin.get("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body.as_array()
+            .expect("notifications array")
+            .iter()
+            .filter(|item| item["kind"] == "payroll_report_blocked")
+            .count(),
+        1,
+        "a nightly retry must not re-warn about the same month"
+    );
+
+    app.cleanup().await;
+}

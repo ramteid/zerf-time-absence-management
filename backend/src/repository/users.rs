@@ -271,6 +271,18 @@ impl UserDb {
             .await?)
     }
 
+    /// Every active administrator. Used for operational warnings that somebody
+    /// with the rights to act on them has to see — as opposed to
+    /// `error_notification_recipient_ids`, which is the opt-in channel for
+    /// technical faults.
+    pub async fn active_admin_ids(&self) -> AppResult<Vec<i64>> {
+        Ok(sqlx::query_scalar(
+            "SELECT id FROM users WHERE active AND archived_at IS NULL AND role = 'admin' ORDER BY id",
+        )
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     pub async fn count_active_admins(&self) -> AppResult<i64> {
         Ok(sqlx::query_scalar(
             "SELECT COUNT(*) FROM users WHERE active=TRUE AND lower(trim(role))='admin'",
