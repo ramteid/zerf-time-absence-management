@@ -82,16 +82,48 @@ impl ReportDb {
         from: NaiveDate,
         to: NaiveDate,
     ) -> AppResult<Vec<(i64, NaiveDate, NaiveDate, String, String)>> {
+        self.approved_absence_rows_as_reported(user_id, from, to, None)
+            .await
+    }
+
+    /// As [`Self::approved_absence_rows`], but able to answer the narrower
+    /// question "which of these did the report for `reported_as` contain".
+    ///
+    /// `None` is the live view: every approved absence overlapping the window,
+    /// which is what a report being assembled now would print.
+    ///
+    /// `Some(period)` additionally requires the absence to have been marked by
+    /// that period's report or an earlier one. That is what stops a sick note
+    /// *filed after* a month was reported from showing on that month's card as
+    /// though the tax office had received it — it has not; it is waiting to be
+    /// carried into a later report, where it appears under "Reported later".
+    /// Without this the same days show twice across two months' cards.
+    ///
+    /// The comparison is `<=`, not `=`, because the mark records the *first*
+    /// period that showed any part of an absence. One spanning July and August
+    /// is marked `2026-07`, and August's report still legitimately printed its
+    /// August portion.
+    pub async fn approved_absence_rows_as_reported(
+        &self,
+        user_id: i64,
+        from: NaiveDate,
+        to: NaiveDate,
+        reported_as: Option<&str>,
+    ) -> AppResult<Vec<(i64, NaiveDate, NaiveDate, String, String)>> {
         Ok(sqlx::query_as(
             "SELECT a.id, a.start_date, a.end_date, c.slug, c.name \
              FROM absences a JOIN absence_categories c ON c.id = a.category_id \
              WHERE a.user_id=$1 AND a.status IN ('approved','cancellation_pending') \
              AND a.end_date >= $2 AND a.start_date <= $3 \
+             AND (($4::text) IS NULL \
+                  OR (a.payroll_reported_period IS NOT NULL \
+                      AND a.payroll_reported_period <= $4)) \
              ORDER BY a.start_date, a.id",
         )
         .bind(user_id)
         .bind(from)
         .bind(to)
+        .bind(reported_as)
         .fetch_all(&self.pool)
         .await?)
     }

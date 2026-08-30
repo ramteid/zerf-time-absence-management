@@ -1098,8 +1098,16 @@ pub async fn build_report_data(
         None
     } else {
         Some(
-            build_absence_rows(app_state, from, to, members, &relevant_categories, language)
-                .await?,
+            build_absence_rows(
+                app_state,
+                from,
+                to,
+                members,
+                &relevant_categories,
+                language,
+                carried.as_ref().and_then(|c| c.reported_as.as_deref()),
+            )
+            .await?,
         )
     };
 
@@ -1514,6 +1522,7 @@ async fn build_absence_rows(
     members: &[User],
     relevant_categories: &[AbsenceCategory],
     language: &Language,
+    reported_as: Option<&str>,
 ) -> AppResult<Vec<PayrollAbsenceRow>> {
     // Category order in the PDF follows `list_all()`'s order, so all sick days
     // stay together, then all unpaid days, and so on.
@@ -1556,7 +1565,7 @@ async fn build_absence_rows(
         let absences = app_state
             .db
             .reports
-            .approved_absence_rows(member.id, from, to)
+            .approved_absence_rows_as_reported(member.id, from, to, reported_as)
             .await?;
         for (absence_id, start_date, end_date, slug, _stored_name) in absences {
             let Some((_, category_name, category_rank, tracks_medical_certificate)) = selected

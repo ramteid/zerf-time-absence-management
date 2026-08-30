@@ -3992,3 +3992,104 @@ async fn a_sick_note_filed_after_its_month_was_reported_reaches_the_next_report(
 
     app.cleanup().await;
 }
+
+/// A delivered month's card must show the absences that report contained, not
+/// the ones filed since. A sick note entered for an already-reported month is
+/// approved on the spot and waits for the *next* report; showing it on the
+/// month it covers would say the tax office already has it, while it also
+/// appears as "Reported later" on a later card — the same days twice.
+#[tokio::test]
+async fn a_sent_months_absences_do_not_grow_after_the_fact() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    configure_unreachable_smtp(&app).await;
+    let (lead_id, lead_pw, emp_id, _emp_pw, _monday, _cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "sent-abs").await;
+    let lead = login_change_pw(&app, "lead-sent-abs@example.com", &lead_pw).await;
+    let _ = lead_id;
+
+    let (status, _) = admin
+        .put(
+            "/api/v1/settings/payroll-report",
+            &json!({
+                "payroll_report_enabled": true,
+                "payroll_report_recipients": ["payroll@example.com"],
+                "payroll_report_day_of_month": 5,
+                "payroll_report_include_assistant_hours": true,
+                "payroll_report_include_employee_hours": false,
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "enable payroll report");
+
+    let today = zerf::services::settings::app_today(&app.state.pool).await;
+    let period = zerf::background::schedule::previous_period(today);
+    let (from, to) = zerf::background::schedule::period_bounds(&period).expect("bounds");
+    let sick = absence_cat(&app.state.pool, "sick").await;
+
+    // A sick note present when the month's report went out.
+    app.state
+        .db
+        .absences
+        .create(
+            emp_id,
+            sick.id,
+            true,
+            from + Duration::days(8),
+            from + Duration::days(9),
+            None,
+            "approved",
+        )
+        .await
+        .expect("on-time sick note");
+
+    app.state
+        .db
+        .reports
+        .mark_payroll_reported_absences(&period, from, to, Default::default(), &[emp_id])
+        .await
+        .expect("mark the sent report");
+    app.state
+        .db
+        .settings
+        .save_setting(
+            zerf::services::settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+            &period,
+        )
+        .await
+        .expect("record the queued period");
+
+    let (status, before) = lead.get("/api/v1/reports/payroll-content").await;
+    assert_eq!(status, StatusCode::OK, "payroll content: {before}");
+    assert_eq!(before["sent"], true, "the month has been delivered");
+    assert_eq!(
+        before["absence_count"], 1,
+        "the one sick note the report actually contained"
+    );
+
+    // A second sick note entered afterwards, for days inside that same closed
+    // month. auto_approve_past means it is approved immediately.
+    app.state
+        .db
+        .absences
+        .create(
+            emp_id,
+            sick.id,
+            true,
+            from + Duration::days(15),
+            from + Duration::days(16),
+            None,
+            "approved",
+        )
+        .await
+        .expect("late sick note");
+
+    let (status, after) = lead.get("/api/v1/reports/payroll-content").await;
+    assert_eq!(status, StatusCode::OK, "payroll content: {after}");
+    assert_eq!(
+        after["absence_count"], before["absence_count"],
+        "a sick note filed after the send must not join the month it was filed for"
+    );
+
+    app.cleanup().await;
+}
