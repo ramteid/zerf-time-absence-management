@@ -3850,7 +3850,7 @@ async fn a_sick_note_filed_after_its_month_was_reported_reaches_the_next_report(
     app.state
         .db
         .reports
-        .mark_payroll_reported_absences(&period, from, to, &[emp_id])
+        .mark_payroll_reported_absences(&period, from, to, Default::default(), &[emp_id])
         .await
         .expect("mark the reported month");
     app.state
@@ -3935,6 +3935,59 @@ async fn a_sick_note_filed_after_its_month_was_reported_reaches_the_next_report(
     assert!(
         row.days > 0.0,
         "the catch-up row carries payroll-relevant days"
+    );
+
+    // The decisive part: this report goes out in turn and records what it
+    // carried, so the same sick days are never declared a second time. A
+    // carried absence ends before the reported month, so the mark has to reach
+    // outside that month to find it — otherwise it would be re-reported every
+    // month for ever.
+    let next_period = next_from.format("%Y-%m").to_string();
+    app.state
+        .db
+        .reports
+        .mark_payroll_reported_absences(
+            &next_period,
+            next_from,
+            next_to,
+            zerf::repository::PayrollCarryScope {
+                since: carried.as_ref().map(|c| c.since),
+                before: carried.as_ref().map(|c| c.before),
+                owed_periods: carried
+                    .as_ref()
+                    .map(|c| c.owed_periods.as_slice())
+                    .unwrap_or(&[]),
+                user_ids: &[emp_id],
+            },
+            &[emp_id],
+        )
+        .await
+        .expect("mark what this report carried");
+
+    let again = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from: next_from,
+            to: next_to,
+            interim: false,
+            created_on: next_to,
+            carried,
+        },
+        &members,
+        &config(true, false),
+        &language,
+        None,
+    )
+    .await
+    .expect("rebuild after sending");
+    assert!(
+        again.late_absence_rows.is_empty(),
+        "a sick note already declared must never be declared again: {:?}",
+        again
+            .late_absence_rows
+            .iter()
+            .map(|row| (row.from, row.to))
+            .collect::<Vec<_>>()
     );
 
     app.cleanup().await;

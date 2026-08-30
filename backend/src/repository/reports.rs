@@ -532,22 +532,36 @@ impl ReportDb {
         period: &str,
         period_start: NaiveDate,
         period_end: NaiveDate,
+        carried: crate::repository::PayrollCarryScope<'_>,
         printed_user_ids: &[i64],
     ) -> AppResult<u64> {
         let result = sqlx::query(
+            // Two groups, exactly like the entries mark: absences overlapping
+            // the reported month (the ordinary rows), and absences lying
+            // entirely before it that this report carried as catch-ups.
+            //
+            // The second clause is not optional. A carried absence ends before
+            // the reported month, so the overlap test alone can never match it
+            // — it would stay unmarked and be carried again by every later
+            // report, declaring the same sick days month after month.
             "UPDATE absences AS a SET payroll_reported_period=$1 \
              WHERE a.payroll_reported_period IS NULL \
              AND a.status IN ('approved','cancellation_pending') \
              AND a.user_id = ANY($4) \
-             AND a.end_date >= $2 AND a.start_date <= $3 \
              AND EXISTS (SELECT 1 FROM absence_categories c \
                          WHERE c.id = a.category_id \
-                         AND (c.auto_approve_past=TRUE OR c.unpaid=TRUE))",
+                         AND (c.auto_approve_past=TRUE OR c.unpaid=TRUE)) \
+             AND ((a.end_date >= $2 AND a.start_date <= $3) \
+                  OR (a.end_date < $5::date AND a.end_date >= $6::date \
+                      AND to_char(a.end_date, 'YYYY-MM') <> ALL($7)))",
         )
         .bind(period)
         .bind(period_start)
         .bind(period_end)
         .bind(printed_user_ids)
+        .bind(carried.before)
+        .bind(carried.since)
+        .bind(carried.owed_periods)
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected())

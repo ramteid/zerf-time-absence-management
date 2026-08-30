@@ -746,7 +746,20 @@ async fn mark_reported_entries(
         match state
             .db
             .reports
-            .mark_payroll_reported_absences(period, period_start, period_end, absence_user_ids)
+            .mark_payroll_reported_absences(
+                period,
+                period_start,
+                period_end,
+                crate::repository::PayrollCarryScope {
+                    since: carried.map(|c| c.since),
+                    before: carried.map(|c| c.before),
+                    owed_periods: carried
+                        .map(|c| c.owed_periods.as_slice())
+                        .unwrap_or(&[]),
+                    user_ids: absence_user_ids,
+                },
+                absence_user_ids,
+            )
             .await
         {
             Ok(marked) => {
