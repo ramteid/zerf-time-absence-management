@@ -518,9 +518,13 @@ impl ReportDb {
     /// therefore appear only after the month it belongs to has been filed.
     /// Without this it would be in no document at all.
     ///
-    /// `owed_periods` (matched on the end date, the month a report would last
-    /// have printed it in) keeps a month whose own report is still to come from
-    /// being raided — that report will show those days itself.
+    /// Selected on `start_date < before`, not `end_date < before`, so an absence
+    /// *spanning* into the reported month is included: only its earlier days
+    /// went unreported, and dropping the whole row would lose them for good
+    /// while the normal clamped path printed the in-month part and marked it.
+    /// The caller clamps to the portion that actually predates the report and
+    /// drops any that falls in a month still owed — see
+    /// `payroll_report::build_late_absence_rows`.
     ///
     /// Returns (user_id, absence_id, start_date, end_date, slug, category_name),
     /// the same shape `approved_absence_rows` returns plus the owner, since the
@@ -530,7 +534,6 @@ impl ReportDb {
         &self,
         since: NaiveDate,
         before: NaiveDate,
-        owed_periods: &[String],
     ) -> AppResult<Vec<(i64, i64, NaiveDate, NaiveDate, String, String)>> {
         Ok(sqlx::query_as(
             "SELECT a.user_id, a.id, a.start_date, a.end_date, c.slug, c.name \
@@ -539,13 +542,11 @@ impl ReportDb {
              WHERE a.payroll_reported_period IS NULL \
              AND a.status IN ('approved','cancellation_pending') \
              AND (c.auto_approve_past=TRUE OR c.unpaid=TRUE) \
-             AND a.end_date < $1 AND a.end_date >= $2 \
-             AND to_char(a.end_date, 'YYYY-MM') <> ALL($3) \
+             AND a.start_date < $1 AND a.end_date >= $2 \
              ORDER BY a.user_id, a.start_date, a.id",
         )
         .bind(before)
         .bind(since)
-        .bind(owed_periods)
         .fetch_all(&self.pool)
         .await?)
     }
@@ -563,7 +564,6 @@ impl ReportDb {
         &self,
         since: NaiveDate,
         before: NaiveDate,
-        owed_periods: &[String],
     ) -> AppResult<Vec<User>> {
         Ok(sqlx::query_as(
             "SELECT DISTINCT u.id, u.email, u.password_hash, u.first_name, u.last_name, u.role, \
@@ -577,12 +577,10 @@ impl ReportDb {
              WHERE a.payroll_reported_period IS NULL \
              AND a.status IN ('approved','cancellation_pending') \
              AND (c.auto_approve_past=TRUE OR c.unpaid=TRUE) \
-             AND a.end_date < $1 AND a.end_date >= $2 \
-             AND to_char(a.end_date, 'YYYY-MM') <> ALL($3)",
+             AND a.start_date < $1 AND a.end_date >= $2",
         )
         .bind(before)
         .bind(since)
-        .bind(owed_periods)
         .fetch_all(&self.pool)
         .await?)
     }
@@ -596,23 +594,22 @@ impl ReportDb {
     /// which is what lets one column serve an absence spanning a month
     /// boundary: the marker gates only the catch-up path, so each month's
     /// report still prints its own clamped part through the normal path.
+    ///
+    /// `carried_absence_ids` are the catch-up absences the assembled document
+    /// declared, handed over by the builder rather than re-derived here (see
+    /// `PayrollReportData::late_absence_ids`). A carried absence lies wholly
+    /// before the reported month, so the overlap test can never match it: left
+    /// unmarked it would be declared again by every later report, and marked on
+    /// a guess that does not match what was printed its days are lost outright.
     pub async fn mark_payroll_reported_absences(
         &self,
         period: &str,
         period_start: NaiveDate,
         period_end: NaiveDate,
-        carried: crate::repository::PayrollCarryScope<'_>,
         printed_user_ids: &[i64],
+        carried_absence_ids: &[i64],
     ) -> AppResult<u64> {
         let result = sqlx::query(
-            // Two groups, exactly like the entries mark: absences overlapping
-            // the reported month (the ordinary rows), and absences lying
-            // entirely before it that this report carried as catch-ups.
-            //
-            // The second clause is not optional. A carried absence ends before
-            // the reported month, so the overlap test alone can never match it
-            // — it would stay unmarked and be carried again by every later
-            // report, declaring the same sick days month after month.
             "UPDATE absences AS a SET payroll_reported_period=$1 \
              WHERE a.payroll_reported_period IS NULL \
              AND a.status IN ('approved','cancellation_pending') \
@@ -620,17 +617,13 @@ impl ReportDb {
              AND EXISTS (SELECT 1 FROM absence_categories c \
                          WHERE c.id = a.category_id \
                          AND (c.auto_approve_past=TRUE OR c.unpaid=TRUE)) \
-             AND ((a.end_date >= $2 AND a.start_date <= $3) \
-                  OR (a.end_date < $5::date AND a.end_date >= $6::date \
-                      AND to_char(a.end_date, 'YYYY-MM') <> ALL($7)))",
+             AND ((a.end_date >= $2 AND a.start_date <= $3) OR a.id = ANY($5))",
         )
         .bind(period)
         .bind(period_start)
         .bind(period_end)
         .bind(printed_user_ids)
-        .bind(carried.before)
-        .bind(carried.since)
-        .bind(carried.owed_periods)
+        .bind(carried_absence_ids)
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected())

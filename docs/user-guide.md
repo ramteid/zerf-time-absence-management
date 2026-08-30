@@ -1990,14 +1990,18 @@ on later, the days recorded since are still there to be reported.
 
 The **Payroll Report** card for a month that has already been sent shows exactly
 what that report contained, not what it would look like if it were assembled
-again today — a day approved afterwards does not creep into a delivered month's
-figures. This applies to working days and hours; an absence approved after the
-send can still change what a delivered month's card shows.
+again today — nothing recorded or approved afterwards creeps into a delivered
+month's figures.
 
 The same applies to **absences**. A sick note entered for a month whose report
 has already gone out is approved straight away, so it never holds that report
 up — it simply arrives too late for it. Those days appear in the next report
 under **Reported later**, with the dates they actually cover.
+
+An absence that runs across a month boundary is split where it has to be. The
+days belonging to a month that has already been reported are carried, and the
+days belonging to a month whose report is still outstanding are left to that
+report. Between the two, every day is declared exactly once.
 
 This covers entries and absences that were newly recorded. Changing a day that
 a report already contained is not carried over — if that happens, tell the

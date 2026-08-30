@@ -241,11 +241,16 @@ Three bounds, each guarding a different way of getting it wrong:
 
 * `before` — the reported month's own start. Everything from there on belongs
   to its regular sections.
-* `owed_periods` — every month still in `payroll_report_queue`, skipped
+* `owed_periods` — every month whose own report is still to come, skipped
   individually rather than collapsed into "everything from the oldest one
   onwards". The queue can have gaps: one month stuck behind a late approval
   while later months were delivered must not freeze carry-over for those later
-  months too, possibly for as long as the stuck month lasts.
+  months too, possibly for as long as the stuck month lasts. It is the queue
+  **plus** `periods_to_backfill`, because a month is owed before it is queued —
+  the queue is filled at the start of a run, so for the first days of every
+  month, before the send day, the month just finished is due and absent from
+  it. Reading the queue alone let the running month's card offer that whole
+  month as catch-up days while its own report was still to come.
 * `since` — the start of the very first period ever queued
   (`payroll_report_first_period`, written once by `queue_previous_month`).
   Without it the *first* report an installation ever sends would sweep in every
@@ -281,19 +286,37 @@ approved on the spot. It never sits in `requested`, never trips
 `PendingAbsences::PayrollRelevant`, and therefore cannot hold its own month's
 report back — it just turns up after that month was filed. Without carry-over
 those days reach no document at all and continued pay is never claimed.
-`build_late_absence_rows` prints them under their real dates (no month clamp —
-the range is the information payroll books against), and the mark records the
-*first* period that showed any part of an absence, which is what lets one
-column serve an absence spanning a month boundary: the marker gates only the
-catch-up path, so each month's report still prints its own clamped part
-normally. A delivered month's card shows no catch-up absences at all, since a
-"first period" marker cannot answer "what did period P carry". `payroll_members` takes it too, because
+`build_late_absence_rows` prints them under their real dates, and the mark
+records the *first* period that showed any part of an absence, which is what
+lets one column serve an absence spanning a month boundary: the marker gates
+only the catch-up path, so each month's report still prints its own clamped
+part normally. A delivered month's card shows no catch-up absences at all,
+since a "first period" marker cannot answer "what did period P carry".
+
+An absence is a *range*, which is where it stops resembling the entries path.
+`reportable_segments` cuts the months still owed out of that range instead of
+dropping the absence whole: a sick note running from a reported month into one
+whose report is stuck must have its earlier days declared now, because the owed
+month's report marks the absence the moment it prints its own half and the
+catch-up path never looks at it again. It returns several stretches where it
+has to, and the rows go through `merge_continuous_illness_rows` like the main
+table's, so a catch-up row cannot carry a certificate verdict earned on a
+longer period than it shows. The absences a document declared travel back to
+the sender on the document itself (`PayrollReportData::late_absence_ids`) and
+are exactly what `mark_payroll_reported_absences` marks — deriving that set
+from a second query is what produced the read/mark drift bugs this feature kept
+hitting, where days were either declared twice or marked without ever being
+printed.
+
+`payroll_members` takes carry-over too, because
 somebody who worked only in the closed month has no activity in the month now
 being reported (and may since have been deactivated, hence
 `users_with_carried_time_entries_before` returning whole user rows). The
 Submissions tile passes `None`: a late day from a closed month says nothing about
-whether *this* month is closed. Absences are deliberately out of scope — an
-assistant's absence never appears in the report at all.
+whether *this* month is closed. A carried *absence* widens the member set only
+for non-assistants, mirroring the rule that an assistant's absence never
+appears in the report: admitting one would add somebody who can never produce a
+row, for ever, since only non-assistants' absences are ever marked.
 
 `require_week_submission` is `false` for payroll and `true` for the archive. An
 unhanded-in week proves nothing here: an assistant with no target schedule may

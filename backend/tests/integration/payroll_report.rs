@@ -3850,7 +3850,7 @@ async fn a_sick_note_filed_after_its_month_was_reported_reaches_the_next_report(
     app.state
         .db
         .reports
-        .mark_payroll_reported_absences(&period, from, to, Default::default(), &[emp_id])
+        .mark_payroll_reported_absences(&period, from, to, &[emp_id], &[])
         .await
         .expect("mark the reported month");
     app.state
@@ -3950,16 +3950,10 @@ async fn a_sick_note_filed_after_its_month_was_reported_reaches_the_next_report(
             &next_period,
             next_from,
             next_to,
-            zerf::repository::PayrollCarryScope {
-                since: carried.as_ref().map(|c| c.since),
-                before: carried.as_ref().map(|c| c.before),
-                owed_periods: carried
-                    .as_ref()
-                    .map(|c| c.owed_periods.as_slice())
-                    .unwrap_or(&[]),
-                user_ids: &[emp_id],
-            },
             &[emp_id],
+            // Exactly what the document above declared — the send path takes
+            // this list straight off the assembled report.
+            &data.late_absence_ids,
         )
         .await
         .expect("mark what this report carried");
@@ -4046,7 +4040,7 @@ async fn a_sent_months_absences_do_not_grow_after_the_fact() {
     app.state
         .db
         .reports
-        .mark_payroll_reported_absences(&period, from, to, Default::default(), &[emp_id])
+        .mark_payroll_reported_absences(&period, from, to, &[emp_id], &[])
         .await
         .expect("mark the sent report");
     app.state
@@ -4115,7 +4109,7 @@ async fn a_departed_employees_late_sick_note_is_still_reported() {
     app.state
         .db
         .reports
-        .mark_payroll_reported_absences(&period, from, to, Default::default(), &[emp_id])
+        .mark_payroll_reported_absences(&period, from, to, &[emp_id], &[])
         .await
         .expect("mark the reported month");
     app.state
@@ -4193,6 +4187,489 @@ async fn a_departed_employees_late_sick_note_is_still_reported() {
             .collect::<Vec<_>>(),
         vec![(sick_from, sick_to)],
         "their sick days are declared under the dates they actually cover"
+    );
+
+    app.cleanup().await;
+}
+
+/// A sick note straddling the month boundary, filed after the earlier month
+/// was reported, must have its earlier days declared too.
+///
+/// The ordinary path clamps such an absence to the month being reported and
+/// marks it as shown, so the days before that month get exactly one chance to
+/// be declared — as a catch-up. Selecting catch-ups on the absence's *end*
+/// date drops the whole row and loses them permanently.
+#[tokio::test]
+async fn a_sick_note_spanning_the_month_boundary_declares_its_earlier_days() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, lead_pw, emp_id, _emp_pw, _monday, _cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "span-sick").await;
+    let _lead = login_change_pw(&app, "lead-span-sick@example.com", &lead_pw).await;
+
+    // The month that has been reported, and the one now being reported.
+    let today = zerf::services::settings::app_today(&app.state.pool).await;
+    let reporting = zerf::background::schedule::previous_period(today);
+    let (reporting_from, reporting_to) =
+        zerf::background::schedule::period_bounds(&reporting).expect("bounds");
+    let (earlier_from, earlier_to) = month_bounds(reporting_from - Duration::days(1));
+    let earlier_period = earlier_from.format("%Y-%m").to_string();
+    let sick = absence_cat(&app.state.pool, "sick").await;
+
+    // The earlier month's report goes out with nothing in it for this person.
+    app.state
+        .db
+        .reports
+        .mark_payroll_reported_absences(
+            &earlier_period,
+            earlier_from,
+            earlier_to,
+            &[emp_id],
+            &[],
+        )
+        .await
+        .expect("mark the earlier month");
+    app.state
+        .db
+        .settings
+        .save_setting(
+            zerf::services::settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+            &earlier_period,
+        )
+        .await
+        .expect("record the queued period");
+
+    // Only afterwards is a sick note filed that straddles the boundary: the
+    // last three days of the closed month and the first two of the new one.
+    let sick_from = earlier_to - Duration::days(2);
+    // Far enough into the new month to cover workdays: the first days of a
+    // month can be a weekend, and a weekend-only stretch has no payroll days.
+    let sick_to = reporting_from + Duration::days(4);
+    app.state
+        .db
+        .absences
+        .create(emp_id, sick.id, true, sick_from, sick_to, None, "approved")
+        .await
+        .expect("straddling sick note");
+
+    let carried = payroll_report::carry_over_boundary(&app.state.pool, reporting_from)
+        .await
+        .expect("carry-over boundary");
+    let members = payroll_report::payroll_members(
+        &app.state,
+        reporting_from,
+        reporting_to,
+        &[],
+        false,
+        carried.as_ref(),
+    )
+    .await
+    .expect("members");
+
+    let language = zerf::i18n::Language::from_setting("en");
+    let data = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from: reporting_from,
+            to: reporting_to,
+            interim: false,
+            created_on: reporting_to,
+            carried,
+        },
+        &members,
+        &config(true, false),
+        &language,
+        None,
+    )
+    .await
+    .expect("build the report");
+
+    // The earlier days are declared as a catch-up, ending at the last day of
+    // the closed month — not running on into the month being reported, whose
+    // days the ordinary absence table already shows.
+    assert_eq!(
+        data.late_absence_rows
+            .iter()
+            .map(|row| (row.from, row.to))
+            .collect::<Vec<_>>(),
+        vec![(sick_from, earlier_to)],
+        "the days that predate this report, and only those"
+    );
+
+    // And the ordinary table shows the part inside the reported month, so
+    // between them every day of the absence is declared exactly once.
+    let ordinary = data.absence_rows.as_ref().expect("absence section");
+    assert_eq!(
+        ordinary
+            .iter()
+            .map(|row| (row.from, row.to))
+            .collect::<Vec<_>>(),
+        vec![(reporting_from, sick_to)],
+        "the in-month part, clamped as usual"
+    );
+
+    app.cleanup().await;
+}
+
+/// A month can be owed without being queued yet, and carry-over has to treat it
+/// as owed all the same.
+///
+/// The queue is backfilled at the start of a run, so for the first days of every
+/// month — before the configured send day — the month just finished is due but
+/// not yet in it. Reading "owed" off the queue alone made the running month's
+/// payroll card offer the whole previous month as catch-up days, hours and all,
+/// while that month's own report was still to come: the same days on two cards.
+#[tokio::test]
+async fn a_month_due_but_not_yet_queued_is_not_raided_for_catch_up_days() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "not-queued").await;
+    let lead = login_change_pw(&app, "lead-not-queued@example.com", &lead_pw).await;
+    let (assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "not-queued").await;
+    let assistant = login_change_pw(&app, "aushilfe-not-queued@example.com", &assistant_pw).await;
+
+    let today = zerf::services::settings::app_today(&app.state.pool).await;
+    let (current_from, _current_to) = month_bounds(today);
+    let (previous_from, _previous_to) = month_bounds(current_from - Duration::days(1));
+    let previous_period = previous_from.format("%Y-%m").to_string();
+    let (two_back_from, _) = month_bounds(previous_from - Duration::days(1));
+    let two_back_period = two_back_from.format("%Y-%m").to_string();
+
+    // A Monday in the middle of the month just finished — every month has one
+    // in this window, whatever day of the week it starts on.
+    let mut worked = previous_from + Duration::days(9);
+    while worked.weekday() != chrono::Weekday::Mon {
+        worked += Duration::days(1);
+    }
+    let entry_id =
+        create_and_submit_entry(&assistant, &worked.format("%Y-%m-%d").to_string(), cat_id).await;
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids":[entry_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the day: {body}");
+
+    // Reports are up to date through the month before last. The month just
+    // finished is due, but no run has queued it yet.
+    app.state
+        .db
+        .settings
+        .save_setting(
+            zerf::services::settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+            &two_back_period,
+        )
+        .await
+        .expect("record the queued period");
+    assert!(
+        app.state
+            .db
+            .payroll_queue
+            .list_pending()
+            .await
+            .expect("queue")
+            .is_empty(),
+        "nothing is queued yet — that is the whole point"
+    );
+
+    let carried = payroll_report::carry_over_boundary(&app.state.pool, current_from)
+        .await
+        .expect("carry-over boundary");
+    assert!(
+        carried
+            .as_ref()
+            .is_some_and(|c| c.owed_periods.contains(&previous_period)),
+        "a month whose report is still to come is owed, queued or not: {:?}",
+        carried.as_ref().map(|c| c.owed_periods.clone())
+    );
+
+    let members = payroll_report::payroll_members(
+        &app.state,
+        current_from,
+        today,
+        &[],
+        true,
+        carried.as_ref(),
+    )
+    .await
+    .expect("members");
+
+    let language = zerf::i18n::Language::from_setting("en");
+    let data = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from: current_from,
+            to: today,
+            interim: true,
+            created_on: today,
+            carried,
+        },
+        &members,
+        &config(true, false),
+        &language,
+        None,
+    )
+    .await
+    .expect("build the running month's snapshot");
+
+    assert!(
+        data.late_entry_rows.is_empty(),
+        "the previous month's own report will print these days: {:?}",
+        data.late_entry_rows
+            .iter()
+            .map(|row| (row.date, row.minutes))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        !members.iter().any(|member| member.id == assistant_id),
+        "and nothing about that month makes the assistant part of this one"
+    );
+
+    app.cleanup().await;
+}
+
+/// An assistant's own absence never reaches the payroll report — they are paid
+/// by the hour, so continued pay does not apply — and a late-filed one must not
+/// drag them into the report's covered set either.
+///
+/// Nothing would ever get them back out again: only non-assistants' absences
+/// are marked as declared, so the note stays unmarked and would pull them into
+/// every future month's covered set for ever, to produce no row in any of them.
+#[tokio::test]
+async fn an_assistants_late_sick_note_does_not_pull_them_into_the_report() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, _cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "aux-sick").await;
+    let _lead = login_change_pw(&app, "lead-aux-sick@example.com", &lead_pw).await;
+    let (assistant_id, _assistant_pw) = create_assistant(&admin, lead_id, "aux-sick").await;
+
+    let today = zerf::services::settings::app_today(&app.state.pool).await;
+    let reporting = zerf::background::schedule::previous_period(today);
+    let (reporting_from, reporting_to) =
+        zerf::background::schedule::period_bounds(&reporting).expect("bounds");
+    let (earlier_from, earlier_to) = month_bounds(reporting_from - Duration::days(1));
+    let earlier_period = earlier_from.format("%Y-%m").to_string();
+    let sick = absence_cat(&app.state.pool, "sick").await;
+
+    app.state
+        .db
+        .settings
+        .save_setting(
+            zerf::services::settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+            &earlier_period,
+        )
+        .await
+        .expect("record the queued period");
+
+    // Filed after the earlier month's report went out, and entirely inside it:
+    // the assistant booked no time at all, in either month.
+    app.state
+        .db
+        .absences
+        .create(
+            assistant_id,
+            sick.id,
+            true,
+            earlier_to - Duration::days(3),
+            earlier_to,
+            None,
+            "approved",
+        )
+        .await
+        .expect("the assistant's sick note");
+
+    let carried = payroll_report::carry_over_boundary(&app.state.pool, reporting_from)
+        .await
+        .expect("carry-over boundary");
+    let members = payroll_report::payroll_members(
+        &app.state,
+        reporting_from,
+        reporting_to,
+        &[],
+        false,
+        carried.as_ref(),
+    )
+    .await
+    .expect("members");
+
+    assert!(
+        !members.iter().any(|member| member.id == assistant_id),
+        "an assistant with nothing but an absence is not covered by the report"
+    );
+
+    app.cleanup().await;
+}
+
+/// A sick note running out of a month that has been reported and into one whose
+/// own report is still stuck must have its earlier days declared now.
+///
+/// The month still owed will print its own days when it finally goes out, so
+/// they must not be taken here. But dropping the whole absence for that reason
+/// loses the earlier days outright: the owed month's report marks the absence
+/// as declared the moment it prints its half, and the catch-up path never looks
+/// at it again. Nobody ever claims continued pay for those days.
+///
+/// The queue really can have such a gap — one month held up behind a late
+/// approval while later ones are delivered is exactly why carry-over skips
+/// owed months by name rather than by a single cut-off date.
+#[tokio::test]
+async fn a_sick_note_running_into_a_month_still_owed_still_declares_the_reported_part() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, lead_pw, emp_id, _emp_pw, _monday, _cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "owed-span").await;
+    let _lead = login_change_pw(&app, "lead-owed-span@example.com", &lead_pw).await;
+
+    // Three months: the one being reported, the one before it whose report is
+    // still queued, and the one before that, which has been delivered.
+    let today = zerf::services::settings::app_today(&app.state.pool).await;
+    let reporting = zerf::background::schedule::previous_period(today);
+    let (reporting_from, reporting_to) =
+        zerf::background::schedule::period_bounds(&reporting).expect("bounds");
+    let (owed_from, _owed_to) = month_bounds(reporting_from - Duration::days(1));
+    let owed_period = owed_from.format("%Y-%m").to_string();
+    let (_delivered_from, delivered_to) = month_bounds(owed_from - Duration::days(1));
+    let sick = absence_cat(&app.state.pool, "sick").await;
+
+    // The older month has been delivered; the one after it is still queued.
+    app.state
+        .db
+        .settings
+        .save_setting(
+            zerf::services::settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+            &reporting,
+        )
+        .await
+        .expect("record the queued period");
+    app.state
+        .db
+        .payroll_queue
+        .enqueue(&owed_period)
+        .await
+        .expect("the middle month is still owed");
+
+    // The sick note straddles the two: the last three days of the delivered
+    // month and the first days of the one still owed.
+    let sick_from = delivered_to - Duration::days(2);
+    let sick_to = owed_from + Duration::days(4);
+    let absence = app
+        .state
+        .db
+        .absences
+        .create(emp_id, sick.id, true, sick_from, sick_to, None, "approved")
+        .await
+        .expect("straddling sick note");
+
+    let carried = payroll_report::carry_over_boundary(&app.state.pool, reporting_from)
+        .await
+        .expect("carry-over boundary");
+    assert!(
+        carried
+            .as_ref()
+            .is_some_and(|c| c.owed_periods.contains(&owed_period)),
+        "the middle month has to be owed for this test to mean anything"
+    );
+    let members = payroll_report::payroll_members(
+        &app.state,
+        reporting_from,
+        reporting_to,
+        &[],
+        false,
+        carried.as_ref(),
+    )
+    .await
+    .expect("members");
+
+    let language = zerf::i18n::Language::from_setting("en");
+    let data = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from: reporting_from,
+            to: reporting_to,
+            interim: false,
+            created_on: reporting_to,
+            carried: carried.clone(),
+        },
+        &members,
+        &config(true, false),
+        &language,
+        None,
+    )
+    .await
+    .expect("build the report");
+
+    // Only the delivered month's days. The owed month's days are left to its
+    // own report, which has not gone out yet.
+    assert_eq!(
+        data.late_absence_rows
+            .iter()
+            .map(|row| (row.from, row.to))
+            .collect::<Vec<_>>(),
+        vec![(sick_from, delivered_to)],
+        "the days no report will ever print unless this one does"
+    );
+    assert_eq!(
+        data.late_absence_ids,
+        vec![absence.id],
+        "and the document records the absence it declared, so the send marks \
+         exactly that"
+    );
+
+    // Marking is what the send does next. It must not stop the month that is
+    // still owed from printing its own half through the ordinary path.
+    app.state
+        .db
+        .reports
+        .mark_payroll_reported_absences(
+            &reporting,
+            reporting_from,
+            reporting_to,
+            &[emp_id],
+            &data.late_absence_ids,
+        )
+        .await
+        .expect("mark what this report declared");
+
+    let owed_members = payroll_report::payroll_members(
+        &app.state,
+        owed_from,
+        sick_to.max(owed_from),
+        &[],
+        false,
+        None,
+    )
+    .await
+    .expect("members of the owed month");
+    let owed_data = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from: owed_from,
+            to: month_bounds(owed_from).1,
+            interim: false,
+            created_on: reporting_to,
+            carried: None,
+        },
+        &owed_members,
+        &config(true, false),
+        &language,
+        None,
+    )
+    .await
+    .expect("build the owed month's report");
+    assert_eq!(
+        owed_data
+            .absence_rows
+            .as_ref()
+            .expect("absence section")
+            .iter()
+            .map(|row| (row.from, row.to))
+            .collect::<Vec<_>>(),
+        vec![(owed_from, sick_to)],
+        "the owed month still prints its own half, so between the two reports \
+         every day is declared exactly once"
     );
 
     app.cleanup().await;

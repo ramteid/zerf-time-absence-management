@@ -181,20 +181,21 @@ pub async fn payroll_members(
             app_state
                 .db
                 .reports
-                .users_with_carried_absences_before(
-                    carried.since,
-                    carried.before,
-                    &carried.owed_periods,
-                )
+                .users_with_carried_absences_before(carried.since, carried.before)
                 .await?
         }
         _ => Vec::new(),
     };
-    let users_with_late_entries: std::collections::HashSet<i64> = late_members
-        .iter()
-        .chain(late_absence_members.iter())
-        .map(|member| member.id)
-        .collect();
+    // Kept apart on purpose. A carried *entry* admits anybody whose hours the
+    // report prints, assistants included. A carried *absence* must not admit an
+    // assistant: the document never prints an assistant's absence, so it would
+    // pull somebody into every future report's covered set who can never
+    // produce a row — and, since only non-assistants' absences are ever marked
+    // as declared, would keep doing so for ever.
+    let users_with_late_entries: std::collections::HashSet<i64> =
+        late_members.iter().map(|member| member.id).collect();
+    let users_with_late_absences: std::collections::HashSet<i64> =
+        late_absence_members.iter().map(|member| member.id).collect();
     let mut members = app_state
         .db
         .reports
@@ -231,7 +232,9 @@ pub async fn payroll_members(
             // the hour, so only recorded time can bring them in.
             let has_relevant_data = users_with_entries.contains(&member.id)
                 || users_with_late_entries.contains(&member.id)
-                || (!is_assistant && users_with_payroll_absences.contains(&member.id));
+                || (!is_assistant
+                    && (users_with_payroll_absences.contains(&member.id)
+                        || users_with_late_absences.contains(&member.id)));
             !crate::roles::is_admin_role(&member.role)
                 && !excluded_user_ids.contains(&member.id)
                 && (!needs_recorded_time || has_relevant_data)
@@ -302,10 +305,11 @@ pub struct CarriedDays {
     /// catch-up rows, must describe what was mailed, not the entries' current
     /// state.
     ///
-    /// Absence rows have no equivalent: there is no marker on `absences`, so a
-    /// sick note approved after a month's send still inflates that month's
-    /// card. Fixing that needs its own marker on `absences` and is out of
-    /// scope for the entry-only carry-over this type exists for.
+    /// Absences answer only the first question. Their marker records the
+    /// *first* period that showed any part of an absence — which is what lets
+    /// one column serve a period spanning a month boundary — so it cannot say
+    /// what a given period carried, and a delivered month shows no catch-up
+    /// absences rather than a wrong set.
     pub reported_as: Option<String>,
 }
 
@@ -338,9 +342,24 @@ pub async fn carry_over_boundary(
     // the queue can have gaps. One month stuck behind a late approval, with
     // later months already delivered, must not freeze carry-over for those
     // later months too, possibly for as long as the stuck month lasts.
-    let owed_periods = crate::repository::PayrollReportQueueDb::new(pool.clone())
+    let mut owed_periods = crate::repository::PayrollReportQueueDb::new(pool.clone())
         .list_pending()
         .await?;
+    // A month can be owed without being queued yet: the queue is backfilled at
+    // the start of a run, so between two runs the setting can trail several
+    // months behind. Both a send and the dashboard card have to count those as
+    // owed, exactly like `manual_send_target` does — otherwise the card offers
+    // days as catch-ups that the older report about to be sent will print
+    // itself.
+    let today = settings::app_today(pool).await;
+    for period in crate::background::schedule::periods_to_backfill(
+        &queued_through,
+        &crate::background::schedule::previous_period(today),
+    ) {
+        if !owed_periods.contains(&period) {
+            owed_periods.push(period);
+        }
+    }
 
     Ok(Some(CarriedDays {
         since: carry_over_floor(pool).await?,
@@ -1178,8 +1197,8 @@ pub async fn build_report_data(
     // Absence days no report has ever shown. Built whenever the absence
     // section itself exists — the catch-up is pointless if the document has
     // nowhere to print absences at all.
-    let late_absence_rows = if relevant_categories.is_empty() {
-        Vec::new()
+    let (late_absence_rows, late_absence_ids) = if relevant_categories.is_empty() {
+        (Vec::new(), Vec::new())
     } else {
         build_late_absence_rows(
             app_state,
@@ -1201,6 +1220,7 @@ pub async fn build_report_data(
         hours_sections,
         late_entry_rows,
         late_absence_rows,
+        late_absence_ids,
         created_on,
         provisional,
     })
@@ -1402,6 +1422,60 @@ async fn sent_hours_rows(
     Ok(sections)
 }
 
+/// The first day of the month after `date`.
+fn next_month_start(date: NaiveDate) -> Option<NaiveDate> {
+    let (year, month) = if date.month() == 12 {
+        (date.year() + 1, 1)
+    } else {
+        (date.year(), date.month() + 1)
+    };
+    NaiveDate::from_ymd_opt(year, month, 1)
+}
+
+/// The stretches of `[from, to]` a report may declare as catch-up days, in
+/// chronological order.
+///
+/// Days in a month whose own report is still queued are cut out: that report
+/// prints them itself through its ordinary, month-clamped path, so declaring
+/// them here as well would report the same days twice.
+///
+/// What is left can be more than one stretch, and treating it as one — or
+/// dropping the whole absence because part of it is owed — is a silent loss of
+/// days. An absence running from a month that has been reported into one that
+/// is still owed is the everyday case: skipping it entirely leaves its earlier
+/// half declared by nobody, because the owed month's report marks the absence
+/// as declared the moment it prints its own half, and the catch-up path never
+/// looks at it again.
+fn reportable_segments(
+    from: NaiveDate,
+    to: NaiveDate,
+    owed_periods: &[String],
+) -> Vec<(NaiveDate, NaiveDate)> {
+    let mut segments: Vec<(NaiveDate, NaiveDate)> = Vec::new();
+    let mut month_start = match NaiveDate::from_ymd_opt(from.year(), from.month(), 1) {
+        Some(start) => start,
+        None => return segments,
+    };
+    while month_start <= to {
+        let Some(next_month) = next_month_start(month_start) else {
+            break;
+        };
+        let slice_from = month_start.max(from);
+        let slice_to = next_month.pred_opt().unwrap_or(next_month).min(to);
+        let period = format!("{:04}-{:02}", month_start.year(), month_start.month());
+        if slice_from <= slice_to && !owed_periods.iter().any(|owed| owed == &period) {
+            match segments.last_mut() {
+                // Grow the run while consecutive months stay declarable, so an
+                // absence nothing interrupts still prints as one row.
+                Some(last) if last.1.succ_opt() == Some(slice_from) => last.1 = slice_to,
+                _ => segments.push((slice_from, slice_to)),
+            }
+        }
+        month_start = next_month;
+    }
+    segments
+}
+
 /// Payroll-relevant absence days from earlier months that no report has ever
 /// shown, printed under their own real dates.
 ///
@@ -1413,26 +1487,35 @@ async fn sent_hours_rows(
 /// simply turns up after the month it belongs to has been filed. Without this
 /// those days reach no document at all, and continued pay is never claimed.
 ///
-/// Rows are clamped to the person's start date but *not* to any month — the
-/// whole point is the real range, which is what payroll books against.
-/// Assistants are skipped here exactly as in [`build_absence_rows`]: they are
-/// paid by the hour, so continued pay does not apply to them.
+/// A row carries the real dates payroll books against, not a clamp to the
+/// reported month — but it covers only days no other report will show: nothing
+/// from the reported month onwards, and nothing from a month that still owes
+/// its own report (see [`reportable_segments`]). Days before the person's start
+/// date are dropped here as everywhere else.
+///
+/// Assistants are skipped exactly as in [`build_absence_rows`]: they are paid
+/// by the hour, so continued pay does not apply to them.
+///
+/// Returns the rows and the ids of the absences they came from. The sender
+/// marks exactly those ids, so what was declared and what is recorded as
+/// declared cannot come apart.
 async fn build_late_absence_rows(
     app_state: &AppState,
     carried: Option<&CarriedDays>,
     members: &[User],
     relevant_categories: &[AbsenceCategory],
     language: &Language,
-) -> AppResult<Vec<PayrollAbsenceRow>> {
+) -> AppResult<(Vec<PayrollAbsenceRow>, Vec<i64>)> {
+    let empty = || (Vec::new(), Vec::new());
     let Some(carried) = carried else {
-        return Ok(Vec::new());
+        return Ok(empty());
     };
     // Reading a delivered month back from its marker is the entries' trick and
     // does not transfer: an absence carries the *first* period that showed any
     // part of it, so it cannot answer "what did period P carry". A delivered
     // month therefore shows no catch-up absences rather than a wrong set.
     if carried.reported_as.is_some() {
-        return Ok(Vec::new());
+        return Ok(empty());
     }
     // Only people whose absences the document prints — never an assistant.
     let printed: std::collections::HashMap<i64, &User> = members
@@ -1441,16 +1524,16 @@ async fn build_late_absence_rows(
         .map(|member| (member.id, member))
         .collect();
     if printed.is_empty() {
-        return Ok(Vec::new());
+        return Ok(empty());
     }
 
     let absences = app_state
         .db
         .reports
-        .unreported_payroll_absences_before(carried.since, carried.before, &carried.owed_periods)
+        .unreported_payroll_absences_before(carried.since, carried.before)
         .await?;
     if absences.is_empty() {
-        return Ok(Vec::new());
+        return Ok(empty());
     }
 
     let selected: Vec<(String, String, usize, bool)> = relevant_categories
@@ -1483,7 +1566,13 @@ async fn build_late_absence_rows(
         .unwrap_or(carried.before);
     let holidays = app_state.db.reports.holiday_set(earliest, latest).await?;
 
-    let mut rows: Vec<(usize, String, PayrollAbsenceRow)> = Vec::new();
+    // (category rank, display name, user id, row) — the shape the shared
+    // illness merge below works on.
+    let mut rows: Vec<(usize, String, i64, PayrollAbsenceRow)> = Vec::new();
+    // The absences this document actually declares something for. They, and
+    // only they, are marked afterwards, so the marked set cannot drift from
+    // the printed one.
+    let mut declared_ids: Vec<i64> = Vec::new();
     for (user_id, absence_id, start_date, end_date, slug, _stored_name) in absences {
         let Some(member) = printed.get(&user_id) else {
             continue;
@@ -1494,13 +1583,20 @@ async fn build_late_absence_rows(
         else {
             continue;
         };
-        // Start date only: the real range is the information payroll needs.
-        let row_from = start_date.max(member.start_date);
-        if row_from > end_date {
+        // Only the part that predates this report. An absence spanning into the
+        // reported month has its remaining days printed by the ordinary clamped
+        // path, so carrying the whole range here would declare those days
+        // twice; carrying nothing would lose the earlier ones for good, because
+        // the ordinary path marks the absence as reported either way.
+        let row_from = start_date.max(member.start_date).max(carried.since);
+        let row_to = end_date.min(carried.before.pred_opt().unwrap_or(carried.before));
+        if row_from > row_to {
             continue;
         }
-        let days = count_workdays(row_from, end_date, &holidays, member.workdays_per_week);
-        if days <= 0.0 {
+        // Months whose own report is still to come print their own days, so
+        // they are cut out — but only they. See [`reportable_segments`].
+        let segments = reportable_segments(row_from, row_to, &carried.owed_periods);
+        if segments.is_empty() {
             continue;
         }
         let medical_certificate_required =
@@ -1513,29 +1609,52 @@ async fn build_late_absence_rows(
             } else {
                 false
             };
-        rows.push((
-            *category_rank,
-            employee_name(member),
-            PayrollAbsenceRow {
-                employee: employee_name(member),
-                category: i18n::absence_kind_label(language, &slug, category_name),
-                from: row_from,
-                to: end_date,
-                days,
-                medical_certificate_required: tracks_medical_certificate
-                    .then_some(medical_certificate_required),
-            },
-        ));
+        let mut declared_anything = false;
+        for (segment_from, segment_to) in segments {
+            let days = count_workdays(segment_from, segment_to, &holidays, member.workdays_per_week);
+            // A stretch covering only weekends or holidays has no payroll
+            // effect — leave it out instead of printing a 0 row.
+            if days <= 0.0 {
+                continue;
+            }
+            declared_anything = true;
+            rows.push((
+                *category_rank,
+                employee_name(member),
+                member.id,
+                PayrollAbsenceRow {
+                    employee: employee_name(member),
+                    category: i18n::absence_kind_label(language, &slug, category_name),
+                    from: segment_from,
+                    to: segment_to,
+                    days,
+                    medical_certificate_required: tracks_medical_certificate
+                        .then_some(medical_certificate_required),
+                },
+            ));
+        }
+        if declared_anything {
+            declared_ids.push(absence_id);
+        }
     }
     // Category, then person, then chronological — the order the main absence
-    // table uses, so the reader is not asked to learn a second one.
+    // table uses, so the reader is not asked to learn a second one, and the
+    // order the illness merge below needs to look only at neighbours.
     rows.sort_by(|left, right| {
         left.0
             .cmp(&right.0)
             .then_with(|| left.1.cmp(&right.1))
-            .then_with(|| left.2.from.cmp(&right.2.from))
+            .then_with(|| left.2.cmp(&right.2))
+            .then_with(|| left.3.from.cmp(&right.3.from))
     });
-    Ok(rows.into_iter().map(|(_, _, row)| row).collect())
+    // One illness filed as two requests over a weekend is one period, and the
+    // certificate verdict was earned on that whole period. The main table folds
+    // such rows together for exactly that reason; a catch-up row printed
+    // unmerged would carry the same misleading "certificate required" on a span
+    // too short to have earned it. Segments of one absence separated by a month
+    // that still owes its own report are never adjacent, so they cannot be
+    // folded back together here.
+    Ok((merge_continuous_illness_rows(rows, &holidays), declared_ids))
 }
 
 /// One row per absence period of a payroll-relevant category, clamped to the
@@ -1795,6 +1914,100 @@ pub fn people_in_report(data: &PayrollReportData) -> usize {
 mod tests {
     use super::*;
 
+    fn day(year: i32, month: u32, day: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(year, month, day).expect("valid date")
+    }
+
+    /// With every month already reported, the whole stretch is one row — the
+    /// reader should not be handed an absence chopped up at month boundaries
+    /// for no reason.
+    #[test]
+    fn reportable_segments_keeps_an_uninterrupted_absence_whole() {
+        assert_eq!(
+            reportable_segments(day(2029, 10, 29), day(2029, 12, 3), &[]),
+            vec![(day(2029, 10, 29), day(2029, 12, 3))]
+        );
+        // A single day is still a stretch.
+        assert_eq!(
+            reportable_segments(day(2029, 10, 29), day(2029, 10, 29), &[]),
+            vec![(day(2029, 10, 29), day(2029, 10, 29))]
+        );
+    }
+
+    /// The case that loses days if it is got wrong: an absence running from a
+    /// month whose report has gone out into one that is still owed. Only the
+    /// reported month's days may be declared here — the owed month prints its
+    /// own — but dropping the absence outright would lose the earlier days for
+    /// good, because the owed month's report marks it as declared when it
+    /// prints its half.
+    #[test]
+    fn reportable_segments_cuts_out_a_month_that_still_owes_its_report() {
+        assert_eq!(
+            reportable_segments(
+                day(2029, 10, 29),
+                day(2029, 11, 5),
+                &["2029-11".to_string()]
+            ),
+            vec![(day(2029, 10, 29), day(2029, 10, 31))]
+        );
+        // And the other way round: the owed month comes first.
+        assert_eq!(
+            reportable_segments(
+                day(2029, 10, 29),
+                day(2029, 11, 5),
+                &["2029-10".to_string()]
+            ),
+            vec![(day(2029, 11, 1), day(2029, 11, 5))]
+        );
+    }
+
+    /// An owed month in the middle leaves two separate stretches. Treating them
+    /// as one would declare the owed month's days twice.
+    #[test]
+    fn reportable_segments_splits_around_an_owed_month_in_the_middle() {
+        assert_eq!(
+            reportable_segments(
+                day(2029, 10, 29),
+                day(2029, 12, 3),
+                &["2029-11".to_string()]
+            ),
+            vec![
+                (day(2029, 10, 29), day(2029, 10, 31)),
+                (day(2029, 12, 1), day(2029, 12, 3)),
+            ]
+        );
+    }
+
+    /// Every month owed means this report declares nothing, and the absence is
+    /// left unmarked so those months' own reports still carry it.
+    #[test]
+    fn reportable_segments_is_empty_when_every_month_is_owed() {
+        assert!(reportable_segments(
+            day(2029, 11, 2),
+            day(2029, 12, 3),
+            &["2029-11".to_string(), "2029-12".to_string()]
+        )
+        .is_empty());
+    }
+
+    /// A December-to-January absence has to roll the year over correctly, or
+    /// the loop would ask whether "2029-13" is owed and never terminate.
+    #[test]
+    fn reportable_segments_crosses_the_turn_of_the_year() {
+        assert_eq!(
+            reportable_segments(day(2029, 12, 28), day(2030, 1, 3), &[]),
+            vec![(day(2029, 12, 28), day(2030, 1, 3))]
+        );
+        assert_eq!(
+            reportable_segments(
+                day(2029, 12, 28),
+                day(2030, 1, 3),
+                &["2030-01".to_string()]
+            ),
+            vec![(day(2029, 12, 28), day(2029, 12, 31))]
+        );
+    }
+
     #[test]
     fn parse_recipient_list_trims_and_deduplicates_case_insensitively() {
         assert_eq!(
@@ -1951,6 +2164,7 @@ mod tests {
             }],
             late_entry_rows: Vec::new(),
             late_absence_rows: Vec::new(),
+            late_absence_ids: Vec::new(),
             created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
             provisional: None,
         };
@@ -1983,6 +2197,7 @@ mod tests {
                 hours_sections: vec![],
                 late_entry_rows: Vec::new(),
                 late_absence_rows: Vec::new(),
+                late_absence_ids: Vec::new(),
                 created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
                 provisional: None,
             }

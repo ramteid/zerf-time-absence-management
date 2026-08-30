@@ -481,8 +481,7 @@ async fn process_period(
                         from,
                         month_end,
                         carried.as_ref(),
-                        &[],
-                        &[],
+                        ReportedScope::default(),
                     )
                     .await
                     {
@@ -578,8 +577,15 @@ async fn process_period(
             // Same as the covers-nobody branch: a period that will never be
             // sent is still done with, and its entries must not resurface as
             // catch-up days next month.
-            if mark_reported_entries(state, period, from, month_end, carried.as_ref(), &[], &[])
-                .await
+            if mark_reported_entries(
+                state,
+                period,
+                from,
+                month_end,
+                carried.as_ref(),
+                ReportedScope::default(),
+            )
+            .await
             {
                 state.db.payroll_queue.delete_entry(period).await?;
             }
@@ -702,8 +708,13 @@ async fn process_period(
             from,
             month_end,
             carried.as_ref(),
-            &carried_user_ids,
-            &absence_user_ids,
+            ReportedScope {
+                hours_user_ids: &carried_user_ids,
+                absence_user_ids: &absence_user_ids,
+                // Exactly the catch-up absences this document declared, taken
+                // off the assembled report rather than asked for a second time.
+                carried_absence_ids: &data.late_absence_ids,
+            },
         )
         .await
         {
@@ -730,15 +741,39 @@ async fn process_period(
 /// This cannot loop for long. Reaching this point means dozens of queries
 /// building the report already succeeded, so a failure here is a momentary one;
 /// the next run re-sends the identical document and settles the period.
+/// What one report actually accounted for, as the marking step needs it.
+///
+/// Three separate lists rather than one, because the document treats the three
+/// differently and a mark claiming more than was printed is how days get lost.
+/// All-empty is the settle-without-sending case: the period is done with, but
+/// nothing outside it was declared.
+#[derive(Default)]
+struct ReportedScope<'a> {
+    /// People whose working hours the document printed. Only their older days
+    /// may be marked as carried — marking anybody else's would claim a report
+    /// accounted for hours it never showed.
+    hours_user_ids: &'a [i64],
+    /// People whose absences the document prints: everybody but assistants,
+    /// whatever the hours settings say.
+    absence_user_ids: &'a [i64],
+    /// The catch-up absences the assembled document declared, straight off the
+    /// document itself.
+    carried_absence_ids: &'a [i64],
+}
+
 async fn mark_reported_entries(
     state: &AppState,
     period: &str,
     period_start: NaiveDate,
     period_end: NaiveDate,
     carried: Option<&payroll_report::CarriedDays>,
-    carried_user_ids: &[i64],
-    absence_user_ids: &[i64],
+    scope: ReportedScope<'_>,
 ) -> bool {
+    let ReportedScope {
+        hours_user_ids,
+        absence_user_ids,
+        carried_absence_ids,
+    } = scope;
     // Absences first: they use their own marker with its own rule (the *first*
     // report that showed any part of an absence), and a failure here must stop
     // the period being settled just as an entry-marking failure does.
@@ -750,15 +785,8 @@ async fn mark_reported_entries(
                 period,
                 period_start,
                 period_end,
-                crate::repository::PayrollCarryScope {
-                    since: carried.map(|c| c.since),
-                    before: carried.map(|c| c.before),
-                    owed_periods: carried
-                        .map(|c| c.owed_periods.as_slice())
-                        .unwrap_or(&[]),
-                    user_ids: absence_user_ids,
-                },
                 absence_user_ids,
+                carried_absence_ids,
             )
             .await
         {
@@ -795,7 +823,7 @@ async fn mark_reported_entries(
                     since: carried.map(|c| c.since),
                     before: carried.map(|c| c.before),
                     owed_periods: carried.map(|c| c.owed_periods.as_slice()).unwrap_or(&[]),
-                    user_ids: carried_user_ids,
+                    user_ids: hours_user_ids,
                 },
             )
             .await

@@ -208,6 +208,17 @@ pub struct PayrollReportData {
     /// Absence periods from earlier months that no report ever showed, under
     /// their own real dates. Same "only when non-empty" rule as above.
     pub late_absence_rows: Vec<PayrollAbsenceRow>,
+    /// Database ids of the absences `late_absence_rows` was built from — not
+    /// rendered, and deliberately part of the assembled document rather than
+    /// recomputed by the sender.
+    ///
+    /// After the report goes out, exactly these absences are marked as
+    /// declared. Deriving that set from a second query instead has gone wrong
+    /// repeatedly in this feature: the reader and the marker drifted apart, and
+    /// days were either declared twice or marked without ever being printed and
+    /// so lost for good. Carrying the ids on the document makes the two the
+    /// same set by construction.
+    pub late_absence_ids: Vec<i64>,
     /// The day the document was assembled. Printed under the title and used in
     /// the attachment's filename: the same month can be sent more than once
     /// (an interim snapshot, then the final report), so the recipient needs to
@@ -572,6 +583,7 @@ mod tests {
                 minutes: 240,
             }],
             late_absence_rows: Vec::new(),
+            late_absence_ids: Vec::new(),
             created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
             provisional: None,
         };
@@ -592,6 +604,7 @@ mod tests {
                 hours_sections: vec![],
                 late_entry_rows: Vec::new(),
                 late_absence_rows: Vec::new(),
+                late_absence_ids: Vec::new(),
                 created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
                 provisional: Some(ProvisionalNotice {
                     included: 8,
@@ -621,6 +634,7 @@ mod tests {
                 hours_sections: vec![],
                 late_entry_rows: Vec::new(),
                 late_absence_rows: Vec::new(),
+                late_absence_ids: Vec::new(),
                 created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
                 provisional: Some(ProvisionalNotice {
                     included: 5,
@@ -647,6 +661,7 @@ mod tests {
             }],
             late_entry_rows: Vec::new(),
             late_absence_rows: Vec::new(),
+            late_absence_ids: Vec::new(),
             created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
             provisional: None,
         };
