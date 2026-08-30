@@ -550,6 +550,43 @@ impl ReportDb {
         .await?)
     }
 
+    /// People holding a payroll-relevant absence that no report has ever shown
+    /// any part of, ending in the carry-over window.
+    ///
+    /// The absence twin of [`Self::users_with_carried_time_entries_before`],
+    /// and needed for the same reason: somebody who left the organisation is no
+    /// longer active and has no activity in the month now being reported, so
+    /// the period-scoped member query cannot see them. A sick note filed after
+    /// they left — exactly when a last one tends to arrive — would otherwise be
+    /// carried by nobody and reach no report at all.
+    pub async fn users_with_carried_absences_before(
+        &self,
+        since: NaiveDate,
+        before: NaiveDate,
+        owed_periods: &[String],
+    ) -> AppResult<Vec<User>> {
+        Ok(sqlx::query_as(
+            "SELECT DISTINCT u.id, u.email, u.password_hash, u.first_name, u.last_name, u.role, \
+             u.weekly_hours, u.workdays_per_week, u.start_date, u.hire_date, u.active, \
+             u.must_change_password, u.created_at, u.allow_reopen_without_approval, \
+             u.allow_submission_without_approval, u.dark_mode, u.tracks_time, u.archived_at, \
+             u.receives_error_notifications \
+             FROM users u \
+             JOIN absences a ON a.user_id = u.id \
+             JOIN absence_categories c ON c.id = a.category_id \
+             WHERE a.payroll_reported_period IS NULL \
+             AND a.status IN ('approved','cancellation_pending') \
+             AND (c.auto_approve_past=TRUE OR c.unpaid=TRUE) \
+             AND a.end_date < $1 AND a.end_date >= $2 \
+             AND to_char(a.end_date, 'YYYY-MM') <> ALL($3)",
+        )
+        .bind(before)
+        .bind(since)
+        .bind(owed_periods)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     /// Record that `period`'s report showed part of these absences.
     ///
     /// Marks every payroll-relevant, approved absence overlapping the reported

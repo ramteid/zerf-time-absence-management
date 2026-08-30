@@ -4093,3 +4093,107 @@ async fn a_sent_months_absences_do_not_grow_after_the_fact() {
 
     app.cleanup().await;
 }
+
+/// A sick note filed for somebody who has since left must still reach the tax
+/// office. They are no longer active and have nothing in the month now being
+/// reported, so the period's own member query cannot see them — and a last
+/// sick note arriving after someone leaves is exactly when this happens.
+#[tokio::test]
+async fn a_departed_employees_late_sick_note_is_still_reported() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, lead_pw, emp_id, _emp_pw, _monday, _cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "gone-sick").await;
+    let _lead = login_change_pw(&app, "lead-gone-sick@example.com", &lead_pw).await;
+
+    let monday = anchor_monday();
+    let (from, to) = month_bounds(monday);
+    let period = from.format("%Y-%m").to_string();
+    let sick = absence_cat(&app.state.pool, "sick").await;
+
+    // That month's report goes out — the employee had nothing in it.
+    app.state
+        .db
+        .reports
+        .mark_payroll_reported_absences(&period, from, to, Default::default(), &[emp_id])
+        .await
+        .expect("mark the reported month");
+    app.state
+        .db
+        .settings
+        .save_setting(
+            zerf::services::settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+            &period,
+        )
+        .await
+        .expect("record the queued period");
+
+    // Afterwards a sick note turns up for that closed month — auto-approved,
+    // because a payroll-relevant category approves past dates on the spot.
+    let sick_from = monday + Duration::days(1);
+    let sick_to = monday + Duration::days(2);
+    app.state
+        .db
+        .absences
+        .create(emp_id, sick.id, true, sick_from, sick_to, None, "approved")
+        .await
+        .expect("late sick note");
+
+    // And the employee has left since.
+    let (status, body) = admin
+        .post(&format!("/api/v1/users/{emp_id}/archive"), &json!({}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "archive the employee: {body}");
+
+    let (next_from, next_to) = month_bounds(to + Duration::days(1));
+    let carried = payroll_report::carry_over_boundary(&app.state.pool, next_from)
+        .await
+        .expect("carry-over boundary");
+    let members = payroll_report::payroll_members(
+        &app.state,
+        next_from,
+        next_to,
+        &[],
+        false,
+        carried.as_ref(),
+    )
+    .await
+    .expect("members");
+    assert!(
+        members.iter().any(|member| member.id == emp_id),
+        "somebody who has left is still covered by the report that owes them"
+    );
+    assert_eq!(
+        members.iter().filter(|member| member.id == emp_id).count(),
+        1,
+        "and appears exactly once, however many kinds of catch-up they hold"
+    );
+
+    let language = zerf::i18n::Language::from_setting("en");
+    let data = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from: next_from,
+            to: next_to,
+            interim: false,
+            created_on: next_to,
+            carried,
+        },
+        &members,
+        &config(true, false),
+        &language,
+        None,
+    )
+    .await
+    .expect("build the next month's report");
+    assert_eq!(
+        data.late_absence_rows
+            .iter()
+            .map(|row| (row.from, row.to))
+            .collect::<Vec<_>>(),
+        vec![(sick_from, sick_to)],
+        "their sick days are declared under the dates they actually cover"
+    );
+
+    app.cleanup().await;
+}

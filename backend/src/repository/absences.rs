@@ -249,9 +249,15 @@ impl AbsenceDb {
             .filter(|(s, e)| s <= e)
             .collect();
         // Delegate to shared counting logic (union).
-        Ok(crate::services::absence_balance::workdays_for_ranges_in_window_with_calendar(
-            &clamped, from, to, &holidays, workdays_per_week,
-        ))
+        Ok(
+            crate::services::absence_balance::workdays_for_ranges_in_window_with_calendar(
+                &clamped,
+                from,
+                to,
+                &holidays,
+                workdays_per_week,
+            ),
+        )
     }
 
     /// Sum of workdays for absences whose category has `auto_approve_past=TRUE`
@@ -282,9 +288,15 @@ impl AbsenceDb {
             .map(|(s, e)| (std::cmp::max(s, from), std::cmp::min(e, to)))
             .filter(|(s, e)| s <= e)
             .collect();
-        Ok(crate::services::absence_balance::workdays_for_ranges_in_window_with_calendar(
-            &clamped, from, to, &holidays, workdays_per_week,
-        ))
+        Ok(
+            crate::services::absence_balance::workdays_for_ranges_in_window_with_calendar(
+                &clamped,
+                from,
+                to,
+                &holidays,
+                workdays_per_week,
+            ),
+        )
     }
 
     /// Sum of workdays booked against one leave account in the requested
@@ -334,9 +346,15 @@ impl AbsenceDb {
             .map(|(s, e)| (std::cmp::max(s, from), std::cmp::min(e, to)))
             .filter(|(s, e)| s <= e)
             .collect();
-        Ok(crate::services::absence_balance::workdays_for_ranges_in_window_with_calendar(
-            &clamped, from, to, &holidays, workdays_per_week,
-        ))
+        Ok(
+            crate::services::absence_balance::workdays_for_ranges_in_window_with_calendar(
+                &clamped,
+                from,
+                to,
+                &holidays,
+                workdays_per_week,
+            ),
+        )
     }
 
     // ── Queries ────────────────────────────────────────────────────────────
@@ -1104,9 +1122,18 @@ impl AbsenceDb {
         input: UpdateAbsenceRecord<'_>,
     ) -> AppResult<()> {
         sqlx::query(
+            // Moving an absence out of the month it was reported in invalidates
+            // its payroll mark, exactly as it does for a time entry: the mark
+            // names the report that showed it, and after the move that report
+            // covered different days. Leaving it stale would hide the absence
+            // from the catch-up path for ever. An edit that keeps it inside the
+            // same month keeps the mark — that report really did show it.
             "UPDATE absences SET \
                 category_id=$1, leave_account_category_id=$2, start_date=$3, end_date=$4, comment=$5, \
-                status=$6, reviewed_by=NULL, reviewed_at=NULL, rejection_reason=NULL \
+                status=$6, reviewed_by=NULL, reviewed_at=NULL, rejection_reason=NULL, \
+                payroll_reported_period = CASE \
+                    WHEN to_char($4::date, 'YYYY-MM') = to_char(end_date, 'YYYY-MM') \
+                    THEN payroll_reported_period ELSE NULL END \
              WHERE id=$7",
         )
         .bind(input.category_id)

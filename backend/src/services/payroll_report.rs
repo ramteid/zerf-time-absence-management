@@ -172,8 +172,29 @@ pub async fn payroll_members(
         }
         None => Vec::new(),
     };
-    let users_with_late_entries: std::collections::HashSet<i64> =
-        late_members.iter().map(|member| member.id).collect();
+    // Absences need the same widening, and for the same reason: a sick note
+    // filed after somebody left is exactly when a last one tends to arrive, and
+    // the period-scoped query below cannot see a person who is no longer active
+    // and has nothing in this month.
+    let late_absence_members = match carried {
+        Some(carried) if carried.reported_as.is_none() => {
+            app_state
+                .db
+                .reports
+                .users_with_carried_absences_before(
+                    carried.since,
+                    carried.before,
+                    &carried.owed_periods,
+                )
+                .await?
+        }
+        _ => Vec::new(),
+    };
+    let users_with_late_entries: std::collections::HashSet<i64> = late_members
+        .iter()
+        .chain(late_absence_members.iter())
+        .map(|member| member.id)
+        .collect();
     let mut members = app_state
         .db
         .reports
@@ -183,11 +204,15 @@ pub async fn payroll_members(
     // have activity in the period, so an assistant who has left since is
     // missing from it. Their unpaid day is exactly what this is for.
     let known: std::collections::HashSet<i64> = members.iter().map(|member| member.id).collect();
-    members.extend(
-        late_members
-            .into_iter()
-            .filter(|member| !known.contains(&member.id)),
-    );
+    // `known` grows as they are added: somebody holding both a carried day and
+    // a carried absence appears in both lists, and adding them twice would
+    // duplicate every row they produce.
+    let mut known = known;
+    for member in late_members.into_iter().chain(late_absence_members) {
+        if known.insert(member.id) {
+            members.push(member);
+        }
+    }
     // Restore the surname ordering the caller relies on for the printed lists.
     members.sort_by(|left, right| {
         left.last_name
