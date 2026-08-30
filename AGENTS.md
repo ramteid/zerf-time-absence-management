@@ -273,10 +273,21 @@ away from the live recompute every other window uses
 otherwise a brand-new entry approved for a date *inside* an already-sent month
 would silently inflate that month's hours as if it had been mailed, while
 independently reappearing as a catch-up row on the *next* month's card — the
-same hours shown twice, under two different months. Absence rows have no
-equivalent fix: `absences` carries no marker, so a sick note approved after
-the send still inflates a delivered month's card. That gap is deliberate and
-unrelated to what this feature was asked to solve — entries only. `payroll_members` takes it too, because
+same hours shown twice, under two different months. Absences carry the same protection through a
+second marker, `absences.payroll_reported_period` (migration 046), and they
+need it *more* than entries do: `AbsenceCategory::is_payroll_relevant` is
+`auto_approve_past OR unpaid`, so a sick-like absence entered for past dates is
+approved on the spot. It never sits in `requested`, never trips
+`PendingAbsences::PayrollRelevant`, and therefore cannot hold its own month's
+report back — it just turns up after that month was filed. Without carry-over
+those days reach no document at all and continued pay is never claimed.
+`build_late_absence_rows` prints them under their real dates (no month clamp —
+the range is the information payroll books against), and the mark records the
+*first* period that showed any part of an absence, which is what lets one
+column serve an absence spanning a month boundary: the marker gates only the
+catch-up path, so each month's report still prints its own clamped part
+normally. A delivered month's card shows no catch-up absences at all, since a
+"first period" marker cannot answer "what did period P carry". `payroll_members` takes it too, because
 somebody who worked only in the closed month has no activity in the month now
 being reported (and may since have been deactivated, hence
 `users_with_carried_time_entries_before` returning whole user rows). The

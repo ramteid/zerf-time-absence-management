@@ -207,9 +207,10 @@ async fn queue_previous_month(state: &AppState, today: NaiveDate) -> AppResult<(
     // period becomes the permanent floor `carry_over_boundary` clamps to, so
     // the very first report this installation ever sends cannot reach back
     // into pre-existing history it was never meant to carry.
-    let first_run = settings::load_setting(&state.pool, settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY, "")
-        .await?
-        .is_empty();
+    let first_run =
+        settings::load_setting(&state.pool, settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY, "")
+            .await?
+            .is_empty();
 
     schedule::queue_periods_through_previous_month(
         state,
@@ -228,8 +229,9 @@ async fn queue_previous_month(state: &AppState, today: NaiveDate) -> AppResult<(
         // insert-only write, not tied to whether this particular call ended
         // up queuing anything (a re-run against an already-populated queue
         // must not move the floor).
-        let floor = settings::load_setting(&state.pool, settings::PAYROLL_REPORT_FIRST_PERIOD_KEY, "")
-            .await?;
+        let floor =
+            settings::load_setting(&state.pool, settings::PAYROLL_REPORT_FIRST_PERIOD_KEY, "")
+                .await?;
         if floor.is_empty() {
             let earliest = schedule::previous_period(today);
             state
@@ -473,8 +475,16 @@ async fn process_period(
                     // later report.
                     // Nothing was printed, so no older day was carried: only
                     // this month's own entries may be marked.
-                    if mark_reported_entries(state, period, from, month_end, carried.as_ref(), &[])
-                        .await
+                    if mark_reported_entries(
+                        state,
+                        period,
+                        from,
+                        month_end,
+                        carried.as_ref(),
+                        &[],
+                        &[],
+                    )
+                    .await
                     {
                         state.db.payroll_queue.delete_entry(period).await?;
                     }
@@ -568,7 +578,9 @@ async fn process_period(
             // Same as the covers-nobody branch: a period that will never be
             // sent is still done with, and its entries must not resurface as
             // catch-up days next month.
-            if mark_reported_entries(state, period, from, month_end, carried.as_ref(), &[]).await {
+            if mark_reported_entries(state, period, from, month_end, carried.as_ref(), &[], &[])
+                .await
+            {
                 state.db.payroll_queue.delete_entry(period).await?;
             }
         }
@@ -677,6 +689,13 @@ async fn process_period(
             .filter(|member| config.includes_hours_for(&member.role))
             .map(|member| member.id)
             .collect();
+        // Absences follow the document's own rule instead: it prints them for
+        // everybody except assistants, whatever the hours settings say.
+        let absence_user_ids: Vec<i64> = included
+            .iter()
+            .filter(|member| !crate::roles::is_assistant_role(&member.role))
+            .map(|member| member.id)
+            .collect();
         if mark_reported_entries(
             state,
             period,
@@ -684,6 +703,7 @@ async fn process_period(
             month_end,
             carried.as_ref(),
             &carried_user_ids,
+            &absence_user_ids,
         )
         .await
         {
@@ -717,7 +737,39 @@ async fn mark_reported_entries(
     period_end: NaiveDate,
     carried: Option<&payroll_report::CarriedDays>,
     carried_user_ids: &[i64],
+    absence_user_ids: &[i64],
 ) -> bool {
+    // Absences first: they use their own marker with its own rule (the *first*
+    // report that showed any part of an absence), and a failure here must stop
+    // the period being settled just as an entry-marking failure does.
+    for attempt in 1..=DELETE_RETRY_ATTEMPTS {
+        match state
+            .db
+            .reports
+            .mark_payroll_reported_absences(period, period_start, period_end, absence_user_ids)
+            .await
+        {
+            Ok(marked) => {
+                tracing::debug!(
+                    "Payroll report: marked {marked} absences as reported for {period}"
+                );
+                break;
+            }
+            Err(e) if attempt < DELETE_RETRY_ATTEMPTS => {
+                tracing::warn!(
+                    "Payroll report: marking absences for {period} failed (attempt {attempt}): {e}"
+                );
+                tokio::time::sleep(DELETE_RETRY_DELAY).await;
+            }
+            Err(e) => {
+                tracing::error!(
+                    "Payroll report: could not mark absences for {period}: {e}. \
+                     The period stays queued so nothing is silently declared twice."
+                );
+                return false;
+            }
+        }
+    }
     for attempt in 1..=DELETE_RETRY_ATTEMPTS {
         match state
             .db
@@ -729,9 +781,7 @@ async fn mark_reported_entries(
                 crate::repository::PayrollCarryScope {
                     since: carried.map(|c| c.since),
                     before: carried.map(|c| c.before),
-                    owed_periods: carried
-                        .map(|c| c.owed_periods.as_slice())
-                        .unwrap_or(&[]),
+                    owed_periods: carried.map(|c| c.owed_periods.as_slice()).unwrap_or(&[]),
                     user_ids: carried_user_ids,
                 },
             )

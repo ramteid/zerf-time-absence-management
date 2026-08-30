@@ -205,6 +205,9 @@ pub struct PayrollReportData {
     /// then left out entirely rather than printed as an empty table — an extra
     /// heading on every document would only train the reader to skip it.
     pub late_entry_rows: Vec<PayrollLateEntryRow>,
+    /// Absence periods from earlier months that no report ever showed, under
+    /// their own real dates. Same "only when non-empty" rule as above.
+    pub late_absence_rows: Vec<PayrollAbsenceRow>,
     /// The day the document was assembled. Printed under the title and used in
     /// the attachment's filename: the same month can be sent more than once
     /// (an interim snapshot, then the final report), so the recipient needs to
@@ -242,6 +245,9 @@ pub fn render_payroll_report_pdf(data: &PayrollReportData, language: &Language) 
     }
     for section in &data.hours_sections {
         render_hours_table(&mut renderer, language, section);
+    }
+    if !data.late_absence_rows.is_empty() {
+        render_late_absence_table(&mut renderer, language, &data.late_absence_rows);
     }
     if !data.late_entry_rows.is_empty() {
         render_late_entry_table(&mut renderer, language, &data.late_entry_rows);
@@ -377,6 +383,47 @@ fn render_hours_table(renderer: &mut Renderer, language: &Language, section: &Pa
             ),
         ],
     );
+}
+
+/// Draw the "reported after the fact" absence table.
+///
+/// Same shape as the ordinary absence table, but the dates are the absence's
+/// real ones rather than a clamp to the reported month — payroll has to book
+/// continued pay against the month it was actually taken in.
+fn render_late_absence_table(
+    renderer: &mut Renderer,
+    language: &Language,
+    rows: &[PayrollAbsenceRow],
+) {
+    renderer.set_columns(ABSENCE_COLUMNS);
+    renderer.draw_section_heading(&i18n::translate(
+        language,
+        "pdf_payroll_late_absences_heading",
+        &[],
+    ));
+    renderer.draw_note(&i18n::translate(
+        language,
+        "pdf_payroll_late_absences_note",
+        &[],
+    ));
+
+    renderer.draw_table_header();
+    for (index, row) in rows.iter().enumerate() {
+        renderer.draw_row(
+            &[
+                (0, row.employee.clone()),
+                (1, row.category.clone()),
+                (2, i18n::format_date(language, row.from)),
+                (3, i18n::format_date(language, row.to)),
+                (ABSENCE_DAYS_COLUMN, format_days(row.days, language)),
+                (
+                    ABSENCE_MEDICAL_CERTIFICATE_COLUMN,
+                    format_medical_certificate_required(row.medical_certificate_required, language),
+                ),
+            ],
+            index % 2 == 1,
+        );
+    }
 }
 
 /// Draw the "booked after the fact" table, with a line of explanation above it.
@@ -524,6 +571,7 @@ mod tests {
                 date: date(2026, 4, 28),
                 minutes: 240,
             }],
+            late_absence_rows: Vec::new(),
             created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
             provisional: None,
         };
@@ -543,6 +591,7 @@ mod tests {
                 absence_rows: Some(vec![]),
                 hours_sections: vec![],
                 late_entry_rows: Vec::new(),
+                late_absence_rows: Vec::new(),
                 created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
                 provisional: Some(ProvisionalNotice {
                     included: 8,
@@ -571,6 +620,7 @@ mod tests {
                 absence_rows: Some(vec![]),
                 hours_sections: vec![],
                 late_entry_rows: Vec::new(),
+                late_absence_rows: Vec::new(),
                 created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
                 provisional: Some(ProvisionalNotice {
                     included: 5,
@@ -596,6 +646,7 @@ mod tests {
                 rows: vec![],
             }],
             late_entry_rows: Vec::new(),
+            late_absence_rows: Vec::new(),
             created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
             provisional: None,
         };

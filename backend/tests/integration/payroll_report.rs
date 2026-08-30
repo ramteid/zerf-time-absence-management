@@ -3656,3 +3656,286 @@ async fn moving_a_reported_day_to_another_month_makes_it_catchable_again() {
 
     app.cleanup().await;
 }
+
+/// A delivered month's card reads its hours back from the payroll marker
+/// instead of recomputing them live. That read-back is a second
+/// implementation of the same arithmetic, so it has to agree with the live
+/// one exactly — including the automatic break deduction, which is the part
+/// most easily got wrong when a day is rebuilt from raw entries.
+///
+/// Marking changes only *how* the figures are obtained, never what they are,
+/// so the card must not move by a single minute across the send.
+#[tokio::test]
+async fn a_sent_months_figures_match_what_the_live_path_produced() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    configure_unreachable_smtp(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "same-figs").await;
+    let lead = login_change_pw(&app, "lead-same-figs@example.com", &lead_pw).await;
+    let (_assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "same-figs").await;
+    let assistant = login_change_pw(&app, "aushilfe-same-figs@example.com", &assistant_pw).await;
+
+    // Automatic breaks on: the deduction is per day and merges adjacent
+    // blocks, so it is exactly where a rebuilt-from-entries day can drift.
+    for (key, value) in [
+        (zerf::services::settings::AUTO_BREAK_ENABLED_KEY, "true"),
+        (
+            zerf::services::settings::AUTO_BREAK_THRESHOLD_HOURS_KEY,
+            "6",
+        ),
+        (
+            zerf::services::settings::AUTO_BREAK_DEDUCTION_MINUTES_KEY,
+            "30",
+        ),
+    ] {
+        app.state
+            .db
+            .settings
+            .save_setting(key, value)
+            .await
+            .expect("configure auto break");
+    }
+
+    let (status, _) = admin
+        .put(
+            "/api/v1/settings/payroll-report",
+            &json!({
+                "payroll_report_enabled": true,
+                "payroll_report_recipients": ["payroll@example.com"],
+                "payroll_report_day_of_month": 5,
+                "payroll_report_include_assistant_hours": true,
+                "payroll_report_include_employee_hours": true,
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "enable payroll report");
+
+    let today = zerf::services::settings::app_today(&app.state.pool).await;
+    let period = zerf::background::schedule::previous_period(today);
+    let (from, to) = zerf::background::schedule::period_bounds(&period).expect("bounds");
+
+    // A long day that crosses the break threshold, plus a split day whose two
+    // blocks together cross it — the case the deduction has to merge.
+    let long_day = from + Duration::days(1);
+    let split_day = from + Duration::days(2);
+    let mut ids = Vec::new();
+    for (day, start, end) in [
+        (long_day, "08:00", "17:00"),
+        (split_day, "08:00", "12:00"),
+        (split_day, "12:30", "16:00"),
+    ] {
+        let (status, body) = assistant
+            .post(
+                "/api/v1/time-entries",
+                &json!({
+                    "entry_date": day.format("%Y-%m-%d").to_string(),
+                    "start_time": start,
+                    "end_time": end,
+                    "category_id": cat_id,
+                    "comment": "work",
+                }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "create entry: {body}");
+        ids.push(id(&body));
+    }
+    let (status, _) = assistant
+        .post("/api/v1/time-entries/submit", &json!({ "ids": ids }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "submit");
+    let (status, _) = lead
+        .post("/api/v1/time-entries/batch-approve", &json!({ "ids": ids }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve");
+
+    // The card as the live path builds it, before anything is marked.
+    let (status, before_send) = lead.get("/api/v1/reports/payroll-content").await;
+    assert_eq!(status, StatusCode::OK, "payroll content: {before_send}");
+    assert_eq!(before_send["sent"], false, "not delivered yet");
+    assert!(
+        before_send["minutes"].as_i64().unwrap_or(0) > 0,
+        "the live path found the booked hours: {before_send}"
+    );
+
+    // The month goes out and records what it contained.
+    app.state
+        .db
+        .time_entries
+        .mark_payroll_reported(&period, from, to, Default::default())
+        .await
+        .expect("mark the sent month");
+    app.state
+        .db
+        .settings
+        .save_setting(
+            zerf::services::settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+            &period,
+        )
+        .await
+        .expect("record the queued period");
+
+    let (status, after_send) = lead.get("/api/v1/reports/payroll-content").await;
+    assert_eq!(status, StatusCode::OK, "payroll content: {after_send}");
+    assert_eq!(after_send["sent"], true, "now delivered");
+
+    assert_eq!(
+        after_send["minutes"], before_send["minutes"],
+        "the marker read-back must report the same minutes as the live path"
+    );
+    assert_eq!(
+        after_send["people_with_hours"], before_send["people_with_hours"],
+        "and the same people"
+    );
+
+    let hours_rows = |body: &serde_json::Value| -> Vec<(String, f64, i64)> {
+        let mut rows: Vec<(String, f64, i64)> = body["rows"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .filter(|row| row["kind"] == "hours")
+            .map(|row| {
+                (
+                    row["name"].as_str().unwrap_or_default().to_string(),
+                    row["days"].as_f64().unwrap_or(-1.0),
+                    row["minutes"].as_i64().unwrap_or(-1),
+                )
+            })
+            .collect();
+        rows.sort_by(|a, b| a.0.cmp(&b.0));
+        rows
+    };
+    assert_eq!(
+        hours_rows(&after_send),
+        hours_rows(&before_send),
+        "every hours row must survive the send unchanged"
+    );
+
+    app.cleanup().await;
+}
+
+/// A sick note filed for an already-reported month must still reach the tax
+/// office.
+///
+/// This is the absence half of the catch-up path, and it has a sharper cause
+/// than the entries half. `AbsenceCategory::is_payroll_relevant` is
+/// `auto_approve_past OR unpaid`, so a sick-like absence entered for *past*
+/// dates is approved on the spot: it never sits in `requested`, never trips
+/// the readiness gate, and so cannot hold its own month's report back. It
+/// simply turns up after that month has been filed — and without carry-over
+/// those days would be in no document at all, with continued pay never
+/// claimed for them.
+#[tokio::test]
+async fn a_sick_note_filed_after_its_month_was_reported_reaches_the_next_report() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, lead_pw, emp_id, _emp_pw, _monday, _cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "late-sick").await;
+    let _lead = login_change_pw(&app, "lead-late-sick@example.com", &lead_pw).await;
+
+    let monday = anchor_monday();
+    let (from, to) = month_bounds(monday);
+    let period = from.format("%Y-%m").to_string();
+    let sick = absence_cat(&app.state.pool, "sick").await;
+
+    // A sick note that was there when the month's report went out.
+    app.state
+        .db
+        .absences
+        .create(emp_id, sick.id, true, monday, monday, None, "approved")
+        .await
+        .expect("create the on-time sick note");
+
+    // The report goes out and records what it showed.
+    app.state
+        .db
+        .reports
+        .mark_payroll_reported_absences(&period, from, to, &[emp_id])
+        .await
+        .expect("mark the reported month");
+    app.state
+        .db
+        .settings
+        .save_setting(
+            zerf::services::settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+            &period,
+        )
+        .await
+        .expect("record the queued period");
+
+    // Only afterwards is a second sick note filed for that same, closed month.
+    // A payroll-relevant category auto-approves a past absence, so this never
+    // had a chance to hold the month open.
+    let late_sick_from = monday + Duration::days(1);
+    let late_sick_to = monday + Duration::days(2);
+    app.state
+        .db
+        .absences
+        .create(
+            emp_id,
+            sick.id,
+            true,
+            late_sick_from,
+            late_sick_to,
+            None,
+            "approved",
+        )
+        .await
+        .expect("create the late sick note");
+
+    let (next_from, next_to) = month_bounds(to + Duration::days(1));
+    let carried = payroll_report::carry_over_boundary(&app.state.pool, next_from)
+        .await
+        .expect("carry-over boundary");
+
+    let members = payroll_report::payroll_members(
+        &app.state,
+        next_from,
+        next_to,
+        &[],
+        false,
+        carried.as_ref(),
+    )
+    .await
+    .expect("members");
+
+    let language = zerf::i18n::Language::from_setting("en");
+    let data = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from: next_from,
+            to: next_to,
+            interim: false,
+            created_on: next_to,
+            carried: carried.clone(),
+        },
+        &members,
+        &config(true, false),
+        &language,
+        None,
+    )
+    .await
+    .expect("build the next month's report");
+
+    assert_eq!(
+        data.late_absence_rows.len(),
+        1,
+        "only the sick note filed after the send is a catch-up: {:?}",
+        data.late_absence_rows
+            .iter()
+            .map(|row| (row.from, row.to))
+            .collect::<Vec<_>>()
+    );
+    let row = &data.late_absence_rows[0];
+    assert_eq!(
+        (row.from, row.to),
+        (late_sick_from, late_sick_to),
+        "the days actually taken, not a clamp to the reporting month"
+    );
+    assert!(
+        row.days > 0.0,
+        "the catch-up row carries payroll-relevant days"
+    );
+
+    app.cleanup().await;
+}

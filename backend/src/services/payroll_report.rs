@@ -468,8 +468,9 @@ pub struct SubmissionStatus {
 #[derive(serde::Serialize)]
 pub struct PayrollContentRow {
     pub name: Option<String>,
-    /// `absence`, `hours`, or `late_hours` for a day carried over from an
-    /// already-reported month.
+    /// `absence`, `hours`, `late_hours` for a day carried over from an
+    /// already-reported month, or `late_absence` for absence days no report
+    /// ever showed.
     pub kind: &'static str,
     /// Localized absence category; `None` on an hours line.
     pub category: Option<String>,
@@ -664,6 +665,21 @@ pub async fn build_content(
                 medical_certificate_required: None,
             });
         }
+    }
+    // Absence days from earlier months that no report ever showed. They count
+    // towards the absence total: they are days this report finally declares.
+    for absence in data.late_absence_rows {
+        absence_count += 1;
+        rows.push(PayrollContentRow {
+            name: show_name(&absence.employee),
+            kind: "late_absence",
+            category: Some(absence.category),
+            from: Some(absence.from),
+            to: Some(absence.to),
+            days: absence.days,
+            minutes: None,
+            medical_certificate_required: absence.medical_certificate_required,
+        });
     }
     // Catch-up days from earlier months. Each carries its own date, and the
     // hours count towards the total the tile shows — they are hours this
@@ -1126,6 +1142,21 @@ pub async fn build_report_data(
     // preview, and the final report will carry the same rows.
     let late_entry_rows =
         build_late_entry_rows(app_state, carried.as_ref(), members, config).await?;
+    // Absence days no report has ever shown. Built whenever the absence
+    // section itself exists — the catch-up is pointless if the document has
+    // nowhere to print absences at all.
+    let late_absence_rows = if relevant_categories.is_empty() {
+        Vec::new()
+    } else {
+        build_late_absence_rows(
+            app_state,
+            carried.as_ref(),
+            members,
+            &relevant_categories,
+            language,
+        )
+        .await?
+    };
 
     Ok(PayrollReportData {
         // `from` is the first day of the reported month, so it carries the
@@ -1136,6 +1167,7 @@ pub async fn build_report_data(
         absence_rows,
         hours_sections,
         late_entry_rows,
+        late_absence_rows,
         created_on,
         provisional,
     })
@@ -1335,6 +1367,142 @@ async fn sent_hours_rows(
         sections.push(PayrollHoursSection { heading_key, rows });
     }
     Ok(sections)
+}
+
+/// Payroll-relevant absence days from earlier months that no report has ever
+/// shown, printed under their own real dates.
+///
+/// The absence twin of [`build_late_entry_rows`], and it exists for a sharper
+/// reason. `AbsenceCategory::is_payroll_relevant` is `auto_approve_past OR
+/// unpaid`, so a sick-like absence filed for *past* dates is approved
+/// immediately: it never sits in `requested`, never trips
+/// `PendingAbsences::PayrollRelevant`, and so cannot hold a report back. It
+/// simply turns up after the month it belongs to has been filed. Without this
+/// those days reach no document at all, and continued pay is never claimed.
+///
+/// Rows are clamped to the person's start date but *not* to any month — the
+/// whole point is the real range, which is what payroll books against.
+/// Assistants are skipped here exactly as in [`build_absence_rows`]: they are
+/// paid by the hour, so continued pay does not apply to them.
+async fn build_late_absence_rows(
+    app_state: &AppState,
+    carried: Option<&CarriedDays>,
+    members: &[User],
+    relevant_categories: &[AbsenceCategory],
+    language: &Language,
+) -> AppResult<Vec<PayrollAbsenceRow>> {
+    let Some(carried) = carried else {
+        return Ok(Vec::new());
+    };
+    // Reading a delivered month back from its marker is the entries' trick and
+    // does not transfer: an absence carries the *first* period that showed any
+    // part of it, so it cannot answer "what did period P carry". A delivered
+    // month therefore shows no catch-up absences rather than a wrong set.
+    if carried.reported_as.is_some() {
+        return Ok(Vec::new());
+    }
+    // Only people whose absences the document prints — never an assistant.
+    let printed: std::collections::HashMap<i64, &User> = members
+        .iter()
+        .filter(|member| !is_assistant_role(&member.role))
+        .map(|member| (member.id, member))
+        .collect();
+    if printed.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let absences = app_state
+        .db
+        .reports
+        .unreported_payroll_absences_before(carried.since, carried.before, &carried.owed_periods)
+        .await?;
+    if absences.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let selected: Vec<(String, String, usize, bool)> = relevant_categories
+        .iter()
+        .enumerate()
+        .map(|(index, category)| {
+            (
+                category.slug.clone(),
+                category.name.clone(),
+                index,
+                category.medical_certificate_relevant,
+            )
+        })
+        .collect();
+    let any_medical_certificate_category = relevant_categories
+        .iter()
+        .any(|c| c.medical_certificate_relevant);
+
+    // Workday counting needs the holidays of the span the rows actually cover,
+    // which is earlier than the reported month.
+    let earliest = absences
+        .iter()
+        .map(|(_, _, start, _, _, _)| *start)
+        .min()
+        .unwrap_or(carried.since);
+    let latest = absences
+        .iter()
+        .map(|(_, _, _, end, _, _)| *end)
+        .max()
+        .unwrap_or(carried.before);
+    let holidays = app_state.db.reports.holiday_set(earliest, latest).await?;
+
+    let mut rows: Vec<(usize, String, PayrollAbsenceRow)> = Vec::new();
+    for (user_id, absence_id, start_date, end_date, slug, _stored_name) in absences {
+        let Some(member) = printed.get(&user_id) else {
+            continue;
+        };
+        let Some((_, category_name, category_rank, tracks_medical_certificate)) = selected
+            .iter()
+            .find(|(selected_slug, _, _, _)| selected_slug == &slug)
+        else {
+            continue;
+        };
+        // Start date only: the real range is the information payroll needs.
+        let row_from = start_date.max(member.start_date);
+        if row_from > end_date {
+            continue;
+        }
+        let days = count_workdays(row_from, end_date, &holidays, member.workdays_per_week);
+        if days <= 0.0 {
+            continue;
+        }
+        let medical_certificate_required =
+            if any_medical_certificate_category && *tracks_medical_certificate {
+                crate::services::medical_certificate::required_map_for_user(app_state, member.id)
+                    .await?
+                    .get(&absence_id)
+                    .copied()
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+        rows.push((
+            *category_rank,
+            employee_name(member),
+            PayrollAbsenceRow {
+                employee: employee_name(member),
+                category: i18n::absence_kind_label(language, &slug, category_name),
+                from: row_from,
+                to: end_date,
+                days,
+                medical_certificate_required: tracks_medical_certificate
+                    .then_some(medical_certificate_required),
+            },
+        ));
+    }
+    // Category, then person, then chronological — the order the main absence
+    // table uses, so the reader is not asked to learn a second one.
+    rows.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then_with(|| left.1.cmp(&right.1))
+            .then_with(|| left.2.from.cmp(&right.2.from))
+    });
+    Ok(rows.into_iter().map(|(_, _, row)| row).collect())
 }
 
 /// One row per absence period of a payroll-relevant category, clamped to the
@@ -1581,6 +1749,11 @@ pub fn people_in_report(data: &PayrollReportData) -> usize {
     // A month whose only content is somebody's catch-up day is still worth
     // sending — without this it would count as empty and be settled unsent.
     names.extend(data.late_entry_rows.iter().map(|row| row.employee.as_str()));
+    names.extend(
+        data.late_absence_rows
+            .iter()
+            .map(|row| row.employee.as_str()),
+    );
     names.len()
 }
 
@@ -1743,6 +1916,7 @@ mod tests {
                 rows: vec![],
             }],
             late_entry_rows: Vec::new(),
+            late_absence_rows: Vec::new(),
             created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
             provisional: None,
         };
@@ -1774,6 +1948,7 @@ mod tests {
                 absence_rows: Some(vec![]),
                 hours_sections: vec![],
                 late_entry_rows: Vec::new(),
+                late_absence_rows: Vec::new(),
                 created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
                 provisional: None,
             }

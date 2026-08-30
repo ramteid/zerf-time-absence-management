@@ -1994,9 +1994,14 @@ again today — a day approved afterwards does not creep into a delivered month'
 figures. This applies to working days and hours; an absence approved after the
 send can still change what a delivered month's card shows.
 
-This covers days that were newly recorded. Changing a day that a report already
-contained is not carried over — if that happens, tell the payroll accountant
-directly.
+The same applies to **absences**. A sick note entered for a month whose report
+has already gone out is approved straight away, so it never holds that report
+up — it simply arrives too late for it. Those days appear in the next report
+under **Reported later**, with the dates they actually cover.
+
+This covers entries and absences that were newly recorded. Changing a day that
+a report already contained is not carried over — if that happens, tell the
+payroll accountant directly.
 
 The **Payroll Report** card on the dashboard shows these days the same way, so
 you can see before the send what the next report will carry.

@@ -476,6 +476,83 @@ impl ReportDb {
         .await?)
     }
 
+    /// Payroll-relevant absences that no report has ever shown any part of,
+    /// ending before `before` and not before `since`.
+    ///
+    /// The absence half of the catch-up path. It exists because
+    /// `AbsenceCategory::is_payroll_relevant` is `auto_approve_past OR unpaid`:
+    /// a sick-like absence filed for *past* dates is approved on the spot, so it
+    /// never sits in `requested`, never trips the readiness gate, and can
+    /// therefore appear only after the month it belongs to has been filed.
+    /// Without this it would be in no document at all.
+    ///
+    /// `owed_periods` (matched on the end date, the month a report would last
+    /// have printed it in) keeps a month whose own report is still to come from
+    /// being raided — that report will show those days itself.
+    ///
+    /// Returns (user_id, absence_id, start_date, end_date, slug, category_name),
+    /// the same shape `approved_absence_rows` returns plus the owner, since the
+    /// caller is looking across everybody at once.
+    #[allow(clippy::type_complexity)]
+    pub async fn unreported_payroll_absences_before(
+        &self,
+        since: NaiveDate,
+        before: NaiveDate,
+        owed_periods: &[String],
+    ) -> AppResult<Vec<(i64, i64, NaiveDate, NaiveDate, String, String)>> {
+        Ok(sqlx::query_as(
+            "SELECT a.user_id, a.id, a.start_date, a.end_date, c.slug, c.name \
+             FROM absences a \
+             JOIN absence_categories c ON c.id = a.category_id \
+             WHERE a.payroll_reported_period IS NULL \
+             AND a.status IN ('approved','cancellation_pending') \
+             AND (c.auto_approve_past=TRUE OR c.unpaid=TRUE) \
+             AND a.end_date < $1 AND a.end_date >= $2 \
+             AND to_char(a.end_date, 'YYYY-MM') <> ALL($3) \
+             ORDER BY a.user_id, a.start_date, a.id",
+        )
+        .bind(before)
+        .bind(since)
+        .bind(owed_periods)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Record that `period`'s report showed part of these absences.
+    ///
+    /// Marks every payroll-relevant, approved absence overlapping the reported
+    /// month that belongs to one of `printed_user_ids` — the people whose
+    /// absences the document actually prints (never assistants). The
+    /// `IS NULL` guard makes this "the *first* report that showed any of it",
+    /// which is what lets one column serve an absence spanning a month
+    /// boundary: the marker gates only the catch-up path, so each month's
+    /// report still prints its own clamped part through the normal path.
+    pub async fn mark_payroll_reported_absences(
+        &self,
+        period: &str,
+        period_start: NaiveDate,
+        period_end: NaiveDate,
+        printed_user_ids: &[i64],
+    ) -> AppResult<u64> {
+        let result = sqlx::query(
+            "UPDATE absences AS a SET payroll_reported_period=$1 \
+             WHERE a.payroll_reported_period IS NULL \
+             AND a.status IN ('approved','cancellation_pending') \
+             AND a.user_id = ANY($4) \
+             AND a.end_date >= $2 AND a.start_date <= $3 \
+             AND EXISTS (SELECT 1 FROM absence_categories c \
+                         WHERE c.id = a.category_id \
+                         AND (c.auto_approve_past=TRUE OR c.unpaid=TRUE))",
+        )
+        .bind(period)
+        .bind(period_start)
+        .bind(period_end)
+        .bind(printed_user_ids)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
     /// Approved, work-crediting time entries dated inside `[from, to]` that
     /// were marked as accounted for by `period`'s report.
     ///

@@ -10,6 +10,9 @@
   // Absences first, then the hours tables, then the catch-up days — the order
   // the report itself prints.
   $: absences = (content?.rows ?? []).filter((row) => row.kind === "absence");
+  $: lateAbsences = (content?.rows ?? []).filter(
+    (row) => row.kind === "late_absence",
+  );
   $: hours = (content?.rows ?? []).filter((row) => row.kind === "hours");
   $: lateHours = (content?.rows ?? []).filter(
     (row) => row.kind === "late_hours",
@@ -33,7 +36,7 @@
     {/if}
   </div>
 
-  {#if absences.length === 0 && hours.length === 0 && lateHours.length === 0}
+  {#if absences.length === 0 && hours.length === 0 && lateHours.length === 0 && lateAbsences.length === 0}
     <div class="payroll-empty">{$t("Nothing to report for this month.")}</div>
   {:else}
     {#if absences.length > 0}
@@ -67,6 +70,30 @@
               {$t("{days} days").replace("{days}", row.days)}
             </span>
             <span class="payroll-amount">{minToHM(row.minutes ?? 0)}</span>
+          </div>
+        {/each}
+      </div>
+    {/if}
+
+    {#if lateAbsences.length > 0}
+      <div class="report-subheading">{$t("Reported later")}</div>
+      <div class="fs-13 text-tertiary mb-12">
+        {$t(
+          "Absences recorded after the report for their own month had already been sent. They go into this month's report with the days they actually cover.",
+        )}
+      </div>
+      <div class="payroll-rows">
+        {#each lateAbsences as row, index (`late-absence-${index}`)}
+          <div class="payroll-row">
+            <span class="payroll-name" class:payroll-hidden={!row.name}>
+              {row.name ?? $t("Not visible to you")}
+            </span>
+            <span class="payroll-detail">
+              {row.category} · {fmtDate(row.from)} – {fmtDate(row.to)}
+            </span>
+            <span class="payroll-amount">
+              {$t("{days} days").replace("{days}", row.days)}
+            </span>
           </div>
         {/each}
       </div>

@@ -118,6 +118,9 @@ const TRANSLATIONS = {
     "Nothing to report for this month.": "Nothing to report for this month.",
     "Working days and hours": "Working days and hours",
     "Booked later": "Booked later",
+    "Reported later": "Reported later",
+    "Absences recorded after the report for their own month had already been sent. They go into this month's report with the days they actually cover.":
+      "Absences recorded after the report for their own month had already been sent. They go into this month's report with the days they actually cover.",
     "Days recorded after the report for their own month had already been sent. They go into this month's report with the day they were worked.":
       "Days recorded after the report for their own month had already been sent. They go into this month's report with the day they were worked.",
     "{days} days": "{days} days",
@@ -1327,6 +1330,9 @@ const TRANSLATIONS = {
       "F\u00fcr diesen Monat gibt es nichts zu melden.",
     "Working days and hours": "Arbeitstage und Stunden",
     "Booked later": "Nachtr\u00e4glich erfasst",
+    "Reported later": "Nachtr\u00e4glich gemeldet",
+    "Absences recorded after the report for their own month had already been sent. They go into this month's report with the days they actually cover.":
+      "Abwesenheiten, die erst erfasst wurden, nachdem die Meldung f\u00fcr ihren eigenen Monat schon verschickt war. Sie kommen mit den Tagen, die sie tats\u00e4chlich betreffen, in die Meldung dieses Monats.",
     "Days recorded after the report for their own month had already been sent. They go into this month's report with the day they were worked.":
       "Tage, die erst erfasst wurden, nachdem die Meldung f\u00fcr ihren eigenen Monat schon verschickt war. Sie kommen mit dem Tag, an dem gearbeitet wurde, in die Meldung dieses Monats.",
     "{days} days": "{days} Tage",
