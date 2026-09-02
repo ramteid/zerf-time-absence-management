@@ -424,7 +424,7 @@ const TRANSLATIONS = {
     "Waiting for approval": "Waiting for approval",
     "Not submitted": "Not submitted",
     help_payroll_report:
-      "The payroll report for the previous month is sent automatically on day {day}, shortly after midnight. It waits only for unapproved working time that the report prints, undecided payroll-relevant absences, or content before a person's start date, and checks again every night. The separate Submissions card shows who still has weeks to finish.",
+      "The payroll report for the previous month is sent automatically on day {day} of the month, shortly after midnight. It waits only for unapproved working time that the report prints, undecided payroll-relevant absences, or content before a person's start date, and is checked again every night. The separate Submissions card shows who still has weeks to finish.",
     "A recipient address is required to enable the payroll report.":
       "Enter at least one recipient.",
     "The payroll report is not enabled.": "Automatic delivery is off.",
@@ -1602,7 +1602,7 @@ const TRANSLATIONS = {
     Done: "Fertig",
     "Not submitted": "Nicht eingereicht",
     help_payroll_report:
-      "Die Lohnmeldung f\u00fcr den Vormonat wird am Tag {day} kurz nach Mitternacht automatisch versendet. Sie wartet nur auf noch nicht genehmigte Arbeitszeiten, die in der Meldung erscheinen, auf noch nicht entschiedene lohnrelevante Abwesenheiten oder auf Daten vor dem Eintrittsdatum einer Person und pr\u00fcft dies jede Nacht erneut. Die separate Karte Einreichungen zeigt, wer noch Wochen abschlie\u00dfen muss.",
+      "Die Lohnmeldung f\u00fcr den Vormonat wird am Tag {day} des Monats kurz nach Mitternacht automatisch versendet. Sie wartet nur auf noch nicht genehmigte Arbeitszeiten, die in der Meldung erscheinen, auf noch nicht entschiedene lohnrelevante Abwesenheiten oder auf Daten vor dem Eintrittsdatum einer Person und wird jede Nacht erneut gepr\u00fcft. Die separate Karte Einreichungen zeigt, wer noch Wochen abschlie\u00dfen muss.",
     "A recipient address is required to enable the payroll report.":
       "Bitte mindestens einen Empfänger eingeben.",
     "The payroll report is not enabled.":
