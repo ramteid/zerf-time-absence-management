@@ -628,6 +628,52 @@ async fn delete_user_blocked_when_has_time_data() {
 }
 
 #[tokio::test]
+async fn delete_user_blocked_when_payroll_declaration_is_the_only_history() {
+    let app = TestApp::spawn().await;
+    let admin = app.client();
+    let (status, body) = admin.login("admin@example.com", &app.admin_password).await;
+    assert_eq!(status, StatusCode::OK, "admin login: {body}");
+    let (status, body) = admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
+    assert_eq!(status, StatusCode::OK, "change admin password: {body}");
+
+    let employee_id = make_emp(&admin, "payroll-history@arch.com", "PayrollHistory", 1).await;
+    let declared_day = chrono::NaiveDate::from_ymd_opt(2024, 1, 8).unwrap();
+    app.state
+        .db
+        .reports
+        .record_declared_days("2024-01", &[(employee_id, declared_day, 240)])
+        .await
+        .expect("record payroll history without live time data");
+
+    let (status, body) = admin.delete(&format!("/api/v1/users/{employee_id}")).await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "payroll history must block hard deletion: {body}"
+    );
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap_or("")
+            .to_lowercase()
+            .contains("archive"),
+        "the response should direct the admin to archive the user: {body}"
+    );
+    assert!(
+        app.state
+            .db
+            .users
+            .find_by_id(employee_id)
+            .await
+            .expect("look up protected employee")
+            .is_some(),
+        "the employee and their correction baseline must remain"
+    );
+}
+
+#[tokio::test]
 async fn delete_user_allowed_without_time_data() {
     let app = TestApp::spawn().await;
     let admin = app.client();

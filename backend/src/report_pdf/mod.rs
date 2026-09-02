@@ -27,8 +27,9 @@ mod payroll;
 mod timesheet;
 
 pub use payroll::{
-    render_payroll_report_pdf, PayrollAbsenceRow, PayrollHoursRow, PayrollHoursSection,
-    PayrollLateEntryRow, PayrollOmittedPerson, PayrollReportData, ProvisionalNotice,
+    render_payroll_report_pdf, PayrollAbsenceRow, PayrollCarriedWorkDay, PayrollDeclaredWorkDay,
+    PayrollHoursRow, PayrollHoursSection, PayrollLateEntryRow, PayrollOmittedPerson,
+    PayrollReportData, ProvisionalNotice,
 };
 pub use timesheet::{render_timesheet_pdf, TimesheetSection};
 
@@ -503,7 +504,7 @@ fn rgb_f32(color: (u8, u8, u8)) -> (f32, f32, f32) {
 }
 
 /// Format minutes as `H:MM`, e.g. `8:00`, `0:00` — mirrors the frontend's
-/// `minToHM` (used for durations, which are never negative).
+/// `minToHM` and retains a negative sign for corrections and balances.
 fn format_minutes(total_minutes: i64) -> String {
     let sign = if total_minutes < 0 { "-" } else { "" };
     let absolute_minutes = total_minutes.abs();

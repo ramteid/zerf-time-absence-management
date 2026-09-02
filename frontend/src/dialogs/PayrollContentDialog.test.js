@@ -1,7 +1,6 @@
-// Tests for the payroll report detail dialog. The section that matters most
-// here is "Booked later": days from an already-reported month reach the reader
-// with the date they were worked, which is the whole reason they are printed
-// separately from this month's hours.
+// Tests for the payroll report detail dialog. Corrections to already-reported
+// months reach the reader with their affected date and signed value, which is
+// why they are printed separately from this month's hours.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mount, unmount } from "svelte";
@@ -46,7 +45,7 @@ afterEach(() => {
 });
 
 describe("PayrollContentDialog", () => {
-  it("lists a day booked after its own month was reported under that day", () => {
+  it("lists a positive correction under its affected day", () => {
     const target = render({
       content: content([
         {
@@ -64,18 +63,18 @@ describe("PayrollContentDialog", () => {
     });
 
     const text = target.textContent;
-    expect(text).toContain("Booked later");
+    expect(text).toContain("Corrections to earlier months");
     expect(text).toContain("Assist, Alex");
     // July, while the report itself covers August.
     expect(text).toMatch(/7\/14\/2026|Jul/);
-    expect(text).toContain("4:00");
+    expect(text).toContain("+4:00");
     expect(text).not.toContain("Nothing to report for this month.");
   });
 
   it("says nothing at all when the month has no content of any kind", () => {
     const target = render({ content: content([]), onClose: () => {} });
     expect(target.textContent).toContain("Nothing to report for this month.");
-    expect(target.textContent).not.toContain("Booked later");
+    expect(target.textContent).not.toContain("Corrections to earlier months");
   });
 
   it("keeps the catch-up section out of a report that has none", () => {
@@ -95,6 +94,27 @@ describe("PayrollContentDialog", () => {
       onClose: () => {},
     });
     expect(target.textContent).toContain("Working days and hours");
-    expect(target.textContent).not.toContain("Booked later");
+    expect(target.textContent).not.toContain("Corrections to earlier months");
+  });
+
+  it("shows a reduction as a negative correction", () => {
+    const target = render({
+      content: content([
+        {
+          name: "Assist, Alex",
+          kind: "late_hours",
+          category: null,
+          from: "2026-07-14",
+          to: "2026-07-14",
+          days: 1,
+          minutes: -90,
+          medical_certificate_required: null,
+        },
+      ]),
+      onClose: () => {},
+    });
+
+    expect(target.textContent).toContain("Corrections to earlier months");
+    expect(target.textContent).toContain("-1:30");
   });
 });

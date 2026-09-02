@@ -117,12 +117,12 @@ const TRANSLATIONS = {
       "What this month's report will contain.",
     "Nothing to report for this month.": "Nothing to report for this month.",
     "Working days and hours": "Working days and hours",
-    "Booked later": "Booked later",
+    "Corrections to earlier months": "Corrections to earlier months",
     "Reported later": "Reported later",
     "Absences recorded after the report for their own month had already been sent. They go into this month's report with the days they actually cover.":
       "Absences recorded after the report for their own month had already been sent. They go into this month's report with the days they actually cover.",
-    "Days recorded after the report for their own month had already been sent. They go into this month's report with the day they were worked.":
-      "Days recorded after the report for their own month had already been sent. They go into this month's report with the day they were worked.",
+    "Working time that changed after the report for its month was sent. Positive hours add time and negative hours reduce it. This report lists each correction under the day it belongs to.":
+      "Working time that changed after the report for its month was sent. Positive hours add time and negative hours reduce it. This report lists each correction under the day it belongs to.",
     "{days} days": "{days} days",
     "{submitted} of {total} weeks": "{submitted} of {total} weeks",
     "Current week: still open": "Current week: still open",
@@ -424,7 +424,7 @@ const TRANSLATIONS = {
     "Waiting for approval": "Waiting for approval",
     "Not submitted": "Not submitted",
     help_payroll_report:
-      "The payroll report for the previous month is sent automatically on day {day} of the month, shortly after midnight. If anyone has not submitted and had their weeks approved yet, it is checked again every night and sent as soon as everyone is done. Green means submitted and approved, amber means submitted but still waiting for approval, red means not submitted yet.",
+      "The payroll report for the previous month is sent automatically on day {day}, shortly after midnight. It waits only for unapproved working time that the report prints, undecided payroll-relevant absences, or content before a person's start date, and checks again every night. The separate Submissions card shows who still has weeks to finish.",
     "A recipient address is required to enable the payroll report.":
       "Enter at least one recipient.",
     "The payroll report is not enabled.": "Automatic delivery is off.",
@@ -1329,12 +1329,12 @@ const TRANSLATIONS = {
     "Nothing to report for this month.":
       "F\u00fcr diesen Monat gibt es nichts zu melden.",
     "Working days and hours": "Arbeitstage und Stunden",
-    "Booked later": "Nachtr\u00e4glich erfasst",
+    "Corrections to earlier months": "Korrekturen fr\u00fcherer Monate",
     "Reported later": "Nachtr\u00e4glich gemeldet",
     "Absences recorded after the report for their own month had already been sent. They go into this month's report with the days they actually cover.":
       "Abwesenheiten, die erst erfasst wurden, nachdem die Meldung f\u00fcr ihren eigenen Monat schon verschickt war. Sie kommen mit den Tagen, die sie tats\u00e4chlich betreffen, in die Meldung dieses Monats.",
-    "Days recorded after the report for their own month had already been sent. They go into this month's report with the day they were worked.":
-      "Tage, die erst erfasst wurden, nachdem die Meldung f\u00fcr ihren eigenen Monat schon verschickt war. Sie kommen mit dem Tag, an dem gearbeitet wurde, in die Meldung dieses Monats.",
+    "Working time that changed after the report for its month was sent. Positive hours add time and negative hours reduce it. This report lists each correction under the day it belongs to.":
+      "Arbeitszeiten, die nach dem Versand der Meldung ihres Monats ge\u00e4ndert wurden. Positive Stunden erh\u00f6hen die gemeldete Zeit, negative Stunden mindern sie. Diese Meldung f\u00fchrt jede Korrektur unter dem betroffenen Tag auf.",
     "{days} days": "{days} Tage",
     "{submitted} of {total} weeks": "{submitted} von {total} Wochen",
     "Current week: still open": "Aktuelle Woche: noch offen",
@@ -1602,7 +1602,7 @@ const TRANSLATIONS = {
     Done: "Fertig",
     "Not submitted": "Nicht eingereicht",
     help_payroll_report:
-      "Die Lohnmeldung für den Vormonat wird automatisch am {day}. des Monats kurz nach Mitternacht versendet. Wenn jemand seine Wochen noch nicht eingereicht und genehmigt bekommen hat, wird jede Nacht erneut geprüft und versendet, sobald alle fertig sind. Grün heißt eingereicht und genehmigt, gelb heißt eingereicht, aber noch nicht genehmigt, rot heißt noch nicht eingereicht.",
+      "Die Lohnmeldung f\u00fcr den Vormonat wird am Tag {day} kurz nach Mitternacht automatisch versendet. Sie wartet nur auf noch nicht genehmigte Arbeitszeiten, die in der Meldung erscheinen, auf noch nicht entschiedene lohnrelevante Abwesenheiten oder auf Daten vor dem Eintrittsdatum einer Person und pr\u00fcft dies jede Nacht erneut. Die separate Karte Einreichungen zeigt, wer noch Wochen abschlie\u00dfen muss.",
     "A recipient address is required to enable the payroll report.":
       "Bitte mindestens einen Empfänger eingeben.",
     "The payroll report is not enabled.":

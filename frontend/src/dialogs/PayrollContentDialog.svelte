@@ -17,6 +17,11 @@
   $: lateHours = (content?.rows ?? []).filter(
     (row) => row.kind === "late_hours",
   );
+
+  function signedMinutes(minutes) {
+    const formatted = minToHM(minutes ?? 0);
+    return (minutes ?? 0) > 0 ? `+${formatted}` : formatted;
+  }
 </script>
 
 <Dialog title={$t("Payroll Report")} {onClose}>
@@ -100,10 +105,10 @@
     {/if}
 
     {#if lateHours.length > 0}
-      <div class="report-subheading">{$t("Booked later")}</div>
+      <div class="report-subheading">{$t("Corrections to earlier months")}</div>
       <div class="fs-13 text-tertiary mb-12">
         {$t(
-          "Days recorded after the report for their own month had already been sent. They go into this month's report with the day they were worked.",
+          "Working time that changed after the report for its month was sent. Positive hours add time and negative hours reduce it. This report lists each correction under the day it belongs to.",
         )}
       </div>
       <div class="payroll-rows">
@@ -113,7 +118,7 @@
               {row.name ?? $t("Not visible to you")}
             </span>
             <span class="payroll-detail">{fmtDate(row.from)}</span>
-            <span class="payroll-amount">{minToHM(row.minutes ?? 0)}</span>
+            <span class="payroll-amount">{signedMinutes(row.minutes)}</span>
           </div>
         {/each}
       </div>

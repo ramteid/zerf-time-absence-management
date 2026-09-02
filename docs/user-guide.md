@@ -1651,10 +1651,10 @@ When a user's role is changed, they are signed out immediately.
 
 ### Archiving a user
 
-When a user has historical data (time entries, absences, or requests), the
-system blocks permanent deletion and requires archiving instead. Archiving is
-a soft removal that preserves all history while preventing the user from
-logging in and hiding them from active lists.
+When a user has historical data (time entries, absences, payroll declarations,
+or requests), the system blocks permanent deletion and requires archiving
+instead. Archiving is a soft removal that preserves all history while
+preventing the user from logging in and hiding them from active lists.
 
 **Location:** Settings > Users > select a user > Archive.
 
@@ -1969,24 +1969,31 @@ What it prints:
 **Assistants' absences never appear.** They are paid for the hours they work, so
 continued pay does not apply to them; only their hours are payroll's business.
 
-#### Days booked after the report was sent
+#### Working time changed after the report was sent
 
-Sometimes a day is recorded only after the report for its month has already gone
-out — an assistant remembers a shift a week too late, or an approval comes
-through afterwards. The month is closed by then, so nothing would ever pay those
-hours.
+Working time can change after the report for its month has gone out: a shift may
+be recorded or approved late, a second shift may be added, or a reported shift
+may be shortened, deleted, or moved to another day.
 
-They are therefore carried into the next report, in a separate section headed
-**Booked later**, each day under the date it was actually worked. The section
-appears only when there is something in it, and a day is carried exactly once:
-the following report no longer lists it. Nothing is carried out of a month whose
-own report is still outstanding — that report is still coming and will contain
-the day itself.
+The next report compares each affected day's current approved net minutes with
+the total already declared for that day. Only a nonzero difference appears in
+**Corrections to earlier months**, under the day it affects. Positive hours add
+time; negative hours reduce or reverse it. Moving a shift between months can
+therefore produce a negative correction on the old day and a positive one on
+the new day. Automatic breaks are recalculated across the whole current day
+before the difference is taken, so adding a second shift cannot under-deduct
+the break.
 
-Only days whose hours the report actually prints are carried: assistants'
-always, everybody else's when *List employees' working hours* is switched on. A
-day that no report prints simply stays outstanding, so if you switch that setting
-on later, the days recorded since are still there to be reported.
+The section appears only when there is something to adjust. Deleting and
+rebooking an unchanged day produces no row. Once a correction is sent, its
+signed value joins the total already declared and does not repeat. Nothing is
+carried out of a month whose own report is still outstanding — that report is
+still coming and will contain the day itself.
+
+Only corrections for people whose hours the report prints are carried:
+assistants' always, everybody else's when *List employees' working hours* is
+switched on. A day that no report prints stays outstanding, so if you switch
+that setting on later, changes recorded since are still there to be reported.
 
 The **Payroll Report** card for a month that has already been sent shows exactly
 what that report contained, not what it would look like if it were assembled
@@ -2003,12 +2010,8 @@ days belonging to a month that has already been reported are carried, and the
 days belonging to a month whose report is still outstanding are left to that
 report. Between the two, every day is declared exactly once.
 
-This covers entries and absences that were newly recorded. Changing a day that
-a report already contained is not carried over — if that happens, tell the
-payroll accountant directly.
-
-The **Payroll Report** card on the dashboard shows these days the same way, so
-you can see before the send what the next report will carry.
+The **Payroll Report** card on the dashboard shows these signed corrections the
+same way, so you can see before the send what the next report will carry.
 
 #### When it is sent
 

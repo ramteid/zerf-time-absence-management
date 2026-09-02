@@ -1,16 +1,61 @@
-use crate::db::DatabasePool;
+use crate::db::{DatabasePool, PgTransaction};
 use crate::error::AppResult;
 use crate::repository::time_entries::{
-    EFFECTIVE_REJECTED_TIME_ENTRY_CONDITION, INCOMPLETE_TIME_ENTRY_CONDITION,
+    PayrollCarryScope, PayrollEntrySnapshot, TimeEntryDb, EFFECTIVE_REJECTED_TIME_ENTRY_CONDITION,
+    INCOMPLETE_TIME_ENTRY_CONDITION,
 };
 use crate::repository::users::User;
 use chrono::NaiveDate;
 use sqlx::{Postgres, QueryBuilder};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone)]
 pub struct ReportDb {
     pool: DatabasePool,
+}
+
+/// One approved entry on a person-day whose declared payroll total may have
+/// changed. A missing time range means the day exists only in the declaration
+/// ledger, so deleting all of its entries can produce a negative correction.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct CarriedDayEntry {
+    pub user_id: i64,
+    pub day: NaiveDate,
+    pub start_time: Option<String>,
+    pub end_time: Option<String>,
+    pub counts_as_work: bool,
+    pub already_reported: bool,
+}
+
+/// Net minutes one payroll report declared for one person-day.
+///
+/// `minutes` is signed because a correction can reduce a previously declared
+/// day. Summing all rows for one `(user_id, day)` is the total payroll has
+/// already received for that day.
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub struct PayrollDeclaredDay {
+    pub user_id: i64,
+    pub day: NaiveDate,
+    pub minutes: i64,
+}
+
+/// One rendered row from a delivered payroll document.
+///
+/// The signed day ledger is the source of truth for future corrections. This
+/// separate snapshot is the source of truth for the delivered dashboard card,
+/// which must not be rebuilt under later settings, exclusions, names, or
+/// absence state.
+#[derive(Debug, Clone, PartialEq, sqlx::FromRow)]
+pub struct PayrollReportedContentRow {
+    pub user_id: i64,
+    pub employee: String,
+    pub kind: String,
+    pub category: Option<String>,
+    pub from_date: Option<NaiveDate>,
+    pub to_date: Option<NaiveDate>,
+    pub days: f64,
+    pub minutes: Option<i64>,
+    pub medical_certificate_required: Option<bool>,
 }
 
 impl ReportDb {
@@ -609,6 +654,28 @@ impl ReportDb {
         printed_user_ids: &[i64],
         carried_absence_ids: &[i64],
     ) -> AppResult<u64> {
+        let mut tx = self.pool.begin().await?;
+        let rows = Self::mark_payroll_reported_absences_tx(
+            &mut tx,
+            period,
+            period_start,
+            period_end,
+            printed_user_ids,
+            carried_absence_ids,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(rows)
+    }
+
+    async fn mark_payroll_reported_absences_tx(
+        tx: &mut PgTransaction<'_>,
+        period: &str,
+        period_start: NaiveDate,
+        period_end: NaiveDate,
+        printed_user_ids: &[i64],
+        carried_absence_ids: &[i64],
+    ) -> AppResult<u64> {
         let result = sqlx::query(
             "UPDATE absences AS a SET payroll_reported_period=$1 \
              WHERE a.payroll_reported_period IS NULL \
@@ -624,21 +691,364 @@ impl ReportDb {
         .bind(period_end)
         .bind(printed_user_ids)
         .bind(carried_absence_ids)
-        .execute(&self.pool)
+        .execute(&mut **tx)
         .await?;
         Ok(result.rows_affected())
     }
 
-    /// Approved, work-crediting time entries dated inside `[from, to]` that
-    /// were marked as accounted for by `period`'s report.
+    async fn mark_payroll_reported_absences_exact_tx(
+        tx: &mut PgTransaction<'_>,
+        period: &str,
+        absence_ids: &[i64],
+    ) -> AppResult<u64> {
+        let result = sqlx::query(
+            "UPDATE absences AS a SET payroll_reported_period=$1 \
+             WHERE a.payroll_reported_period IS NULL \
+             AND a.id = ANY($2) \
+             AND a.status IN ('approved','cancellation_pending') \
+             AND EXISTS (SELECT 1 FROM absence_categories c \
+                         WHERE c.id = a.category_id \
+                         AND (c.auto_approve_past=TRUE OR c.unpaid=TRUE))",
+        )
+        .bind(period)
+        .bind(absence_ids)
+        .execute(&mut **tx)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
+    /// Approved entries on every older day whose declaration can have changed.
     ///
-    /// A delivered month's dashboard card uses this instead of a live
-    /// recomputation: every entry dated inside the period was marked at send
-    /// time regardless of status (see `TimeEntryDb::mark_payroll_reported`),
-    /// so an entry with this exact mark is provably one the sent document
-    /// actually had. A new entry approved for the same dates afterwards has no
-    /// mark and is therefore correctly left out — it belongs to whichever
-    /// future report ends up carrying it, not to this one's history.
+    /// Every declaration-ledger day travels, because deleting or rejecting one
+    /// of several previously declared shifts can change a day without leaving
+    /// any unmarked row behind. Approved, unmarked work on a day with no ledger
+    /// row travels too, preserving the pre-ledger late-booking path. A move is
+    /// therefore represented by the old ledger day and the new unmarked day.
+    /// Unsettled entries in a month whose own report is still owed do not block
+    /// corrections from delivered months; that pending month owns those rows.
+    ///
+    /// The returned time range is absent for a ledger-only day. `counts_as_work`
+    /// and `already_reported` let the service preserve the pre-ledger fallback:
+    /// when no declaration exists, only unmarked work entries count.
+    pub async fn carried_day_entries_before(
+        &self,
+        since: NaiveDate,
+        before: NaiveDate,
+        owed_periods: &[String],
+    ) -> AppResult<Vec<CarriedDayEntry>> {
+        Ok(sqlx::query_as(
+            "WITH blocked_users AS ( \
+                 SELECT DISTINCT z.user_id \
+                 FROM time_entries z \
+                 WHERE z.entry_date >= $1 AND z.entry_date < $2 \
+                 AND to_char(z.entry_date, 'YYYY-MM') <> ALL($3) \
+                 AND (z.status IN ('draft', 'submitted') \
+                      OR (z.status = 'rejected' AND z.rejection_resolved_at IS NULL)) \
+             ), wanted_days AS ( \
+                 SELECT DISTINCT z.user_id, z.entry_date AS day \
+                 FROM time_entries z \
+                 JOIN categories c ON c.id = z.category_id \
+                 JOIN users u ON u.id = z.user_id \
+                 WHERE z.entry_date >= $1 AND z.entry_date < $2 \
+                 AND to_char(z.entry_date, 'YYYY-MM') <> ALL($3) \
+                 AND z.status='approved' AND z.payroll_reported_period IS NULL \
+                 AND c.counts_as_work AND z.entry_date >= u.start_date \
+                 AND NOT EXISTS (SELECT 1 FROM blocked_users blocked \
+                                 WHERE blocked.user_id = z.user_id) \
+                 UNION \
+                 SELECT DISTINCT d.user_id, d.day \
+                 FROM payroll_reported_days d \
+                 JOIN users u ON u.id = d.user_id \
+                 WHERE d.day >= $1 AND d.day < $2 \
+                 AND to_char(d.day, 'YYYY-MM') <> ALL($3) \
+                 AND d.day >= u.start_date \
+                 AND NOT EXISTS (SELECT 1 FROM blocked_users blocked \
+                                 WHERE blocked.user_id = d.user_id) \
+             ) \
+             SELECT wanted.user_id, wanted.day, entry.start_time, entry.end_time, \
+                    COALESCE(entry.counts_as_work, FALSE) AS counts_as_work, \
+                    COALESCE(entry.already_reported, FALSE) AS already_reported \
+             FROM wanted_days wanted \
+             LEFT JOIN LATERAL ( \
+                 SELECT z.start_time, z.end_time, c.counts_as_work, \
+                        z.payroll_reported_period IS NOT NULL AS already_reported \
+                 FROM time_entries z \
+                 JOIN categories c ON c.id = z.category_id \
+                 WHERE z.user_id = wanted.user_id AND z.entry_date = wanted.day \
+                 AND z.status='approved' \
+             ) entry ON TRUE \
+             ORDER BY wanted.user_id, wanted.day, entry.start_time NULLS FIRST",
+        )
+        .bind(since)
+        .bind(before)
+        .bind(owed_periods)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// What earlier reports have already declared for these person-days.
+    ///
+    /// Absent means "no figure recorded" — either the day was never declared,
+    /// or it was declared before this ledger existed. The caller decides which
+    /// (see `payroll_report::build_late_entry_rows`); this only reports what is
+    /// stored.
+    pub async fn declared_minutes_for_days(
+        &self,
+        days: &[(i64, NaiveDate)],
+    ) -> AppResult<HashMap<(i64, NaiveDate), i64>> {
+        if days.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let user_ids: Vec<i64> = days.iter().map(|(user_id, _)| *user_id).collect();
+        let dates: Vec<NaiveDate> = days.iter().map(|(_, day)| *day).collect();
+        let rows: Vec<(i64, NaiveDate, i64)> = sqlx::query_as(
+            "WITH wanted AS ( \
+                 SELECT DISTINCT pair.user_id, pair.day \
+                 FROM unnest($1::bigint[], $2::date[]) AS pair(user_id, day) \
+             ) \
+             SELECT d.user_id, d.day, SUM(d.minutes)::bigint AS minutes \
+             FROM payroll_reported_days d \
+             JOIN wanted ON wanted.user_id = d.user_id AND wanted.day = d.day \
+             GROUP BY d.user_id, d.day",
+        )
+        .bind(&user_ids)
+        .bind(&dates)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(user_id, day, minutes)| ((user_id, day), minutes))
+            .collect())
+    }
+
+    /// Reported months whose per-day baseline is known, including zero days.
+    pub async fn declared_periods_for_days(
+        &self,
+        days: &[(i64, NaiveDate)],
+    ) -> AppResult<HashSet<String>> {
+        let periods: HashSet<String> = days
+            .iter()
+            .map(|(_, day)| day.format("%Y-%m").to_string())
+            .collect();
+        if periods.is_empty() {
+            return Ok(HashSet::new());
+        }
+        let mut periods: Vec<String> = periods.into_iter().collect();
+        periods.sort();
+        Ok(
+            sqlx::query_scalar(
+                "SELECT period FROM payroll_reported_periods WHERE period = ANY($1)",
+            )
+            .bind(&periods)
+            .fetch_all(&self.pool)
+            .await?
+            .into_iter()
+            .collect(),
+        )
+    }
+
+    /// Record the signed person-day declarations this report printed.
+    ///
+    /// Repeating the same report replaces its own rows instead of adding a
+    /// duplicate. A later report writes a separate row, preserving both the
+    /// earlier document and the sum that represents what payroll has received.
+    pub async fn record_declared_days(
+        &self,
+        period: &str,
+        days: &[(i64, NaiveDate, i64)],
+    ) -> AppResult<u64> {
+        let mut tx = self.pool.begin().await?;
+        let rows = Self::record_declared_days_tx(&mut tx, period, days).await?;
+        tx.commit().await?;
+        Ok(rows)
+    }
+
+    async fn record_declared_days_tx(
+        tx: &mut PgTransaction<'_>,
+        period: &str,
+        days: &[(i64, NaiveDate, i64)],
+    ) -> AppResult<u64> {
+        if days.is_empty() {
+            return Ok(0);
+        }
+        let user_ids: Vec<i64> = days.iter().map(|(user_id, _, _)| *user_id).collect();
+        let dates: Vec<NaiveDate> = days.iter().map(|(_, day, _)| *day).collect();
+        let minutes: Vec<i64> = days.iter().map(|(_, _, minutes)| *minutes).collect();
+        let result = sqlx::query(
+            "INSERT INTO payroll_reported_days (user_id, day, period, minutes) \
+             SELECT d.user_id, d.day, $3, SUM(d.minutes)::bigint \
+             FROM unnest($1::bigint[], $2::date[], $4::bigint[]) \
+                  AS d(user_id, day, minutes) \
+             GROUP BY d.user_id, d.day \
+             ON CONFLICT (period, user_id, day) DO UPDATE \
+             SET minutes = EXCLUDED.minutes, \
+                 reported_at = CURRENT_TIMESTAMP",
+        )
+        .bind(&user_ids)
+        .bind(&dates)
+        .bind(period)
+        .bind(&minutes)
+        .execute(&mut **tx)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
+    /// Every signed day declaration recorded by one report, in stable order.
+    pub async fn declared_days_for_period(
+        &self,
+        period: &str,
+    ) -> AppResult<Vec<PayrollDeclaredDay>> {
+        Ok(sqlx::query_as(
+            "SELECT user_id, day, minutes FROM payroll_reported_days \
+             WHERE period = $1 ORDER BY user_id, day",
+        )
+        .bind(period)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// People whose working time this report declared, including people who
+    /// have since been archived or whose live entries were corrected away.
+    pub async fn users_with_declared_days_for_period(&self, period: &str) -> AppResult<Vec<User>> {
+        Ok(sqlx::query_as(
+            "SELECT DISTINCT u.id, u.email, u.password_hash, u.first_name, u.last_name, u.role, \
+             u.weekly_hours, u.workdays_per_week, u.start_date, u.hire_date, u.active, \
+             u.must_change_password, u.created_at, u.allow_reopen_without_approval, \
+             u.allow_submission_without_approval, u.dark_mode, u.tracks_time, u.archived_at, \
+             u.receives_error_notifications \
+             FROM users u \
+             JOIN payroll_reported_days d ON d.user_id = u.id \
+             WHERE d.period = $1",
+        )
+        .bind(period)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Whether a period was settled after exact payroll accounting became
+    /// available. An accounted period with no content rows is a known-empty
+    /// report; an older period with no rows needs the legacy live readback.
+    pub async fn payroll_period_accounted(&self, period: &str) -> AppResult<bool> {
+        Ok(sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS (SELECT 1 FROM payroll_reported_periods WHERE period=$1)",
+        )
+        .bind(period)
+        .fetch_one(&self.pool)
+        .await?)
+    }
+
+    /// Exact rendered rows recorded for one delivered payroll report.
+    pub async fn payroll_reported_content(
+        &self,
+        period: &str,
+    ) -> AppResult<Vec<PayrollReportedContentRow>> {
+        Ok(sqlx::query_as(
+            "SELECT user_id, employee, kind, category, from_date, to_date, days, minutes, \
+                    medical_certificate_required \
+             FROM payroll_reported_content WHERE period=$1 ORDER BY position",
+        )
+        .bind(period)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    async fn record_payroll_reported_content_tx(
+        tx: &mut PgTransaction<'_>,
+        period: &str,
+        rows: &[PayrollReportedContentRow],
+    ) -> AppResult<u64> {
+        sqlx::query("DELETE FROM payroll_reported_content WHERE period=$1")
+            .bind(period)
+            .execute(&mut **tx)
+            .await?;
+        if rows.is_empty() {
+            return Ok(0);
+        }
+
+        let mut query = QueryBuilder::<Postgres>::new(
+            "INSERT INTO payroll_reported_content (period, position, user_id, employee, kind, \
+             category, from_date, to_date, days, minutes, medical_certificate_required) ",
+        );
+        query.push_values(rows.iter().enumerate(), |mut values, (position, row)| {
+            values
+                .push_bind(period)
+                .push_bind(position as i64)
+                .push_bind(row.user_id)
+                .push_bind(&row.employee)
+                .push_bind(&row.kind)
+                .push_bind(&row.category)
+                .push_bind(row.from_date)
+                .push_bind(row.to_date)
+                .push_bind(row.days)
+                .push_bind(row.minutes)
+                .push_bind(row.medical_certificate_required);
+        });
+        Ok(query.build().execute(&mut **tx).await?.rows_affected())
+    }
+
+    /// Atomically record every declaration in a sent report, mark the live
+    /// rows it accounted for, snapshot its rendered content, and settle its
+    /// queue entry.
+    ///
+    /// The PDF has already been accepted by SMTP when this runs. Keeping the
+    /// declaration ledger, both marker families, and queue deletion in one
+    /// transaction means a retry sees either the original document's complete
+    /// accounting state or none of it. A transient failure is retried by the
+    /// caller; if all attempts fail, the period remains queued rather than
+    /// exposing partially committed accounting state.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn record_payroll_report_delivery(
+        &self,
+        period: &str,
+        period_start: NaiveDate,
+        period_end: NaiveDate,
+        period_entries: &[PayrollEntrySnapshot],
+        declared_days: &[(i64, NaiveDate, i64)],
+        carried: PayrollCarryScope<'_>,
+        reported_absence_ids: &[i64],
+        carried_absence_ids: &[i64],
+        content_rows: &[PayrollReportedContentRow],
+    ) -> AppResult<(u64, u64, u64, u64)> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "INSERT INTO payroll_reported_periods (period) VALUES ($1) \
+             ON CONFLICT (period) DO NOTHING",
+        )
+        .bind(period)
+        .execute(&mut *tx)
+        .await?;
+        let declared = Self::record_declared_days_tx(&mut tx, period, declared_days).await?;
+        let mut absence_ids = reported_absence_ids.to_vec();
+        absence_ids.extend_from_slice(carried_absence_ids);
+        absence_ids.sort_unstable();
+        absence_ids.dedup();
+        let absences =
+            Self::mark_payroll_reported_absences_exact_tx(&mut tx, period, &absence_ids).await?;
+        let entries = TimeEntryDb::mark_payroll_reported_tx(
+            &mut tx,
+            period,
+            period_start,
+            period_end,
+            period_entries,
+            carried,
+        )
+        .await?;
+        let content =
+            Self::record_payroll_reported_content_tx(&mut tx, period, content_rows).await?;
+        sqlx::query("DELETE FROM payroll_report_queue WHERE period = $1")
+            .bind(period)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok((declared, absences, entries, content))
+    }
+
+    /// Legacy readback for approved, work-crediting entries in `[from, to]`
+    /// marked as accounted for by `period`'s report.
+    ///
+    /// Reports sent after migration 047 use `declared_days_for_period`, which
+    /// preserves exact net values. This remains for older reports that have no
+    /// ledger rows and cannot be reconstructed more precisely.
     pub async fn time_entries_reported_in_range(
         &self,
         period: &str,

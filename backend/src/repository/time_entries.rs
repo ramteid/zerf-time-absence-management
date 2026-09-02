@@ -84,13 +84,13 @@ fn duration_min(start: &str, end: &str) -> AppResult<i64> {
     Ok((e - s).num_minutes())
 }
 
-/// The catch-up half of one payroll report's mark: which older days it
-/// printed, and therefore which ones it may record as accounted for.
+/// The correction half of one payroll report's entry marker: which exact older
+/// person-days it printed, and therefore which live rows it may mark.
 ///
-/// Bundled rather than passed loose because every field has to agree with
-/// `ReportDb::carried_time_entries_before`, which selects the very same rows
-/// for the document. A mark that is scoped differently from the document
-/// silently either loses a day or reports it twice.
+/// Bundled rather than passed loose because the date bounds must agree with
+/// `ReportDb::carried_day_entries_before`, while `days` comes directly from the
+/// assembled document. A wider marker scope silently loses changes; a narrower
+/// one can declare the same row twice.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PayrollCarryScope<'a> {
     /// Permanent floor: the start of the very first period the payroll report
@@ -103,9 +103,19 @@ pub struct PayrollCarryScope<'a> {
     /// Months ("YYYY-MM") whose own report is still to come; their days belong
     /// to that report, not this one.
     pub owed_periods: &'a [String],
-    /// The people whose hours this document actually printed. Nobody else's
-    /// older day may be marked — it was in no report at all.
-    pub user_ids: &'a [i64],
+    /// Exact older person-days whose corrections this document printed.
+    /// Nobody else's entries may be marked — they were in no report at all.
+    pub days: &'a [(i64, NaiveDate)],
+}
+
+/// One entry row captured before a payroll report is assembled.
+///
+/// The marker update matches both fields, so a row created or edited while the
+/// document is being built or sent remains unmarked and can be carried later.
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub struct PayrollEntrySnapshot {
+    pub id: i64,
+    pub updated_at: DateTime<Utc>,
 }
 
 const TE_SELECT: &str =
@@ -763,21 +773,31 @@ impl TimeEntryDb {
             }
         }
         validate_entry(&mut tx, prev.user_id, entry, Some(entry_id)).await?;
+        let payroll_content_changed = prev.entry_date != entry.entry_date
+            || prev.start_time != entry.start_time
+            || prev.end_time != entry.end_time
+            || prev.category_id != entry.category_id;
         sqlx::query(
-            // Moving a day to a different month invalidates any payroll mark it
-            // carries: the mark records the month whose report accounted for
-            // this entry, and after the move that is no longer the month the
-            // entry is in. Leaving it would make the day invisible to both
-            // months' read-back — the old one no longer contains its date, the
-            // new one does not carry its mark — so it is cleared and the entry
-            // becomes catchable again. An edit inside the same month keeps its
-            // mark: that report really did account for the day.
+            // A day ledger row makes a post-send edit safe to carry as a signed
+            // correction, so any material change clears the entry marker and
+            // lets the next report compare the whole day with what payroll
+            // already received. A period-level marker alone is not enough: a
+            // no-ledger day can contain an older marked shift plus a fallback
+            // correction carried later. Its combined baseline is still
+            // unknowable, so it must keep the legacy behavior of preserving
+            // the marker within the same month.
             "UPDATE time_entries \
              SET entry_date=$1, start_time=$2, end_time=$3, category_id=$4, \
                  comment=$5, updated_at=CURRENT_TIMESTAMP, \
                  payroll_reported_period = CASE \
+                     WHEN $7::boolean AND EXISTS ( \
+                         SELECT 1 FROM payroll_reported_days d \
+                         WHERE d.user_id = time_entries.user_id \
+                         AND d.day = time_entries.entry_date \
+                     ) THEN NULL \
                      WHEN to_char($1::date, 'YYYY-MM') = to_char(entry_date, 'YYYY-MM') \
-                     THEN payroll_reported_period ELSE NULL END \
+                     THEN payroll_reported_period \
+                     ELSE NULL END \
              WHERE id=$6",
         )
         .bind(entry.entry_date)
@@ -786,6 +806,7 @@ impl TimeEntryDb {
         .bind(entry.category_id)
         .bind(&entry.comment)
         .bind(entry_id)
+        .bind(payroll_content_changed)
         .execute(&mut *tx)
         .await?;
         if admin_correction && prev.status == "approved" {
@@ -1249,9 +1270,8 @@ impl TimeEntryDb {
     ///   whoever it belongs to. The month has been through the report; nothing
     ///   in it arrived late. This is what keeps switching on *List employees'
     ///   working hours* from dumping years of history into the next report.
-    /// * approved entries in `[carry_over_since, carry_over_before)` belonging
-    ///   to `carried_user_ids` — the people whose hours this report actually
-    ///   printed, so these are the catch-up days it carried.
+    /// * approved entries in `[carry_over_since, carry_over_before)` on the
+    ///   exact `(user, day)` pairs this report printed as corrections.
     ///   `carry_over_since` is a permanent floor (the start of the very first
     ///   period the payroll report ever queued) so that an installation's
     ///   first-ever report cannot reach into pre-existing history it was never
@@ -1286,27 +1306,87 @@ impl TimeEntryDb {
         period_end: NaiveDate,
         carried: PayrollCarryScope<'_>,
     ) -> AppResult<u64> {
+        let period_entries = self
+            .payroll_entry_snapshot(period_start, period_end)
+            .await?;
+        let mut tx = self.pool.begin().await?;
+        let rows = Self::mark_payroll_reported_tx(
+            &mut tx,
+            period,
+            period_start,
+            period_end,
+            &period_entries,
+            carried,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(rows)
+    }
+
+    /// Entry identities and versions present before payroll report assembly.
+    pub async fn payroll_entry_snapshot(
+        &self,
+        period_start: NaiveDate,
+        period_end: NaiveDate,
+    ) -> AppResult<Vec<PayrollEntrySnapshot>> {
+        Ok(sqlx::query_as(
+            "SELECT id, updated_at FROM time_entries \
+             WHERE entry_date BETWEEN $1 AND $2 ORDER BY id",
+        )
+        .bind(period_start)
+        .bind(period_end)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Transaction-bound half of [`Self::mark_payroll_reported`]. Payroll
+    /// delivery uses this beside its declaration ledger write so neither can
+    /// commit without the other after SMTP accepted the PDF.
+    pub async fn mark_payroll_reported_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        period: &str,
+        period_start: NaiveDate,
+        period_end: NaiveDate,
+        period_entries: &[PayrollEntrySnapshot],
+        carried: PayrollCarryScope<'_>,
+    ) -> AppResult<u64> {
         let PayrollCarryScope {
             since: carry_over_since,
             before: carry_over_before,
             owed_periods,
-            user_ids: carried_user_ids,
+            days: carried_days,
         } = carried;
+        let carried_user_ids: Vec<i64> = carried_days.iter().map(|(user_id, _)| *user_id).collect();
+        let carried_dates: Vec<NaiveDate> = carried_days.iter().map(|(_, day)| *day).collect();
+        let period_entry_ids: Vec<i64> = period_entries.iter().map(|entry| entry.id).collect();
+        let period_entry_versions: Vec<DateTime<Utc>> = period_entries
+            .iter()
+            .map(|entry| entry.updated_at)
+            .collect();
         let result = sqlx::query(
             // A NULL bound makes the comparison NULL rather than true, and an
-            // empty id list matches nobody, so a report that carried nothing
+            // empty day list matches nobody, so a report that carried nothing
             // marks its own month and not one day more. The carry clause has to
-            // match `ReportDb::carried_time_entries_before` condition for
-            // condition, or the document and the mark disagree about what went
-            // out.
+            // retain the same bounds as `ReportDb::carried_day_entries_before`;
+            // the paired arrays narrow it to the document's exact rows.
             "UPDATE time_entries AS z SET payroll_reported_period=$1 \
              WHERE z.payroll_reported_period IS NULL \
-             AND (z.entry_date BETWEEN $2 AND $3 \
+             AND ((z.entry_date BETWEEN $2 AND $3 \
+                   AND EXISTS ( \
+                       SELECT 1 \
+                       FROM unnest($9::bigint[], $10::timestamptz[]) snapshot(id, updated_at) \
+                       WHERE snapshot.id = z.id AND snapshot.updated_at = z.updated_at \
+                   )) \
                   OR (z.status='approved' \
                       AND z.entry_date >= $4::date \
                       AND z.entry_date < $5::date \
                       AND to_char(z.entry_date, 'YYYY-MM') <> ALL($6) \
-                      AND z.user_id = ANY($7) \
+                      AND EXISTS ( \
+                          SELECT 1 \
+                          FROM unnest($7::bigint[], $8::date[]) carried(user_id, day) \
+                          WHERE carried.user_id = z.user_id \
+                          AND carried.day = z.entry_date \
+                      ) \
                       AND z.entry_date >= \
                           (SELECT u.start_date FROM users u WHERE u.id = z.user_id) \
                       AND EXISTS (SELECT 1 FROM categories c \
@@ -1318,8 +1398,11 @@ impl TimeEntryDb {
         .bind(carry_over_since)
         .bind(carry_over_before.map(|boundary| boundary.min(period_start)))
         .bind(owed_periods)
-        .bind(carried_user_ids)
-        .execute(&self.pool)
+        .bind(&carried_user_ids)
+        .bind(&carried_dates)
+        .bind(&period_entry_ids)
+        .bind(&period_entry_versions)
+        .execute(&mut **tx)
         .await?;
         Ok(result.rows_affected())
     }

@@ -205,35 +205,58 @@ changes:
    its document is one person's whole month.)
 3. Content stored before a start date, which every renderer hides.
 
-**Days booked after their month was reported.** A day recorded only after its
-month's report went out belongs to no document at all, so the next report carries
-it in its own section (`PayrollLateEntryRow`, "Booked later"), under its real
-date. `time_entries.payroll_reported_period` records **that the entry existed
-when the report for its month was produced** — deliberately not "these hours were
-paid", because that depends on settings which may change, and a marker whose
-meaning moves with a setting is useless.
-`TimeEntryDb::mark_payroll_reported` therefore marks two different groups on a
-*scheduled* send: every entry dated **in the period**, whatever its status and
-whoever it belongs to (this is what stops switching on
-`payroll_report_include_employee_hours` from dumping history), and older approved
-entries **only for the people whose hours that document printed**, since those
-are the catch-up days it carried. Marking anybody else's older entry would claim
-a report accounted for hours it never showed, and would make a genuine late
-booking uncatchable if the setting that prints them is switched on later — so an
-employee's late day simply stays outstanding while only assistants' hours are
-printed. The two settle-without-sending branches mark with an empty carried list,
-so a settled month can never resurface while nothing it did not print is touched.
-If marking fails the period is left queued on purpose: a second copy of the same
-month is recognisable, whereas the same hours reappearing a month later under an
-older date read like new work. Manual sends never mark — the scheduled copy is
-still to come. An approved, work-crediting entry with no mark is therefore
-provably a day no report has printed. Migration 044 backfills every pre-existing
-entry with its own month, so enabling the feature cannot dump history into the
-next report. Editing an entry's date *out of* its month clears the mark
-(`TimeEntryDb::update`): the mark names the month whose report accounted for the
-entry, and after such a move that is no longer the month the entry is in — a
-stale mark would hide the day from both months' read-back. An edit inside the
-same month keeps it.
+**Working time changed after its month was reported.** A late booking or a
+change to an already-declared day belongs in a later report under its affected
+date. `PayrollLateEntryRow` is therefore a signed correction: positive minutes
+add time and negative minutes reduce it. The live path recomputes the whole
+approved person-day, including one automatic-break deduction across all shifts,
+then subtracts everything payroll has already received for that day.
+
+Two records serve different purposes. `time_entries.payroll_reported_period`
+records **that an entry row existed when a report was produced**. It deliberately
+does not mean "these hours were paid", because the settings deciding whose hours
+are printed can change. `payroll_reported_days` (migration 047) is the append-only
+value ledger: one signed net-minute row per `(period, user, day)`. Summing a
+person-day gives the exact total already declared. An unchanged delete/rebook
+therefore produces zero, adding a shift carries only the net increase, and a
+cross-month move produces a negative old-day correction plus a positive new-day
+correction.
+
+Migration 047 has no backfill. Exact historic day totals cannot be reconstructed
+from row markers, and inventing zero would dump the full history into the next
+report. `payroll_reported_periods` records every month settled with the ledger
+available, so a missing day in one of those months is a known zero baseline. A
+missing day from an older month stays on the marker-based behavior permanently,
+even after that fallback prints a correction; recording only the new delta
+would mistake it for the unknown full baseline on the next report. Migration
+044 already marked every entry that existed when catch-up reporting was
+introduced, so enabling the feature still cannot dump pre-existing history.
+
+On a scheduled send, `PayrollReportData::declared_work_days` carries the exact
+regular day totals and signed corrections from the assembled document to the
+sender. `ReportDb::record_payroll_report_delivery` writes those ledger rows,
+stores the exact rendered rows for delivered-card readback, marks the printed
+absences and time entries, and removes the queue row in one transaction.
+Own-period entries are marked only from the exact `(id,
+updated_at)` snapshot captured before report assembly; an entry created or
+materially edited while the document is built stays unmarked for a later
+correction. Older approved rows are marked only on the exact `(user, day)` pairs
+the document printed. The settle-without-sending branches pass empty
+declarations and carried-day lists. If any write fails, the transaction rolls
+back and the period remains queued. Manual sends never record declarations or
+markers because the scheduled copy is still to come.
+
+`payroll_reported_content` stores the ordered dashboard projection of each
+post-migration delivery. A delivered card reads that snapshot instead of
+reapplying current inclusion settings, exclusions, names, category labels, or
+absence state to an old document. The stored user id is used only for the
+viewer's current visibility check. Periods sent before migration 047 have no
+snapshot and retain the marker-based readback.
+
+A material edit to a ledger-backed entry clears its row marker, even inside the
+same month, so the whole day can be compared with its declared total. A legacy
+row with no ledger retains the established behavior: an edit inside the same
+month keeps its marker and a cross-month move clears it.
 
 `services::payroll_report::carry_over_boundary` decides how far back that
 reaches, and returns the whole `CarriedDays` scope rather than a single date.
@@ -263,22 +286,23 @@ Three bounds, each guarding a different way of getting it wrong:
   restrictive fallback would silently switch carry-over off for exactly the
   installations that have been running longest.
 
-The scope travels in `ReportWindow::carried`, and `TimeEntryDb::mark_payroll_reported`
-takes the same three bounds as a `PayrollCarryScope`, so the member set, the
-document and the marking afterwards cannot disagree about which days were meant.
-Every condition in `ReportDb::carried_time_entries_before` has a twin in the mark
-query for that reason. `CarriedDays::reported_as` picks the direction: `None` asks what a
-report produced now would carry, `Some(period)` asks what that period's send
-actually carried, read back from the mark. The dashboard card uses the second
-form for a month already delivered — asking the first would list days booked
-*since* the send under "what this month's report contained". For the same
-reason `reported_as = Some(period)` also switches the regular hours sections
-away from the live recompute every other window uses
-(`payroll_report::sent_hours_rows`, reading `time_entries_reported_in_range`):
-otherwise a brand-new entry approved for a date *inside* an already-sent month
-would silently inflate that month's hours as if it had been mailed, while
-independently reappearing as a catch-up row on the *next* month's card — the
-same hours shown twice, under two different months. Absences carry the same protection through a
+The scope travels in `ReportWindow::carried`. The live path reads candidate
+person-days through `ReportDb::carried_day_entries_before`, calculates their
+current net totals, and subtracts `declared_minutes_for_days`. A
+`PayrollCarryScope` carries the same date bounds plus the exact printed
+person-days, so marking cannot widen beyond the document. A person with an
+unsettled entry in an already-reported month is deferred rather than treated as
+a deletion while a reopened correction is still in progress; unsettled rows in
+a month still owed belong to that month's own report and do not block older
+corrections. `CarriedDays::reported_as`
+picks the direction: `None` asks what a report produced now would correct;
+`Some(period)` asks what that period actually declared. Post-migration reports
+read both their regular hours and correction rows through
+`declared_days_for_period`; reports with no ledger rows fall back to
+`time_entries_reported_in_range` and the older marker queries. The dashboard card
+uses the historical form for a delivered month, so later edits cannot rewrite
+"what this month's report contained" or show the same time in two months.
+Absences carry the same protection through a
 second marker, `absences.payroll_reported_period` (migration 046), and they
 need it *more* than entries do: `AbsenceCategory::is_payroll_relevant` is
 `auto_approve_past OR unpaid`, so a sick-like absence entered for past dates is
@@ -308,15 +332,15 @@ from a second query is what produced the read/mark drift bugs this feature kept
 hitting, where days were either declared twice or marked without ever being
 printed.
 
-`payroll_members` takes carry-over too, because
-somebody who worked only in the closed month has no activity in the month now
-being reported (and may since have been deactivated, hence
-`users_with_carried_time_entries_before` returning whole user rows). The
-Submissions tile passes `None`: a late day from a closed month says nothing about
-whether *this* month is closed. A carried *absence* widens the member set only
-for non-assistants, mirroring the rule that an assistant's absence never
-appears in the report: admitting one would add somebody who can never produce a
-row, for ever, since only non-assistants' absences are ever marked.
+`payroll_members` takes corrections too, because somebody whose only activity is
+an older changed day has no row in the month now being reported and may since
+have been deactivated. The live member set uses only nonzero calculated deltas,
+so an unchanged rebook cannot create a permanent phantom member. A delivered
+report gets its historic users from that period's declaration ledger, with the
+old entry-marker lookup only as the migration-047 fallback. The Submissions tile
+passes `None`: an older correction says nothing about whether this month is
+closed. A carried *absence* widens the member set only for non-assistants,
+mirroring the rule that an assistant's absence never appears in the report.
 
 `require_week_submission` is `false` for payroll and `true` for the archive. An
 unhanded-in week proves nothing here: an assistant with no target schedule may
@@ -391,6 +415,9 @@ sends a real message and must not be blocked by unrelated breaker state.
 | `login_attempts` | Failed login tracking for rate-limit lockout |
 | `categories` | Work categories |
 | `time_entries` | Daily entries (date, start/end, category, status, `payroll_reported_period`) |
+| `payroll_reported_days` | Signed net working minutes declared per person and day by each payroll report |
+| `payroll_reported_periods` | Months settled after exact per-day payroll accounting became available |
+| `payroll_reported_content` | Ordered rendered rows of each delivered payroll report for exact dashboard readback |
 | `flextime_adjustments` | Dated, signed changes to a flextime balance that no worked time explains (carry-in balance, admin corrections) |
 | `absences` | Absence requests with status workflow |
 | `holidays` | Public holidays (auto-fetched or manual) |

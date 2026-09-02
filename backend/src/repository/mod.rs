@@ -40,11 +40,13 @@ pub use notifications::{
 };
 pub use payroll_report_queue::PayrollReportQueueDb;
 pub use reopen_requests::{ReopenRequest, ReopenRequestDb};
-pub use reports::ReportDb;
+pub use reports::{PayrollReportedContentRow, ReportDb};
 pub use sessions::SessionDb;
 pub use settings::SettingsDb;
 pub use system_metadata::SystemMetadataDb;
-pub use time_entries::{NewEntryData, PayrollCarryScope, TimeEntry, TimeEntryDb};
+pub use time_entries::{
+    NewEntryData, PayrollCarryScope, PayrollEntrySnapshot, TimeEntry, TimeEntryDb,
+};
 pub use timesheet_export_queue::{ExportQueueEntry, TimesheetExportQueueDb};
 pub use users::{
     ActiveUserRow, LeaveAccountDefinition, User, UserDb, UserLeaveAccountDetails,

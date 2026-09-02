@@ -631,9 +631,9 @@ pub async fn delete_sessions_for_user_tx(
     SessionDb::delete_for_user_tx(tx, user_id).await
 }
 
-/// Delegate to the repository: check whether `user_id` has any time entries or
-/// absences. Used by the delete handler to guard against hard-deleting users
-/// with historical data.
+/// Delegate to the repository: check whether `user_id` has any time entries,
+/// absences, or payroll declarations. Used by the delete handler to guard
+/// against hard-deleting users with historical data.
 pub async fn has_time_data_tx(tx: &mut crate::db::PgConnection, user_id: i64) -> AppResult<bool> {
     UserDb::has_time_data_tx(tx, user_id).await
 }

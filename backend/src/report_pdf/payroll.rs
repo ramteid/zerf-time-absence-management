@@ -12,7 +12,7 @@
 //!   Hours:    Employee 70 | Work days 30 | Hours 40 | Hours (decimal) 40
 //!   Late:     Employee 70 | Date 30 | Hours 40 | Hours (decimal) 40
 
-use super::{format_minutes, Align, Column, Renderer};
+use super::{format_minutes, format_signed_minutes, Align, Column, Renderer};
 use crate::i18n::{self, Language};
 use chrono::NaiveDate;
 
@@ -88,11 +88,10 @@ const HOURS_WORK_DAYS_COLUMN: usize = 1;
 const HOURS_HOURS_COLUMN: usize = 2;
 const HOURS_DECIMAL_COLUMN: usize = 3;
 
-/// Late-entries table: one row per person and day booked after that day's own
-/// month had already been reported. Same widths as [`HOURS_COLUMNS`], with the
-/// day itself in place of the work-day count — the date is the whole point of
-/// the section, because payroll has to book the hours into the month they were
-/// worked in, not the one that ships them.
+/// Corrections table: one row per person and day whose approved net time
+/// changed after that day's month was reported. Same widths as
+/// [`HOURS_COLUMNS`], with the affected day in place of the work-day count so
+/// payroll can adjust the month the value belongs to.
 const LATE_ENTRY_COLUMNS: &[Column] = &[
     Column {
         header_key: "pdf_payroll_column_employee",
@@ -122,6 +121,9 @@ const LATE_ENTRY_DECIMAL_COLUMN: usize = 3;
 
 /// One absence period of one employee within the reported month.
 pub struct PayrollAbsenceRow {
+    /// Not rendered; retained so delivery can persist an exact, access-aware
+    /// dashboard snapshot of the document.
+    pub user_id: i64,
     pub employee: String,
     /// Display name of the absence category (localized by the caller).
     pub category: String,
@@ -139,6 +141,8 @@ pub struct PayrollAbsenceRow {
 
 /// Working days and worked minutes of one person within the reported month.
 pub struct PayrollHoursRow {
+    /// Not rendered; retained for the delivered dashboard snapshot.
+    pub user_id: i64,
     pub employee: String,
     pub work_days: i64,
     pub minutes: i64,
@@ -151,15 +155,39 @@ pub struct PayrollHoursSection {
     pub rows: Vec<PayrollHoursRow>,
 }
 
-/// One day of work that belongs to an already-reported month.
+/// One signed correction to a day in an already-reported month.
 ///
-/// It carries its own date rather than being folded into the month's totals:
-/// the hours were earned in that earlier month and payroll books them there.
+/// It carries its own date rather than being folded into the current month's
+/// totals. Positive minutes add time and negative minutes reduce it.
 pub struct PayrollLateEntryRow {
+    /// Not rendered; retained for the delivered dashboard snapshot.
+    pub user_id: i64,
     pub employee: String,
     /// The day actually worked — always before the reported month.
     pub date: NaiveDate,
     pub minutes: i64,
+}
+
+/// One signed day total the assembled report declares to payroll.
+///
+/// This is deliberately not rendered itself. It travels with the finished
+/// document so the sender records exactly the values the PDF showed, instead
+/// of attempting to derive them again from mutable time entries after SMTP has
+/// accepted the message.
+pub struct PayrollDeclaredWorkDay {
+    pub user_id: i64,
+    pub date: NaiveDate,
+    pub minutes: i64,
+}
+
+/// One older person-day whose correction the assembled report printed.
+///
+/// This stays separate from [`PayrollDeclaredWorkDay`]: a pre-ledger day must
+/// remain on the legacy entry-marker fallback, but its newly printed row still
+/// has to be marked so it does not repeat.
+pub struct PayrollCarriedWorkDay {
+    pub user_id: i64,
+    pub date: NaiveDate,
 }
 
 /// One person the report had to leave out, with the reason in the report
@@ -200,11 +228,20 @@ pub struct PayrollReportData {
     pub absence_rows: Option<Vec<PayrollAbsenceRow>>,
     /// Empty when neither hours section is enabled.
     pub hours_sections: Vec<PayrollHoursSection>,
-    /// Days from earlier, already-reported months that were booked too late to
-    /// reach their own report. Empty on almost every report, and the section is
-    /// then left out entirely rather than printed as an empty table — an extra
-    /// heading on every document would only train the reader to skip it.
+    /// Signed changes to days from already-reported months. Empty on almost
+    /// every report, and the section is then left out entirely rather than
+    /// printed as an empty table.
     pub late_entry_rows: Vec<PayrollLateEntryRow>,
+    /// Signed per-person-day hour values this exact document declared. Regular
+    /// working days carry their net totals; catch-up rows carry their positive
+    /// or negative correction. Kept with the document so its ledger record
+    /// cannot drift from what payroll received.
+    pub declared_work_days: Vec<PayrollDeclaredWorkDay>,
+    /// Exact older person-days printed in the corrections section, including
+    /// legacy days whose unknown baseline must not be added to the new ledger.
+    pub carried_work_days: Vec<PayrollCarriedWorkDay>,
+    /// Database ids of the regular absence rows this document printed.
+    pub reported_absence_ids: Vec<i64>,
     /// Absence periods from earlier months that no report ever showed, under
     /// their own real dates. Same "only when non-empty" rule as above.
     pub late_absence_rows: Vec<PayrollAbsenceRow>,
@@ -437,7 +474,7 @@ fn render_late_absence_table(
     }
 }
 
-/// Draw the "booked after the fact" table, with a line of explanation above it.
+/// Draw the corrections table, with a line of explanation above it.
 ///
 /// The note matters more than the table: without it the payroll accountant sees
 /// dates from a month they have already filed and has no way to know whether
@@ -468,10 +505,10 @@ fn render_late_entry_table(
                     LATE_ENTRY_DATE_COLUMN,
                     i18n::format_date(language, row.date),
                 ),
-                (LATE_ENTRY_HOURS_COLUMN, format_minutes(row.minutes)),
+                (LATE_ENTRY_HOURS_COLUMN, format_signed_minutes(row.minutes)),
                 (
                     LATE_ENTRY_DECIMAL_COLUMN,
-                    format_decimal_hours(row.minutes, language),
+                    format_signed_decimal_hours(row.minutes, language),
                 ),
             ],
             index % 2 == 1,
@@ -482,10 +519,13 @@ fn render_late_entry_table(
     renderer.draw_total_row(
         &i18n::translate(language, "pdf_payroll_total", &[]),
         &[
-            (LATE_ENTRY_HOURS_COLUMN, format_minutes(total_minutes)),
+            (
+                LATE_ENTRY_HOURS_COLUMN,
+                format_signed_minutes(total_minutes),
+            ),
             (
                 LATE_ENTRY_DECIMAL_COLUMN,
-                format_decimal_hours(total_minutes, language),
+                format_signed_decimal_hours(total_minutes, language),
             ),
         ],
     );
@@ -506,6 +546,15 @@ fn decimal_separator(language: &Language) -> char {
 fn format_decimal_hours(total_minutes: i64, language: &Language) -> String {
     let hours = total_minutes as f64 / 60.0;
     format!("{hours:.2}").replace('.', &decimal_separator(language).to_string())
+}
+
+fn format_signed_decimal_hours(total_minutes: i64, language: &Language) -> String {
+    let formatted = format_decimal_hours(total_minutes, language);
+    if total_minutes >= 0 {
+        format!("+{formatted}")
+    } else {
+        formatted
+    }
 }
 
 /// Absence days without trailing noise: whole days print as `3`, the rare
@@ -543,6 +592,8 @@ mod tests {
         assert_eq!(format_decimal_hours(450, &english), "7.50");
         assert_eq!(format_decimal_hours(450, &german), "7,50");
         assert_eq!(format_decimal_hours(0, &english), "0.00");
+        assert_eq!(format_signed_decimal_hours(450, &english), "+7.50");
+        assert_eq!(format_signed_decimal_hours(-30, &german), "-0,50");
     }
 
     #[test]
@@ -560,6 +611,7 @@ mod tests {
             period_label: "May 2026".into(),
             organization_name: "Example GmbH".into(),
             absence_rows: Some(vec![PayrollAbsenceRow {
+                user_id: 1,
                 employee: "Smith, John".into(),
                 category: "Sick".into(),
                 from: date(2026, 5, 4),
@@ -570,6 +622,7 @@ mod tests {
             hours_sections: vec![PayrollHoursSection {
                 heading_key: "pdf_payroll_assistant_hours_heading",
                 rows: vec![PayrollHoursRow {
+                    user_id: 2,
                     employee: "Doe, Jane".into(),
                     work_days: 4,
                     minutes: 930,
@@ -578,10 +631,14 @@ mod tests {
             // A day from April that only reached the system in May, so the
             // catch-up table is laid out at least once here.
             late_entry_rows: vec![PayrollLateEntryRow {
+                user_id: 2,
                 employee: "Doe, Jane".into(),
                 date: date(2026, 4, 28),
                 minutes: 240,
             }],
+            declared_work_days: Vec::new(),
+            carried_work_days: Vec::new(),
+            reported_absence_ids: Vec::new(),
             late_absence_rows: Vec::new(),
             late_absence_ids: Vec::new(),
             created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
@@ -603,6 +660,9 @@ mod tests {
                 absence_rows: Some(vec![]),
                 hours_sections: vec![],
                 late_entry_rows: Vec::new(),
+                declared_work_days: Vec::new(),
+                carried_work_days: Vec::new(),
+                reported_absence_ids: Vec::new(),
                 late_absence_rows: Vec::new(),
                 late_absence_ids: Vec::new(),
                 created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
@@ -633,6 +693,9 @@ mod tests {
                 absence_rows: Some(vec![]),
                 hours_sections: vec![],
                 late_entry_rows: Vec::new(),
+                declared_work_days: Vec::new(),
+                carried_work_days: Vec::new(),
+                reported_absence_ids: Vec::new(),
                 late_absence_rows: Vec::new(),
                 late_absence_ids: Vec::new(),
                 created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
@@ -660,6 +723,9 @@ mod tests {
                 rows: vec![],
             }],
             late_entry_rows: Vec::new(),
+            declared_work_days: Vec::new(),
+            carried_work_days: Vec::new(),
+            reported_absence_ids: Vec::new(),
             late_absence_rows: Vec::new(),
             late_absence_ids: Vec::new(),
             created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),

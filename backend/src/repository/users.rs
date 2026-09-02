@@ -1016,18 +1016,19 @@ impl UserDb {
         Ok(())
     }
 
-    /// Check whether a user has any time entries or absences.
+    /// Check whether a user has any time entries, absences, or payroll declarations.
     /// Used to guard hard delete: users with historical data must be archived,
     /// not hard-deleted.
     pub async fn has_time_data_tx(tx: &mut sqlx::PgConnection, user_id: i64) -> AppResult<bool> {
-        let has_entries: bool = sqlx::query_scalar(
+        let has_data: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM time_entries WHERE user_id=$1) \
-             OR EXISTS(SELECT 1 FROM absences WHERE user_id=$1)",
+             OR EXISTS(SELECT 1 FROM absences WHERE user_id=$1) \
+             OR EXISTS(SELECT 1 FROM payroll_reported_days WHERE user_id=$1)",
         )
         .bind(user_id)
         .fetch_one(tx)
         .await?;
-        Ok(has_entries)
+        Ok(has_data)
     }
 
     pub async fn delete_tx(tx: &mut sqlx::PgConnection, id: i64) -> AppResult<()> {

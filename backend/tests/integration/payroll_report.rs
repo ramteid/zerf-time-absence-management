@@ -2656,6 +2656,18 @@ async fn hours_booked_after_a_month_was_reported_reach_the_next_report() {
     );
     assert_eq!(data.late_entry_rows[0].minutes, 240);
     assert!(
+        data.declared_work_days.is_empty(),
+        "a pre-ledger period has no reconstructible zero-day baseline"
+    );
+    assert_eq!(
+        data.carried_work_days
+            .iter()
+            .map(|day| (day.user_id, day.date))
+            .collect::<Vec<_>>(),
+        vec![(assistant_id, late_day)],
+        "the legacy row still travels to the exact marker step"
+    );
+    assert!(
         data.hours_sections
             .iter()
             .all(|section| section.rows.is_empty()),
@@ -2677,7 +2689,7 @@ async fn hours_booked_after_a_month_was_reported_reach_the_next_report() {
                     .as_ref()
                     .map(|c| c.owed_periods.as_slice())
                     .unwrap_or(&[]),
-                user_ids: &[assistant_id],
+                days: &[(assistant_id, late_day)],
             },
         )
         .await
@@ -2932,7 +2944,7 @@ async fn a_day_no_report_printed_is_not_recorded_as_reported() {
                     .as_ref()
                     .map(|c| c.owed_periods.as_slice())
                     .unwrap_or(&[]),
-                user_ids: &[],
+                days: &[],
             },
         )
         .await
@@ -3031,7 +3043,7 @@ async fn a_sent_month_shows_the_days_it_carried_and_not_the_ones_since() {
                 since: Some(earlier_from),
                 before: Some(from),
                 owed_periods: &[],
-                user_ids: &[_assistant_id],
+                days: &[(_assistant_id, carried_day)],
             },
         )
         .await
@@ -4670,6 +4682,1485 @@ async fn a_sick_note_running_into_a_month_still_owed_still_declares_the_reported
         vec![(owed_from, sick_to)],
         "the owed month still prints its own half, so between the two reports \
          every day is declared exactly once"
+    );
+
+    app.cleanup().await;
+}
+
+/// A replacement row is not new money when payroll has already received the
+/// same net person-day total. Reopening and deleting removes the entry marker,
+/// so this exercises the declaration ledger as the durable baseline and
+/// verifies that a zero correction does not leave a phantom assistant.
+#[tokio::test]
+async fn payroll_declared_days_exact_rebook_has_no_correction_or_phantom_member() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "ledger-rebook").await;
+    let lead = login_change_pw(&app, "lead-ledger-rebook@example.com", &lead_pw).await;
+    let (assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "ledger-rebook").await;
+    let assistant =
+        login_change_pw(&app, "aushilfe-ledger-rebook@example.com", &assistant_pw).await;
+
+    let worked_day = anchor_monday();
+    let (from, to) = month_bounds(worked_day);
+    let period = from.format("%Y-%m").to_string();
+    let original = create_and_submit_entry(
+        &assistant,
+        &worked_day.format("%Y-%m-%d").to_string(),
+        cat_id,
+    )
+    .await;
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [original]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve original day: {body}");
+
+    let period_entries = app
+        .state
+        .db
+        .time_entries
+        .payroll_entry_snapshot(from, to)
+        .await
+        .expect("snapshot reported entries");
+    let recorded = app
+        .state
+        .db
+        .reports
+        .record_payroll_report_delivery(
+            &period,
+            from,
+            to,
+            &period_entries,
+            &[(assistant_id, worked_day, 240)],
+            Default::default(),
+            &[],
+            &[],
+            &[],
+        )
+        .await
+        .expect("record the report that paid the original row");
+    assert_eq!(recorded.0, 1, "one declared person-day was recorded");
+    assert_eq!(recorded.2, 1, "the original entry was marked as reported");
+
+    let (status, body) = assistant
+        .post(
+            "/api/v1/reopen-requests",
+            &json!({
+                "week_start": worked_day.format("%Y-%m-%d").to_string(),
+                "reason": "replace the booking"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "request reopen: {body}");
+    assert_eq!(body["status"], "pending");
+    let reopen_id = id(&body);
+    let (status, body) = lead
+        .post(
+            &format!("/api/v1/reopen-requests/{reopen_id}/approve"),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve reopen: {body}");
+    assert_eq!(body["entries_reopened"], 1);
+
+    let (status, body) = assistant
+        .delete(&format!("/api/v1/time-entries/{original}"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "delete original draft: {body}");
+    let replacement = create_and_submit_entry(
+        &assistant,
+        &worked_day.format("%Y-%m-%d").to_string(),
+        cat_id,
+    )
+    .await;
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [replacement]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve replacement day: {body}");
+
+    let next_from = to + Duration::days(1);
+    let (_next_month_start, next_to) = month_bounds(next_from);
+    let carried = payroll_report::CarriedDays {
+        since: from,
+        before: next_from,
+        owed_periods: Vec::new(),
+        reported_as: None,
+    };
+    let members =
+        payroll_report::payroll_members(&app.state, next_from, next_to, &[], false, Some(&carried))
+            .await
+            .expect("load next report members");
+    assert!(
+        !members.iter().any(|member| member.id == assistant_id),
+        "an exact rebook has no correction and must not create a phantom member"
+    );
+
+    let assistant_member = app
+        .state
+        .db
+        .users
+        .find_by_id(assistant_id)
+        .await
+        .expect("load assistant")
+        .expect("assistant exists");
+    let data = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from: next_from,
+            to: next_to,
+            interim: false,
+            created_on: next_to,
+            carried: Some(carried),
+        },
+        std::slice::from_ref(&assistant_member),
+        &config(true, false),
+        &zerf::i18n::Language::from_setting("en"),
+        None,
+    )
+    .await
+    .expect("build next report with the assistant forced into scope");
+    assert!(
+        data.late_entry_rows.is_empty(),
+        "the replacement's 240 minutes equal the 240 minutes already declared"
+    );
+    assert!(
+        data.declared_work_days.is_empty(),
+        "a zero difference must not be written as a new declaration"
+    );
+
+    app.cleanup().await;
+}
+
+/// A newly added shift changes the value of its whole day. The automatic
+/// break therefore has to be calculated over the original and new shifts
+/// together before subtracting the amount payroll already received.
+#[tokio::test]
+async fn payroll_declared_days_second_shift_recomputes_the_whole_days_break() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "ledger-break").await;
+    let lead = login_change_pw(&app, "lead-ledger-break@example.com", &lead_pw).await;
+    let (assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "ledger-break").await;
+    let assistant = login_change_pw(&app, "aushilfe-ledger-break@example.com", &assistant_pw).await;
+
+    for (key, value) in [
+        (zerf::services::settings::AUTO_BREAK_ENABLED_KEY, "true"),
+        (
+            zerf::services::settings::AUTO_BREAK_THRESHOLD_HOURS_KEY,
+            "6",
+        ),
+        (
+            zerf::services::settings::AUTO_BREAK_DEDUCTION_MINUTES_KEY,
+            "30",
+        ),
+    ] {
+        app.state
+            .db
+            .settings
+            .save_setting(key, value)
+            .await
+            .expect("configure automatic break");
+    }
+
+    let worked_day = anchor_monday();
+    let (from, to) = month_bounds(worked_day);
+    let period = from.format("%Y-%m").to_string();
+    let first_shift = create_and_submit_entry(
+        &assistant,
+        &worked_day.format("%Y-%m-%d").to_string(),
+        cat_id,
+    )
+    .await;
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [first_shift]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve first shift: {body}");
+    let period_entries = app
+        .state
+        .db
+        .time_entries
+        .payroll_entry_snapshot(from, to)
+        .await
+        .expect("snapshot reported entries");
+    app.state
+        .db
+        .reports
+        .record_payroll_report_delivery(
+            &period,
+            from,
+            to,
+            &period_entries,
+            &[(assistant_id, worked_day, 240)],
+            Default::default(),
+            &[],
+            &[],
+            &[],
+        )
+        .await
+        .expect("record the first shift's report");
+
+    let (status, body) = assistant
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": worked_day.format("%Y-%m-%d").to_string(),
+                "start_time": "12:00",
+                "end_time": "15:30",
+                "category_id": cat_id,
+                "comment": "late second shift"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create second shift: {body}");
+    let second_shift = id(&body);
+    let (status, body) = assistant
+        .post(
+            "/api/v1/time-entries/submit",
+            &json!({"ids": [second_shift]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "submit second shift: {body}");
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [second_shift]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve second shift: {body}");
+
+    let next_from = to + Duration::days(1);
+    let (_next_month_start, next_to) = month_bounds(next_from);
+    let carried = payroll_report::CarriedDays {
+        since: from,
+        before: next_from,
+        owed_periods: Vec::new(),
+        reported_as: None,
+    };
+    let members =
+        payroll_report::payroll_members(&app.state, next_from, next_to, &[], false, Some(&carried))
+            .await
+            .expect("load correction report members");
+    assert!(
+        members.iter().any(|member| member.id == assistant_id),
+        "the positive day correction brings the assistant into the report"
+    );
+    let data = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from: next_from,
+            to: next_to,
+            interim: false,
+            created_on: next_to,
+            carried: Some(carried),
+        },
+        &members,
+        &config(true, false),
+        &zerf::i18n::Language::from_setting("en"),
+        None,
+    )
+    .await
+    .expect("build the correction report");
+
+    assert_eq!(data.late_entry_rows.len(), 1);
+    assert_eq!(data.late_entry_rows[0].date, worked_day);
+    assert_eq!(
+        data.late_entry_rows[0].minutes, 180,
+        "450 raw minutes minus the 30-minute whole-day break, less 240 already declared"
+    );
+    assert_eq!(
+        data.declared_work_days
+            .iter()
+            .map(|day| (day.user_id, day.date, day.minutes))
+            .collect::<Vec<_>>(),
+        vec![(assistant_id, worked_day, 180)],
+        "the ledger receives exactly the signed correction printed in the document"
+    );
+
+    app.cleanup().await;
+}
+
+/// Moving work after it was declared changes two person-days: the former day
+/// is reduced to zero and the corrected day gains the time. Both signed rows
+/// must be delivered, while the original report remains an immutable record
+/// of what payroll received at that time.
+#[tokio::test]
+async fn payroll_declared_days_cross_month_move_is_signed_and_history_stays_fixed() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "ledger-move").await;
+    let lead = login_change_pw(&app, "lead-ledger-move@example.com", &lead_pw).await;
+    let (assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "ledger-move").await;
+    let assistant = login_change_pw(&app, "aushilfe-ledger-move@example.com", &assistant_pw).await;
+
+    let original_day = anchor_monday();
+    let (from, to) = month_bounds(original_day);
+    let period = from.format("%Y-%m").to_string();
+    let entry_id = create_and_submit_entry(
+        &assistant,
+        &original_day.format("%Y-%m-%d").to_string(),
+        cat_id,
+    )
+    .await;
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [entry_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve original day: {body}");
+    let original_snapshot = app
+        .state
+        .db
+        .time_entries
+        .payroll_entry_snapshot(from, to)
+        .await
+        .expect("snapshot original report entries");
+    app.state
+        .db
+        .reports
+        .record_payroll_report_delivery(
+            &period,
+            from,
+            to,
+            &original_snapshot,
+            &[(assistant_id, original_day, 240)],
+            Default::default(),
+            &[],
+            &[],
+            &[],
+        )
+        .await
+        .expect("record the original report");
+
+    let (earlier_from, earlier_to) = month_bounds(from - Duration::days(1));
+    let earlier_period = earlier_from.format("%Y-%m").to_string();
+    app.state
+        .db
+        .reports
+        .record_payroll_report_delivery(
+            &earlier_period,
+            earlier_from,
+            earlier_to,
+            &[],
+            &[],
+            Default::default(),
+            &[],
+            &[],
+            &[],
+        )
+        .await
+        .expect("record the target month's known zero baseline");
+    let corrected_day = earlier_from + Duration::days(9);
+    let (status, body) = admin
+        .put(
+            &format!("/api/v1/time-entries/{entry_id}"),
+            &json!({
+                "entry_date": corrected_day.format("%Y-%m-%d").to_string(),
+                "start_time": "08:00",
+                "end_time": "12:00",
+                "category_id": cat_id,
+                "comment": "corrected to its real month"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "move the approved entry: {body}");
+
+    let reporting_from = to + Duration::days(1);
+    let (_reporting_month_start, reporting_to) = month_bounds(reporting_from);
+    let reporting_period = reporting_from.format("%Y-%m").to_string();
+    let carried = payroll_report::CarriedDays {
+        since: earlier_from,
+        before: reporting_from,
+        owed_periods: Vec::new(),
+        reported_as: None,
+    };
+    let members = payroll_report::payroll_members(
+        &app.state,
+        reporting_from,
+        reporting_to,
+        &[],
+        false,
+        Some(&carried),
+    )
+    .await
+    .expect("load correction report members");
+    assert!(
+        members.iter().any(|member| member.id == assistant_id),
+        "the signed move corrections bring the assistant into the report"
+    );
+    let data = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from: reporting_from,
+            to: reporting_to,
+            interim: false,
+            created_on: reporting_to,
+            carried: Some(carried.clone()),
+        },
+        &members,
+        &config(true, false),
+        &zerf::i18n::Language::from_setting("en"),
+        None,
+    )
+    .await
+    .expect("build correction report");
+    assert_eq!(
+        data.late_entry_rows
+            .iter()
+            .map(|row| (row.date, row.minutes))
+            .collect::<Vec<_>>(),
+        vec![(corrected_day, 240), (original_day, -240)],
+        "the corrected date gains the hours and the previously paid date loses them"
+    );
+    assert_eq!(
+        data.declared_work_days
+            .iter()
+            .map(|day| (day.user_id, day.date, day.minutes))
+            .collect::<Vec<_>>(),
+        vec![
+            (assistant_id, corrected_day, 240),
+            (assistant_id, original_day, -240),
+        ],
+        "the send path receives the same signed days that the document prints"
+    );
+
+    let historical_scope = payroll_report::CarriedDays {
+        since: earlier_from,
+        before: from,
+        owed_periods: Vec::new(),
+        reported_as: Some(period.clone()),
+    };
+    let historical_members =
+        payroll_report::payroll_members(&app.state, from, to, &[], false, Some(&historical_scope))
+            .await
+            .expect("load the original report's members");
+    assert!(
+        historical_members
+            .iter()
+            .any(|member| member.id == assistant_id),
+        "the declaration ledger preserves the original report's member set"
+    );
+    let historical = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from,
+            to,
+            interim: false,
+            created_on: to,
+            carried: Some(historical_scope),
+        },
+        &historical_members,
+        &config(true, false),
+        &zerf::i18n::Language::from_setting("en"),
+        None,
+    )
+    .await
+    .expect("read the original report back from its ledger");
+    assert_eq!(
+        historical
+            .hours_sections
+            .iter()
+            .flat_map(|section| section.rows.iter())
+            .map(|row| (row.work_days, row.minutes))
+            .collect::<Vec<_>>(),
+        vec![(1, 240)],
+        "moving the live row must not rewrite the report that originally paid it"
+    );
+    assert!(historical.late_entry_rows.is_empty());
+
+    let declarations: Vec<(i64, NaiveDate, i64)> = data
+        .declared_work_days
+        .iter()
+        .map(|day| (day.user_id, day.date, day.minutes))
+        .collect();
+    let carried_days: Vec<(i64, NaiveDate)> = data
+        .carried_work_days
+        .iter()
+        .map(|day| (day.user_id, day.date))
+        .collect();
+    app.state
+        .db
+        .reports
+        .record_payroll_report_delivery(
+            &reporting_period,
+            reporting_from,
+            reporting_to,
+            &[],
+            &declarations,
+            zerf::repository::PayrollCarryScope {
+                since: Some(earlier_from),
+                before: Some(reporting_from),
+                owed_periods: &[],
+                days: &carried_days,
+            },
+            &[],
+            &[],
+            &[],
+        )
+        .await
+        .expect("record both signed corrections");
+
+    let after_delivery = payroll_report::payroll_members(
+        &app.state,
+        reporting_from,
+        reporting_to,
+        &[],
+        false,
+        Some(&carried),
+    )
+    .await
+    .expect("load members after recording the correction");
+    assert!(
+        !after_delivery
+            .iter()
+            .any(|member| member.id == assistant_id),
+        "the two corrected days are settled and must not recur"
+    );
+    assert_eq!(
+        app.state
+            .db
+            .reports
+            .declared_days_for_period(&period)
+            .await
+            .expect("read the original period after recording the correction")
+            .into_iter()
+            .map(|day| (day.user_id, day.day, day.minutes))
+            .collect::<Vec<_>>(),
+        vec![(assistant_id, original_day, 240)],
+        "a later signed correction never mutates the original document ledger"
+    );
+
+    app.cleanup().await;
+}
+
+/// The ledger write is runtime-checked SQL. Exercise the parallel arrays with
+/// multiple users, dates, duplicate input pairs and a later period, then verify
+/// both per-document readback and the sum used by correction calculations.
+#[tokio::test]
+async fn payroll_declared_days_multi_array_write_groups_and_sums_by_period() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, _lead_pw, employee_id, _employee_pw, _monday, _cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "ledger-arrays").await;
+    let day_one = anchor_monday();
+    let day_two = day_one + Duration::days(1);
+
+    let inserted = app
+        .state
+        .db
+        .reports
+        .record_declared_days(
+            "2029-01",
+            &[
+                (lead_id, day_one, 120),
+                (lead_id, day_one, 30),
+                (employee_id, day_two, 240),
+            ],
+        )
+        .await
+        .expect("execute the multi-array insert");
+    assert_eq!(
+        inserted, 2,
+        "duplicate input pairs are grouped into two person-day rows"
+    );
+
+    let updated = app
+        .state
+        .db
+        .reports
+        .record_declared_days(
+            "2029-01",
+            &[(lead_id, day_one, 175), (employee_id, day_two, 200)],
+        )
+        .await
+        .expect("repeat the same period idempotently");
+    assert_eq!(updated, 2, "both existing period rows were replaced");
+    let second_period = app
+        .state
+        .db
+        .reports
+        .record_declared_days(
+            "2029-02",
+            &[(lead_id, day_one, -25), (employee_id, day_two, 40)],
+        )
+        .await
+        .expect("append declarations from another period");
+    assert_eq!(second_period, 2);
+
+    assert_eq!(
+        app.state
+            .db
+            .reports
+            .declared_days_for_period("2029-01")
+            .await
+            .expect("read one document's declarations")
+            .into_iter()
+            .map(|day| (day.user_id, day.day, day.minutes))
+            .collect::<Vec<_>>(),
+        vec![(lead_id, day_one, 175), (employee_id, day_two, 200)],
+        "same-period retries replace only that document's rows"
+    );
+    let totals = app
+        .state
+        .db
+        .reports
+        .declared_minutes_for_days(&[
+            (lead_id, day_one),
+            (employee_id, day_two),
+            (lead_id, day_one),
+        ])
+        .await
+        .expect("sum declarations for parallel person-day arrays");
+    assert_eq!(
+        totals.len(),
+        2,
+        "duplicate requested pairs are deduplicated"
+    );
+    assert_eq!(totals.get(&(lead_id, day_one)), Some(&150));
+    assert_eq!(totals.get(&(employee_id, day_two)), Some(&240));
+
+    app.cleanup().await;
+}
+
+/// Accounting uses the entry identities and versions captured before report
+/// assembly. A row added afterwards must remain unmarked even though its date
+/// lies inside the reported month, or no later report could recover it.
+#[tokio::test]
+async fn payroll_declared_days_delivery_marks_only_the_assembled_entry_snapshot() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "ledger-snapshot").await;
+    let lead = login_change_pw(&app, "lead-ledger-snapshot@example.com", &lead_pw).await;
+    let (assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "ledger-snapshot").await;
+    let assistant =
+        login_change_pw(&app, "aushilfe-ledger-snapshot@example.com", &assistant_pw).await;
+
+    let first_day = anchor_monday();
+    let second_day = first_day + Duration::days(1);
+    let (from, to) = month_bounds(first_day);
+    let period = from.format("%Y-%m").to_string();
+    let first_id = create_and_submit_entry(
+        &assistant,
+        &first_day.format("%Y-%m-%d").to_string(),
+        cat_id,
+    )
+    .await;
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [first_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve assembled entry: {body}");
+    let snapshot = app
+        .state
+        .db
+        .time_entries
+        .payroll_entry_snapshot(from, to)
+        .await
+        .expect("capture report entry snapshot");
+    let members = payroll_report::payroll_members(&app.state, from, to, &[], false, None)
+        .await
+        .expect("load assembled report members");
+    let assembled_data = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from,
+            to,
+            interim: false,
+            created_on: to,
+            carried: None,
+        },
+        &members,
+        &config(true, false),
+        &zerf::i18n::Language::from_setting("en"),
+        None,
+    )
+    .await
+    .expect("build the assembled document");
+    let assembled_content = payroll_report::reported_content_rows(&assembled_data);
+    assert_eq!(
+        assembled_content.len(),
+        1,
+        "the assembled document contains the first assistant day"
+    );
+
+    let second_id = create_and_submit_entry(
+        &assistant,
+        &second_day.format("%Y-%m-%d").to_string(),
+        cat_id,
+    )
+    .await;
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [second_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve concurrent entry: {body}");
+    app.state
+        .db
+        .payroll_queue
+        .enqueue(&period)
+        .await
+        .expect("queue period before accounting");
+    app.state
+        .db
+        .settings
+        .save_setting(
+            zerf::services::settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+            &period,
+        )
+        .await
+        .expect("record the period as having reached the queue");
+
+    app.state
+        .db
+        .reports
+        .record_payroll_report_delivery(
+            &period,
+            from,
+            to,
+            &snapshot,
+            &[(assistant_id, first_day, 240)],
+            Default::default(),
+            &[],
+            &[],
+            &assembled_content,
+        )
+        .await
+        .expect("record delivery from the assembled snapshot");
+
+    let markers: Vec<(i64, Option<String>)> = sqlx::query_as(
+        "SELECT id, payroll_reported_period FROM time_entries WHERE id = ANY($1) ORDER BY id",
+    )
+    .bind([first_id, second_id])
+    .fetch_all(&app.state.pool)
+    .await
+    .expect("read entry markers");
+    assert_eq!(
+        markers,
+        vec![(first_id, Some(period.clone())), (second_id, None)],
+        "only the unchanged row captured before assembly may be marked"
+    );
+    assert!(
+        !app.state
+            .db
+            .payroll_queue
+            .list_pending()
+            .await
+            .expect("read settled queue")
+            .contains(&period),
+        "ledger, markers, and queue settlement commit together"
+    );
+
+    for (key, value) in [
+        (
+            zerf::services::settings::PAYROLL_REPORT_ENABLED_KEY,
+            "true".to_string(),
+        ),
+        (
+            zerf::services::settings::PAYROLL_REPORT_ASSISTANT_HOURS_KEY,
+            "false".to_string(),
+        ),
+        (
+            zerf::services::settings::PAYROLL_REPORT_EXCLUDED_USERS_KEY,
+            assistant_id.to_string(),
+        ),
+    ] {
+        app.state
+            .db
+            .settings
+            .save_setting(key, &value)
+            .await
+            .expect("change current payroll settings");
+    }
+    let (status, historical) = admin.get("/api/v1/reports/payroll-content").await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "load delivered content: {historical}"
+    );
+    assert_eq!(historical["sent"], true);
+    assert_eq!(
+        historical["minutes"], 240,
+        "later settings and exclusions must not rewrite the delivered document"
+    );
+    assert_eq!(
+        historical["rows"].as_array().map(Vec::len),
+        Some(1),
+        "the delivered card reads its exact stored row set"
+    );
+
+    app.cleanup().await;
+}
+
+/// A failure in the final content-snapshot write must roll back the earlier
+/// period marker, day declarations, live-row markers, and queue deletion. The
+/// next scheduler pass then retries a complete report instead of continuing
+/// from a partially accounted state.
+#[tokio::test]
+async fn payroll_delivery_accounting_is_atomic() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, _employee_id, _employee_pw, _monday, category_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "ledger-atomic").await;
+    let lead = login_change_pw(&app, "lead-ledger-atomic@example.com", &lead_pw).await;
+    let (assistant_id, assistant_password) =
+        create_assistant(&admin, lead_id, "ledger-atomic").await;
+    let assistant = login_change_pw(
+        &app,
+        "aushilfe-ledger-atomic@example.com",
+        &assistant_password,
+    )
+    .await;
+
+    let worked_day = anchor_monday();
+    let (from, to) = month_bounds(worked_day);
+    let period = from.format("%Y-%m").to_string();
+    let entry_id = create_and_submit_entry(
+        &assistant,
+        &worked_day.format("%Y-%m-%d").to_string(),
+        category_id,
+    )
+    .await;
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [entry_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve reported shift: {body}");
+    let snapshot = app
+        .state
+        .db
+        .time_entries
+        .payroll_entry_snapshot(from, to)
+        .await
+        .expect("snapshot reported shift");
+    app.state
+        .db
+        .payroll_queue
+        .enqueue(&period)
+        .await
+        .expect("queue period");
+
+    let invalid_content = zerf::repository::PayrollReportedContentRow {
+        user_id: assistant_id,
+        employee: "Atomic, Alex".to_string(),
+        kind: "invalid".to_string(),
+        category: None,
+        from_date: None,
+        to_date: None,
+        days: 1.0,
+        minutes: Some(240),
+        medical_certificate_required: None,
+    };
+    let result = app
+        .state
+        .db
+        .reports
+        .record_payroll_report_delivery(
+            &period,
+            from,
+            to,
+            &snapshot,
+            &[(assistant_id, worked_day, 240)],
+            Default::default(),
+            &[],
+            &[],
+            &[invalid_content],
+        )
+        .await;
+    assert!(
+        result.is_err(),
+        "the database kind constraint must reject invalid rendered content"
+    );
+    assert!(
+        !app
+            .state
+            .db
+            .reports
+            .payroll_period_accounted(&period)
+            .await
+            .expect("check period marker after rollback"),
+        "the period-level marker must roll back"
+    );
+    assert!(
+        app.state
+            .db
+            .reports
+            .declared_days_for_period(&period)
+            .await
+            .expect("check declarations after rollback")
+            .is_empty(),
+        "day declarations must roll back"
+    );
+    let entry_marker: Option<String> =
+        sqlx::query_scalar("SELECT payroll_reported_period FROM time_entries WHERE id=$1")
+            .bind(entry_id)
+            .fetch_one(&app.state.pool)
+            .await
+            .expect("check entry marker after rollback");
+    assert_eq!(
+        entry_marker, None,
+        "the live entry marker must roll back with the ledger"
+    );
+    assert!(
+        app.state
+            .db
+            .payroll_queue
+            .list_pending()
+            .await
+            .expect("check queue after rollback")
+            .contains(&period),
+        "the failed accounting transaction must leave the period queued"
+    );
+    assert!(
+        app.state
+            .db
+            .reports
+            .payroll_reported_content(&period)
+            .await
+            .expect("check rendered content after rollback")
+            .is_empty(),
+        "no partial content snapshot may survive"
+    );
+
+    app.cleanup().await;
+}
+
+/// Reopening a reported day is not itself a deletion. Corrections wait while
+/// any older entry for that person is unsettled, then compare the final whole
+/// day even when a surviving shift still carries its original row marker.
+#[tokio::test]
+async fn payroll_declared_days_partial_deletion_waits_for_the_reopen_to_settle() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "ledger-delete").await;
+    let lead = login_change_pw(&app, "lead-ledger-delete@example.com", &lead_pw).await;
+    let (assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "ledger-delete").await;
+    let assistant =
+        login_change_pw(&app, "aushilfe-ledger-delete@example.com", &assistant_pw).await;
+
+    let worked_day = anchor_monday();
+    let (from, to) = month_bounds(worked_day);
+    let period = from.format("%Y-%m").to_string();
+    let mut entry_ids = Vec::new();
+    for (start, end) in [("08:00", "10:00"), ("10:00", "12:00")] {
+        let (status, body) = assistant
+            .post(
+                "/api/v1/time-entries",
+                &json!({
+                    "entry_date": worked_day.format("%Y-%m-%d").to_string(),
+                    "start_time": start,
+                    "end_time": end,
+                    "category_id": cat_id,
+                    "comment": "reported split shift"
+                }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "create reported shift: {body}");
+        entry_ids.push(id(&body));
+    }
+    let (status, body) = assistant
+        .post("/api/v1/time-entries/submit", &json!({"ids": entry_ids}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "submit reported shifts: {body}");
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": entry_ids}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve reported shifts: {body}");
+    let snapshot = app
+        .state
+        .db
+        .time_entries
+        .payroll_entry_snapshot(from, to)
+        .await
+        .expect("snapshot reported shifts");
+    app.state
+        .db
+        .reports
+        .record_payroll_report_delivery(
+            &period,
+            from,
+            to,
+            &snapshot,
+            &[(assistant_id, worked_day, 240)],
+            Default::default(),
+            &[],
+            &[],
+            &[],
+        )
+        .await
+        .expect("record split day report");
+
+    let (status, body) = assistant
+        .post(
+            "/api/v1/reopen-requests",
+            &json!({
+                "week_start": worked_day.format("%Y-%m-%d").to_string(),
+                "reason": "remove duplicate shift"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "request reopen: {body}");
+    let reopen_id = id(&body);
+    let (status, body) = lead
+        .post(
+            &format!("/api/v1/reopen-requests/{reopen_id}/approve"),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve reopen: {body}");
+    let removed_id = entry_ids[1];
+    let (status, body) = assistant
+        .delete(&format!("/api/v1/time-entries/{removed_id}"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "delete duplicate shift: {body}");
+
+    let next_from = to + Duration::days(1);
+    let (_next_start, next_to) = month_bounds(next_from);
+    let carried = payroll_report::CarriedDays {
+        since: from,
+        before: next_from,
+        owed_periods: Vec::new(),
+        reported_as: None,
+    };
+    let assistant_member = app
+        .state
+        .db
+        .users
+        .find_by_id(assistant_id)
+        .await
+        .expect("load assistant")
+        .expect("assistant exists");
+    let report_config = config(true, false);
+    let language = zerf::i18n::Language::from_setting("en");
+    let build = || {
+        payroll_report::build_report_data(
+            &app.state,
+            payroll_report::ReportWindow {
+                from: next_from,
+                to: next_to,
+                interim: false,
+                created_on: next_to,
+                carried: Some(carried.clone()),
+            },
+            std::slice::from_ref(&assistant_member),
+            &report_config,
+            &language,
+            None,
+        )
+    };
+    let unsettled = build().await.expect("build while reopen is unfinished");
+    assert!(
+        unsettled.late_entry_rows.is_empty(),
+        "a draft survivor must not make the reported day look deleted"
+    );
+
+    let surviving_id = entry_ids[0];
+    let (status, body) = assistant
+        .post(
+            "/api/v1/time-entries/submit",
+            &json!({"ids": [surviving_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "resubmit surviving shift: {body}");
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [surviving_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve surviving shift: {body}");
+
+    let settled = build().await.expect("build after reopen settles");
+    assert_eq!(settled.late_entry_rows.len(), 1);
+    assert_eq!(settled.late_entry_rows[0].date, worked_day);
+    assert_eq!(
+        settled.late_entry_rows[0].minutes, -120,
+        "the remaining marked shift is compared with the full 240 minutes already declared"
+    );
+
+    app.cleanup().await;
+}
+
+/// A day without a declaration row stays on the legacy entry-marker fallback,
+/// even when its own month was settled after the ledger migration. Once a late
+/// shift on such a mixed day has been carried, editing it inside the same month
+/// must not clear its marker and pay the entire edited shift again.
+#[tokio::test]
+async fn payroll_no_ledger_fallback_edit_does_not_repeat_a_carried_shift() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, _employee_id, _employee_pw, _monday, category_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "ledger-fallback-edit").await;
+    let lead = login_change_pw(&app, "lead-ledger-fallback-edit@example.com", &lead_pw).await;
+    let (assistant_id, assistant_password) =
+        create_assistant(&admin, lead_id, "ledger-fallback-edit").await;
+    let assistant = login_change_pw(
+        &app,
+        "aushilfe-ledger-fallback-edit@example.com",
+        &assistant_password,
+    )
+    .await;
+
+    let worked_day = anchor_monday();
+    let (from, to) = month_bounds(worked_day);
+    let period = from.format("%Y-%m").to_string();
+    let original = create_and_submit_entry(
+        &assistant,
+        &worked_day.format("%Y-%m-%d").to_string(),
+        category_id,
+    )
+    .await;
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [original]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve original shift: {body}");
+
+    let original_snapshot = app
+        .state
+        .db
+        .time_entries
+        .payroll_entry_snapshot(from, to)
+        .await
+        .expect("snapshot original month");
+    app.state
+        .db
+        .reports
+        .record_payroll_report_delivery(
+            &period,
+            from,
+            to,
+            &original_snapshot,
+            &[],
+            Default::default(),
+            &[],
+            &[],
+            &[],
+        )
+        .await
+        .expect("settle original month without a day declaration");
+
+    let (status, body) = assistant
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": worked_day.format("%Y-%m-%d").to_string(),
+                "start_time": "12:00",
+                "end_time": "14:00",
+                "category_id": category_id,
+                "comment": "late fallback shift"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create fallback shift: {body}");
+    let fallback_entry = id(&body);
+    let (status, body) = assistant
+        .post(
+            "/api/v1/time-entries/submit",
+            &json!({"ids": [fallback_entry]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "submit fallback shift: {body}");
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [fallback_entry]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve fallback shift: {body}");
+
+    let reporting_from = to + Duration::days(1);
+    let (_, reporting_to) = month_bounds(reporting_from);
+    let reporting_period = reporting_from.format("%Y-%m").to_string();
+    let carried = payroll_report::CarriedDays {
+        since: from,
+        before: reporting_from,
+        owed_periods: Vec::new(),
+        reported_as: None,
+    };
+    let assistant_member = app
+        .state
+        .db
+        .users
+        .find_by_id(assistant_id)
+        .await
+        .expect("load assistant")
+        .expect("assistant exists");
+    let data = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from: reporting_from,
+            to: reporting_to,
+            interim: false,
+            created_on: reporting_to,
+            carried: Some(carried.clone()),
+        },
+        std::slice::from_ref(&assistant_member),
+        &config(true, false),
+        &zerf::i18n::Language::from_setting("en"),
+        None,
+    )
+    .await
+    .expect("build fallback correction report");
+    assert_eq!(
+        data.late_entry_rows
+            .iter()
+            .map(|row| (row.date, row.minutes))
+            .collect::<Vec<_>>(),
+        vec![(worked_day, 120)],
+        "only the new unmarked shift is carried on a mixed no-ledger day"
+    );
+    assert!(
+        data.declared_work_days.is_empty(),
+        "an unknowable historical baseline must not be converted into a partial ledger baseline"
+    );
+
+    let carried_days: Vec<(i64, NaiveDate)> = data
+        .carried_work_days
+        .iter()
+        .map(|day| (day.user_id, day.date))
+        .collect();
+    app.state
+        .db
+        .reports
+        .record_payroll_report_delivery(
+            &reporting_period,
+            reporting_from,
+            reporting_to,
+            &[],
+            &[],
+            zerf::repository::PayrollCarryScope {
+                since: Some(from),
+                before: Some(reporting_from),
+                owed_periods: &[],
+                days: &carried_days,
+            },
+            &[],
+            &[],
+            &[],
+        )
+        .await
+        .expect("mark the fallback shift as carried");
+
+    let (status, body) = admin
+        .put(
+            &format!("/api/v1/time-entries/{fallback_entry}"),
+            &json!({
+                "entry_date": worked_day.format("%Y-%m-%d").to_string(),
+                "start_time": "12:00",
+                "end_time": "15:00",
+                "category_id": category_id,
+                "comment": "edited legacy fallback"
+            }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "edit carried fallback shift: {body}"
+    );
+
+    let marker: Option<String> =
+        sqlx::query_scalar("SELECT payroll_reported_period FROM time_entries WHERE id=$1")
+            .bind(fallback_entry)
+            .fetch_one(&app.state.pool)
+            .await
+            .expect("read fallback marker");
+    assert_eq!(
+        marker,
+        Some(reporting_period),
+        "a same-month edit cannot clear a no-ledger fallback marker"
+    );
+
+    let next_from = reporting_to + Duration::days(1);
+    let (_, next_to) = month_bounds(next_from);
+    let after_edit = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from: next_from,
+            to: next_to,
+            interim: false,
+            created_on: next_to,
+            carried: Some(payroll_report::CarriedDays {
+                since: from,
+                before: next_from,
+                owed_periods: Vec::new(),
+                reported_as: None,
+            }),
+        },
+        std::slice::from_ref(&assistant_member),
+        &config(true, false),
+        &zerf::i18n::Language::from_setting("en"),
+        None,
+    )
+    .await
+    .expect("build report after fallback edit");
+    assert!(
+        after_edit.late_entry_rows.is_empty(),
+        "the edited fallback shift must not be paid again in full"
+    );
+
+    app.cleanup().await;
+}
+
+/// Delivery accounting must mark the absence ids captured by the assembled
+/// document, not every currently matching absence from a second broad query.
+#[tokio::test]
+async fn payroll_delivery_marks_only_the_absences_in_the_assembled_document() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, _lead_pw, employee_id, _employee_pw, _monday, _category_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "ledger-absence-snapshot").await;
+
+    let first_day = anchor_monday();
+    let second_day = first_day + Duration::days(1);
+    let (from, to) = month_bounds(first_day);
+    let period = from.format("%Y-%m").to_string();
+    let sick = absence_cat(&app.state.pool, "sick").await;
+    let assembled = app
+        .state
+        .db
+        .absences
+        .create(
+            employee_id,
+            sick.id,
+            true,
+            first_day,
+            first_day,
+            None,
+            "approved",
+        )
+        .await
+        .expect("create absence included in the document");
+    let concurrent = app
+        .state
+        .db
+        .absences
+        .create(
+            employee_id,
+            sick.id,
+            true,
+            second_day,
+            second_day,
+            None,
+            "approved",
+        )
+        .await
+        .expect("create absence after document assembly");
+
+    app.state
+        .db
+        .reports
+        .record_payroll_report_delivery(
+            &period,
+            from,
+            to,
+            &[],
+            &[],
+            Default::default(),
+            &[assembled.id],
+            &[],
+            &[],
+        )
+        .await
+        .expect("record the assembled report");
+
+    let markers: Vec<(i64, Option<String>)> = sqlx::query_as(
+        "SELECT id, payroll_reported_period FROM absences WHERE id = ANY($1) ORDER BY id",
+    )
+    .bind([assembled.id, concurrent.id])
+    .fetch_all(&app.state.pool)
+    .await
+    .expect("read absence markers");
+    assert_eq!(
+        markers,
+        vec![(assembled.id, Some(period)), (concurrent.id, None),],
+        "only the absence that produced a document row may be marked"
+    );
+
+    app.cleanup().await;
+}
+
+/// Reproduces a reported dashboard bug: on the first days of a new month, the
+/// Submissions tile showed a person as fully "Done" for the just-finished
+/// month even though the week straddling the boundary — whose Monday belongs
+/// to that month — had nothing booked at all.
+///
+/// The straddling week counts for the finished month via its one in-month
+/// day (`weeks_in_month_to_judge`: "a week belongs to a month as soon as any
+/// of its days do"), and that day must itself carry a submitted/approved
+/// status or be excused, or the week — and so the month — is not accounted
+/// for. Only the fully-elapsed prior week is handled here; nothing is booked
+/// for the straddling week itself.
+#[tokio::test]
+async fn submissions_tile_requires_the_straddling_weeks_in_month_day_too() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, emp_id, emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "straddle-submissions").await;
+    let lead = login_change_pw(&app, "lead-straddle-submissions@example.com", &lead_pw).await;
+    let employee = login_change_pw(&app, "emp-straddle-submissions@example.com", &emp_pw).await;
+    assert_ne!(lead_id, emp_id);
+
+    // The last fully-elapsed week before the straddling one. A single
+    // submitted+approved day is enough to carry this whole week.
+    let prior_week_monday = next_monday(-14);
+    // The straddling week's Monday: the only day of that week belonging to
+    // the finished month being judged. Both Mondays must land in the same
+    // month, or this test would not exercise the straddle at all.
+    let straddling_monday = next_monday(-7);
+    assert_eq!(
+        straddling_monday.month(),
+        prior_week_monday.month(),
+        "the reference date must place both weeks in one month"
+    );
+    let entry_id =
+        create_and_submit_entry(&employee, &prior_week_monday.format("%Y-%m-%d").to_string(), cat_id)
+            .await;
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [entry_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the prior week's day: {body}");
+
+    // The straddling week's Monday is left completely untouched: no entry,
+    // no absence.
+    let (status, card) = admin.get("/api/v1/reports/submission-status").await;
+    assert_eq!(status, StatusCode::OK, "fetch submission status: {card}");
+    let members = card["members"].as_array().expect("members");
+    let member = members
+        .iter()
+        .find(|member| member["user_id"].as_i64() == Some(emp_id))
+        .unwrap_or_else(|| panic!("employee missing from submission status: {card}"));
+    assert_ne!(
+        member["status"], "ready",
+        "the straddling week's unbooked in-month day must keep the month open: {card}"
     );
 
     app.cleanup().await;

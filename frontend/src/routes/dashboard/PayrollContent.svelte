@@ -16,6 +16,7 @@
   // history, not something anybody still has to act on.
   $: done = !!content?.sent;
   $: hasRows = (content?.rows?.length ?? 0) > 0;
+  $: hasHourRows = (content?.rows ?? []).some((row) => row.minutes != null);
 </script>
 
 <div class="zf-card payroll-card" class:is-dimmed={done}>
@@ -49,7 +50,7 @@
       </div>
       <div class="payroll-sub">
         {content?.period_label ?? ""}
-        {#if (content?.minutes ?? 0) > 0}
+        {#if hasHourRows}
           · {minToHM(content?.minutes ?? 0)}
         {/if}
         {#if content?.in_progress}

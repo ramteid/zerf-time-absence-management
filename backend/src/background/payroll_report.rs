@@ -32,8 +32,10 @@
 use crate::background::schedule;
 use crate::error::{AppError, AppResult};
 use crate::i18n::Language;
-use crate::report_pdf::{PayrollOmittedPerson, ProvisionalNotice};
-use crate::repository::User;
+use crate::report_pdf::{
+    PayrollCarriedWorkDay, PayrollDeclaredWorkDay, PayrollOmittedPerson, ProvisionalNotice,
+};
+use crate::repository::{PayrollEntrySnapshot, PayrollReportedContentRow, User};
 use crate::services::payroll_report::{self, PayrollReportConfig};
 use crate::services::settings;
 use crate::AppState;
@@ -393,16 +395,24 @@ async fn process_period(
     } else {
         month_end
     };
+    let period_entries = if mode == SendMode::Scheduled {
+        state
+            .db
+            .time_entries
+            .payroll_entry_snapshot(from, month_end)
+            .await?
+    } else {
+        Vec::new()
+    };
     // Start with the same period-aware member set as the timesheet export,
     // then remove admins, explicitly excluded people, and assistants without
     // any recorded hours in this month. A snapshot of the running month drops
     // everyone who has not booked yet, not just assistants — see
     // [`payroll_report::payroll_members`].
-    // Days booked after their own month's report went out are carried by this
-    // one, so whoever holds such a day belongs to the member set even when they
-    // did nothing in this period. `carry_over_boundary` already asks what a
-    // report produced now would still have to carry, never what an earlier
-    // one already did.
+    // Working-time corrections to already-reported months are carried by this
+    // one, so whoever has a nonzero correction belongs to the member set even
+    // when they did nothing in this period. `carry_over_boundary` asks what a
+    // report produced now would still have to declare.
     let carried = payroll_report::carry_over_boundary(&state.pool, from).await?;
     let members = payroll_report::payroll_members(
         state,
@@ -475,18 +485,18 @@ async fn process_period(
                     // later report.
                     // Nothing was printed, so no older day was carried: only
                     // this month's own entries may be marked.
-                    if mark_reported_entries(
+                    mark_reported_entries(
                         state,
                         period,
                         from,
                         month_end,
                         carried.as_ref(),
-                        ReportedScope::default(),
+                        ReportedScope {
+                            period_entries: &period_entries,
+                            ..ReportedScope::default()
+                        },
                     )
-                    .await
-                    {
-                        state.db.payroll_queue.delete_entry(period).await?;
-                    }
+                    .await;
                 }
                 tracing::info!("Payroll report: period {period} covers nobody; nothing to send");
                 return Ok(SendOutcome::Skipped(SkipReason::CoversNobody));
@@ -547,6 +557,7 @@ async fn process_period(
         provisional,
     )
     .await?;
+    let reported_content_rows = payroll_report::reported_content_rows(&data);
 
     // Being covered by the report is not the same as appearing in it: only
     // approved entries and approved absences produce rows. A document with
@@ -569,26 +580,29 @@ async fn process_period(
         // out. That is the same trade the covers-nobody branch already makes,
         // and it is the honest half of the choice — the alternative is a month
         // that stays outstanding on the tile and is retried every night for
-        // ever, for a report that will never have anything in it. A plain
-        // delete (not the post-send retry helper) is right here: nothing was
-        // sent, so a failed delete costs one wasted retry tomorrow rather than
-        // risking a second copy reaching the tax office.
+        // ever, for a report that will never have anything in it. The same
+        // accounting transaction used after a send settles this branch too,
+        // keeping the period marker, row markers, and queue state together.
         if !mode.is_manual() {
             // Same as the covers-nobody branch: a period that will never be
             // sent is still done with, and its entries must not resurface as
             // catch-up days next month.
-            if mark_reported_entries(
+            mark_reported_entries(
                 state,
                 period,
                 from,
                 month_end,
                 carried.as_ref(),
-                ReportedScope::default(),
+                ReportedScope {
+                    declared_work_days: &data.declared_work_days,
+                    carried_work_days: &data.carried_work_days,
+                    period_entries: &period_entries,
+                    reported_absence_ids: &data.reported_absence_ids,
+                    carried_absence_ids: &data.late_absence_ids,
+                    content_rows: &reported_content_rows,
+                },
             )
-            .await
-            {
-                state.db.payroll_queue.delete_entry(period).await?;
-            }
+            .await;
         }
         tracing::info!("Payroll report: period {period} has nothing to report; nothing sent");
         return Ok(SendOutcome::Skipped(reason));
@@ -671,55 +685,30 @@ async fn process_period(
             config.recipients.join(", ")
         );
     } else {
-        // Only drop the period once the SMTP server accepted the message.
-        // Removing it is also what tells the dashboard card the month is
-        // done. The email is already gone at this point — a bare delete
-        // that gives up after one transient DB hiccup would leave the
-        // period looking un-sent and cause the whole report to go out to
-        // the tax office / payroll accountant a second time tomorrow, so
-        // retry the (idempotent) delete a few times before accepting that
-        // risk.
-        // Record what this report accounted for before the period leaves the
-        // queue, so the two agree even if the delete below has to be retried.
-        // Marking is what stops the catch-up days above from being printed
-        // again next month; failing to mark costs a duplicated line there,
-        // which is why it is only logged and never fails an already-sent
-        // report.
-        // Only the people whose hours this document actually printed may have
-        // an older day marked as carried. Marking anybody else's would claim a
-        // report accounted for hours it never showed — and would make a genuine
-        // late booking uncatchable if the setting that prints them is ever
-        // switched on.
-        let carried_user_ids: Vec<i64> = included
-            .iter()
-            .filter(|member| config.includes_hours_for(&member.role))
-            .map(|member| member.id)
-            .collect();
-        // Absences follow the document's own rule instead: it prints them for
-        // everybody except assistants, whatever the hours settings say.
-        let absence_user_ids: Vec<i64> = included
-            .iter()
-            .filter(|member| !crate::roles::is_assistant_role(&member.role))
-            .map(|member| member.id)
-            .collect();
-        if mark_reported_entries(
+        // Record exactly what this document declared and remove the period
+        // from the queue in one transaction, so the ledger and live-row
+        // markers cannot drift apart. Failing to record it leaves the whole
+        // transaction rolled back and the period queued: a recognisable
+        // duplicate of this month is safer than silently carrying the same
+        // correction into a later month where it could be paid twice.
+        mark_reported_entries(
             state,
             period,
             from,
             month_end,
             carried.as_ref(),
             ReportedScope {
-                hours_user_ids: &carried_user_ids,
-                absence_user_ids: &absence_user_ids,
+                declared_work_days: &data.declared_work_days,
+                carried_work_days: &data.carried_work_days,
+                period_entries: &period_entries,
+                reported_absence_ids: &data.reported_absence_ids,
                 // Exactly the catch-up absences this document declared, taken
                 // off the assembled report rather than asked for a second time.
                 carried_absence_ids: &data.late_absence_ids,
+                content_rows: &reported_content_rows,
             },
         )
-        .await
-        {
-            delete_payroll_period_with_retry(state, period).await?;
-        }
+        .await;
         tracing::info!(
             "Payroll report: sent period {period} to {}",
             config.recipients.join(", ")
@@ -728,37 +717,28 @@ async fn process_period(
     Ok(SendOutcome::Sent)
 }
 
-/// Mark every time entry this period's report accounted for.
+/// What one report actually declared, as the accounting step needs it.
 ///
-/// Retried like the queue delete and for the same reason: the email is already
-/// gone, and an unmarked entry would show up as a late booking in next month's
-/// report even though the tax office has it. Returns whether it succeeded, and
-/// the caller leaves the period queued if it did not: a duplicate copy of the
-/// same month is something the recipient can recognise, whereas the same hours
-/// appearing again a month later under an older date reads like new work and
-/// could be paid twice.
-///
-/// This cannot loop for long. Reaching this point means dozens of queries
-/// building the report already succeeded, so a failure here is a momentary one;
-/// the next run re-sends the identical document and settles the period.
-/// What one report actually accounted for, as the marking step needs it.
-///
-/// Three separate lists rather than one, because the document treats the three
-/// differently and a mark claiming more than was printed is how days get lost.
-/// All-empty is the settle-without-sending case: the period is done with, but
-/// nothing outside it was declared.
+/// Separate lists preserve each rendered data set exactly; a mark claiming
+/// more than was printed is how days get lost. All-empty is the
+/// settle-without-sending case: the period is done with, but nothing outside it
+/// was declared.
 #[derive(Default)]
 struct ReportedScope<'a> {
-    /// People whose working hours the document printed. Only their older days
-    /// may be marked as carried — marking anybody else's would claim a report
-    /// accounted for hours it never showed.
-    hours_user_ids: &'a [i64],
-    /// People whose absences the document prints: everybody but assistants,
-    /// whatever the hours settings say.
-    absence_user_ids: &'a [i64],
+    /// Exact signed person-day values carried on the assembled document.
+    declared_work_days: &'a [PayrollDeclaredWorkDay],
+    /// Exact older person-days printed, including legacy fallback rows that
+    /// deliberately have no new declaration-ledger entry.
+    carried_work_days: &'a [PayrollCarriedWorkDay],
+    /// Entry rows and versions present before this report was assembled.
+    period_entries: &'a [PayrollEntrySnapshot],
+    /// Exact regular absences printed in the assembled document.
+    reported_absence_ids: &'a [i64],
     /// The catch-up absences the assembled document declared, straight off the
     /// document itself.
     carried_absence_ids: &'a [i64],
+    /// Exact rendered rows used to read this delivered document back later.
+    content_rows: &'a [PayrollReportedContentRow],
 }
 
 async fn mark_reported_entries(
@@ -768,109 +748,74 @@ async fn mark_reported_entries(
     period_end: NaiveDate,
     carried: Option<&payroll_report::CarriedDays>,
     scope: ReportedScope<'_>,
-) -> bool {
+) {
     let ReportedScope {
-        hours_user_ids,
-        absence_user_ids,
+        declared_work_days,
+        carried_work_days,
+        period_entries,
+        reported_absence_ids,
         carried_absence_ids,
+        content_rows,
     } = scope;
-    // Absences first: they use their own marker with its own rule (the *first*
-    // report that showed any part of an absence), and a failure here must stop
-    // the period being settled just as an entry-marking failure does.
-    for attempt in 1..=DELETE_RETRY_ATTEMPTS {
+    let declarations: Vec<(i64, NaiveDate, i64)> = declared_work_days
+        .iter()
+        .map(|day| (day.user_id, day.date, day.minutes))
+        .collect();
+    let carried_days: Vec<(i64, NaiveDate)> = carried_work_days
+        .iter()
+        .map(|day| (day.user_id, day.date))
+        .collect();
+
+    for attempt in 1..=ACCOUNTING_RETRY_ATTEMPTS {
         match state
             .db
             .reports
-            .mark_payroll_reported_absences(
+            .record_payroll_report_delivery(
                 period,
                 period_start,
                 period_end,
-                absence_user_ids,
-                carried_absence_ids,
-            )
-            .await
-        {
-            Ok(marked) => {
-                tracing::debug!(
-                    "Payroll report: marked {marked} absences as reported for {period}"
-                );
-                break;
-            }
-            Err(e) if attempt < DELETE_RETRY_ATTEMPTS => {
-                tracing::warn!(
-                    "Payroll report: marking absences for {period} failed (attempt {attempt}): {e}"
-                );
-                tokio::time::sleep(DELETE_RETRY_DELAY).await;
-            }
-            Err(e) => {
-                tracing::error!(
-                    "Payroll report: could not mark absences for {period}: {e}. \
-                     The period stays queued so nothing is silently declared twice."
-                );
-                return false;
-            }
-        }
-    }
-    for attempt in 1..=DELETE_RETRY_ATTEMPTS {
-        match state
-            .db
-            .time_entries
-            .mark_payroll_reported(
-                period,
-                period_start,
-                period_end,
+                period_entries,
+                &declarations,
                 crate::repository::PayrollCarryScope {
                     since: carried.map(|c| c.since),
                     before: carried.map(|c| c.before),
                     owed_periods: carried.map(|c| c.owed_periods.as_slice()).unwrap_or(&[]),
-                    user_ids: hours_user_ids,
+                    days: &carried_days,
                 },
+                reported_absence_ids,
+                carried_absence_ids,
+                content_rows,
             )
             .await
         {
-            Ok(marked) => {
+            Ok((declared, absences, entries, content)) => {
                 tracing::debug!(
-                    "Payroll report: marked {marked} time entries as reported for {period}"
+                    "Payroll report: recorded {declared} declared days and {content} content rows, marked {absences} absences and {entries} time entries for {period}"
                 );
-                return true;
+                return;
             }
-            Err(e) if attempt < DELETE_RETRY_ATTEMPTS => {
+            Err(e) if attempt < ACCOUNTING_RETRY_ATTEMPTS => {
                 tracing::warn!(
-                    "Payroll report: marking period {period} failed (attempt {attempt}): {e}"
+                    "Payroll report: recording period {period} failed (attempt {attempt}): {e}"
                 );
-                tokio::time::sleep(DELETE_RETRY_DELAY).await;
+                tokio::time::sleep(ACCOUNTING_RETRY_DELAY).await;
             }
             Err(e) => tracing::error!(
-                "Payroll report: could not mark period {period} as reported: {e}. \
+                "Payroll report: could not record period {period} as reported: {e}. \
                  The period stays queued so nothing is silently paid twice."
             ),
         }
     }
-    false
 }
 
-/// Delay between delete attempts. Short: this only needs to ride out a
+/// Delay between accounting attempts. Short: this only needs to ride out a
 /// momentary DB hiccup, not a real outage.
-const DELETE_RETRY_DELAY: Duration = Duration::from_secs(1);
+const ACCOUNTING_RETRY_DELAY: Duration = Duration::from_secs(1);
 
-/// Number of delete attempts before giving up and accepting the period will
-/// be reported again on the next run.
-const DELETE_RETRY_ATTEMPTS: u32 = 3;
-
-/// Retry `payroll_queue.delete_entry` a few times. The DELETE is idempotent
-/// (removing an already-gone period is a harmless no-op), so retrying is
-/// always safe and never risks double-deleting — it only closes the window
-/// in which a transient DB failure would otherwise leave an already-sent
-/// period looking outstanding.
-async fn delete_payroll_period_with_retry(state: &AppState, period: &str) -> AppResult<()> {
-    for _ in 1..DELETE_RETRY_ATTEMPTS {
-        if state.db.payroll_queue.delete_entry(period).await.is_ok() {
-            return Ok(());
-        }
-        tokio::time::sleep(DELETE_RETRY_DELAY).await;
-    }
-    state.db.payroll_queue.delete_entry(period).await
-}
+/// Number of accounting attempts before the period is left queued for a later
+/// retry. The transaction includes queue settlement, so partial accounting can
+/// never be mistaken for a completed delivery.
+const ACCOUNTING_RETRY_ATTEMPTS: u32 = 3;
 
 /// Subject and body of the payroll report email.
 ///
