@@ -6165,3 +6165,541 @@ async fn submissions_tile_requires_the_straddling_weeks_in_month_day_too() {
 
     app.cleanup().await;
 }
+
+/// Two corrections to the same day in successive reports must each declare
+/// only their own increment.
+///
+/// The baseline for a day is the *sum* of every declaration ever made for it,
+/// not the most recent one. Reading only the latest row would make the second
+/// correction re-declare everything the first one already added, paying the
+/// same minutes twice.
+#[tokio::test]
+async fn payroll_declared_days_successive_corrections_accumulate_the_baseline() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "ledger-twice").await;
+    let lead = login_change_pw(&app, "lead-ledger-twice@example.com", &lead_pw).await;
+    let (assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "ledger-twice").await;
+    let assistant = login_change_pw(&app, "aushilfe-ledger-twice@example.com", &assistant_pw).await;
+    let language = zerf::i18n::Language::from_setting("en");
+
+    let worked_day = anchor_monday();
+    let worked_iso = worked_day.format("%Y-%m-%d").to_string();
+    let (from, to) = month_bounds(worked_day);
+    let period = from.format("%Y-%m").to_string();
+
+    // The day as its own month's report declared it: 08:00-12:00.
+    let first_shift = create_and_submit_entry(&assistant, &worked_iso, cat_id).await;
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [first_shift]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the first shift: {body}");
+    let period_entries = app
+        .state
+        .db
+        .time_entries
+        .payroll_entry_snapshot(from, to)
+        .await
+        .expect("snapshot the reported month");
+    app.state
+        .db
+        .reports
+        .record_payroll_report_delivery(
+            &period,
+            from,
+            to,
+            &period_entries,
+            &[(assistant_id, worked_day, 240)],
+            Default::default(),
+            &[],
+            &[],
+            &[],
+        )
+        .await
+        .expect("record the original report");
+
+    let add_shift = |start: &'static str, end: &'static str| {
+        let assistant = &assistant;
+        let lead = &lead;
+        let worked_iso = worked_iso.clone();
+        async move {
+            let (status, body) = assistant
+                .post(
+                    "/api/v1/time-entries",
+                    &json!({
+                        "entry_date": worked_iso,
+                        "start_time": start,
+                        "end_time": end,
+                        "category_id": cat_id,
+                        "comment": "late shift"
+                    }),
+                )
+                .await;
+            assert_eq!(status, StatusCode::OK, "create late shift: {body}");
+            let entry_id = id(&body);
+            let (status, body) = assistant
+                .post("/api/v1/time-entries/submit", &json!({"ids": [entry_id]}))
+                .await;
+            assert_eq!(status, StatusCode::OK, "submit late shift: {body}");
+            let (status, body) = lead
+                .post(
+                    "/api/v1/time-entries/batch-approve",
+                    &json!({"ids": [entry_id]}),
+                )
+                .await;
+            assert_eq!(status, StatusCode::OK, "approve late shift: {body}");
+        }
+    };
+
+    // Each correcting report covers the month after the one before it, so the
+    // two declarations land under different periods and must be summed.
+    let correct = |report_from: NaiveDate, report_to: NaiveDate| {
+        let app = &app;
+        let language = &language;
+        async move {
+            let carried = payroll_report::CarriedDays {
+                since: from,
+                before: report_from,
+                owed_periods: Vec::new(),
+                reported_as: None,
+            };
+            let members = payroll_report::payroll_members(
+                &app.state,
+                report_from,
+                report_to,
+                &[],
+                false,
+                Some(&carried),
+            )
+            .await
+            .expect("members of the correcting report");
+            let data = payroll_report::build_report_data(
+                &app.state,
+                payroll_report::ReportWindow {
+                    from: report_from,
+                    to: report_to,
+                    interim: false,
+                    created_on: report_to,
+                    carried: Some(carried.clone()),
+                },
+                &members,
+                &config(true, false),
+                language,
+                None,
+            )
+            .await
+            .expect("build the correcting report");
+            let declared: Vec<(i64, NaiveDate, i64)> = data
+                .declared_work_days
+                .iter()
+                .map(|day| (day.user_id, day.date, day.minutes))
+                .collect();
+            let carried_days: Vec<(i64, NaiveDate)> = data
+                .carried_work_days
+                .iter()
+                .map(|day| (day.user_id, day.date))
+                .collect();
+            let report_period = report_from.format("%Y-%m").to_string();
+            app.state
+                .db
+                .reports
+                .record_payroll_report_delivery(
+                    &report_period,
+                    report_from,
+                    report_to,
+                    &[],
+                    &declared,
+                    zerf::repository::PayrollCarryScope {
+                        since: Some(carried.since),
+                        before: Some(carried.before),
+                        owed_periods: &[],
+                        days: &carried_days,
+                    },
+                    &[],
+                    &data.late_absence_ids,
+                    &[],
+                )
+                .await
+                .expect("record the correcting report");
+            data.late_entry_rows
+                .iter()
+                .map(|row| (row.date, row.minutes))
+                .collect::<Vec<_>>()
+        }
+    };
+
+    // First correction: a 13:00-15:00 shift adds two hours to a 240-minute day.
+    add_shift("13:00", "15:00").await;
+    let first_from = to + Duration::days(1);
+    let (_, first_to) = month_bounds(first_from);
+    assert_eq!(
+        correct(first_from, first_to).await,
+        vec![(worked_day, 120)],
+        "the first correction declares only the added two hours"
+    );
+
+    // Second correction: another hour on the same day. The baseline is now
+    // 240 + 120, so only the new hour may be declared.
+    add_shift("16:00", "17:00").await;
+    let second_from = first_to + Duration::days(1);
+    let (_, second_to) = month_bounds(second_from);
+    assert_eq!(
+        correct(second_from, second_to).await,
+        vec![(worked_day, 60)],
+        "the second correction declares only the newly added hour, not the sum \
+         of everything since the original report"
+    );
+
+    let total: i64 = app
+        .state
+        .db
+        .reports
+        .declared_minutes_for_days(&[(assistant_id, worked_day)])
+        .await
+        .expect("read the day's declared total")
+        .get(&(assistant_id, worked_day))
+        .copied()
+        .unwrap_or_default();
+    assert_eq!(
+        total, 420,
+        "the ledger sums to exactly the day's current worth: 240 + 120 + 60"
+    );
+
+    app.cleanup().await;
+}
+
+/// A correction for somebody who has since been archived still reaches the
+/// report. Leaving is exactly when a forgotten shift surfaces, and the
+/// period-scoped member query cannot see an archived account with no activity
+/// in the month now being reported.
+#[tokio::test]
+async fn payroll_declared_days_correction_survives_the_person_being_archived() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "ledger-archived").await;
+    let lead = login_change_pw(&app, "lead-ledger-archived@example.com", &lead_pw).await;
+    let (assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "ledger-archived").await;
+    let assistant =
+        login_change_pw(&app, "aushilfe-ledger-archived@example.com", &assistant_pw).await;
+
+    let worked_day = anchor_monday();
+    let worked_iso = worked_day.format("%Y-%m-%d").to_string();
+    let (from, to) = month_bounds(worked_day);
+    let period = from.format("%Y-%m").to_string();
+
+    let first_shift = create_and_submit_entry(&assistant, &worked_iso, cat_id).await;
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [first_shift]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the reported shift: {body}");
+    let period_entries = app
+        .state
+        .db
+        .time_entries
+        .payroll_entry_snapshot(from, to)
+        .await
+        .expect("snapshot the reported month");
+    app.state
+        .db
+        .reports
+        .record_payroll_report_delivery(
+            &period,
+            from,
+            to,
+            &period_entries,
+            &[(assistant_id, worked_day, 240)],
+            Default::default(),
+            &[],
+            &[],
+            &[],
+        )
+        .await
+        .expect("record the original report");
+
+    // The forgotten shift arrives, is approved, and only then does the person
+    // leave the organisation.
+    let (status, body) = assistant
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": worked_iso,
+                "start_time": "13:00",
+                "end_time": "15:00",
+                "category_id": cat_id,
+                "comment": "remembered too late"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create the forgotten shift: {body}");
+    let late_shift = id(&body);
+    let (status, body) = assistant
+        .post("/api/v1/time-entries/submit", &json!({"ids": [late_shift]}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "submit the forgotten shift: {body}");
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [late_shift]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the forgotten shift: {body}");
+    let (status, body) = admin
+        .post(&format!("/api/v1/users/{assistant_id}/archive"), &json!({}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "archive the assistant: {body}");
+
+    let next_from = to + Duration::days(1);
+    let (_, next_to) = month_bounds(next_from);
+    let carried = payroll_report::CarriedDays {
+        since: from,
+        before: next_from,
+        owed_periods: Vec::new(),
+        reported_as: None,
+    };
+    let members =
+        payroll_report::payroll_members(&app.state, next_from, next_to, &[], false, Some(&carried))
+            .await
+            .expect("members of the correcting report");
+    assert!(
+        members.iter().any(|member| member.id == assistant_id),
+        "an archived person still owed a correction belongs to the report"
+    );
+
+    let data = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from: next_from,
+            to: next_to,
+            interim: false,
+            created_on: next_to,
+            carried: Some(carried),
+        },
+        &members,
+        &config(true, false),
+        &zerf::i18n::Language::from_setting("en"),
+        None,
+    )
+    .await
+    .expect("build the correcting report");
+
+    assert_eq!(
+        data.late_entry_rows
+            .iter()
+            .map(|row| (row.date, row.minutes))
+            .collect::<Vec<_>>(),
+        vec![(worked_day, 120)],
+        "the archived person's forgotten shift is still declared"
+    );
+
+    app.cleanup().await;
+}
+
+/// A stray, unrelated draft entry inside the carry-over window silently
+/// defers *every* correction for that person — not just a correction that
+/// touches the same day, and not just for as long as the draft is genuinely
+/// "a reopen in progress". Nothing here is lost or double-paid, but the
+/// deferral has no time bound and raises no notification, so an abandoned
+/// draft nobody ever resubmits can suppress a person's corrections for good,
+/// invisibly. Documents the actual scope of that trade-off with a concrete
+/// case: a completely unrelated month's forgotten draft blocks a correction
+/// on a day it has nothing to do with.
+#[tokio::test]
+async fn payroll_declared_days_unrelated_stray_draft_blocks_every_correction() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "ledger-stray").await;
+    let lead = login_change_pw(&app, "lead-ledger-stray@example.com", &lead_pw).await;
+    let (assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "ledger-stray").await;
+    let assistant = login_change_pw(&app, "aushilfe-ledger-stray@example.com", &assistant_pw).await;
+
+    let worked_day = anchor_monday();
+    let worked_iso = worked_day.format("%Y-%m-%d").to_string();
+    let (from, to) = month_bounds(worked_day);
+    let period = from.format("%Y-%m").to_string();
+
+    // The day whose correction we actually want to observe.
+    let first_shift = create_and_submit_entry(&assistant, &worked_iso, cat_id).await;
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [first_shift]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the reported shift: {body}");
+    let period_entries = app
+        .state
+        .db
+        .time_entries
+        .payroll_entry_snapshot(from, to)
+        .await
+        .expect("snapshot the reported month");
+    app.state
+        .db
+        .reports
+        .record_payroll_report_delivery(
+            &period,
+            from,
+            to,
+            &period_entries,
+            &[(assistant_id, worked_day, 240)],
+            Default::default(),
+            &[],
+            &[],
+            &[],
+        )
+        .await
+        .expect("record the original report");
+
+    // A genuine, forgotten correction on the reported day.
+    let (status, body) = assistant
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": worked_iso,
+                "start_time": "13:00",
+                "end_time": "15:00",
+                "category_id": cat_id,
+                "comment": "forgotten shift"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create the forgotten shift: {body}");
+    let forgotten_id = id(&body);
+    let (status, body) = assistant
+        .post("/api/v1/time-entries/submit", &json!({"ids": [forgotten_id]}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "submit the forgotten shift: {body}");
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [forgotten_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the forgotten shift: {body}");
+
+    // An entirely unrelated draft, on a *different* already-reported day, that
+    // nobody ever resubmits. Its own month is a different month than the one
+    // being corrected above.
+    let stray_day = worked_day - Duration::days(21);
+    let (status, body) = assistant
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": stray_day.format("%Y-%m-%d").to_string(),
+                "start_time": "08:00",
+                "end_time": "09:00",
+                "category_id": cat_id,
+                "comment": "abandoned draft, never submitted"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create the stray draft: {body}");
+
+    let next_from = to + Duration::days(1);
+    let (_, next_to) = month_bounds(next_from);
+    // Wide enough to cover both the stray draft's month and the reported day.
+    let carried = payroll_report::CarriedDays {
+        since: stray_day - Duration::days(31),
+        before: next_from,
+        owed_periods: Vec::new(),
+        reported_as: None,
+    };
+    let members =
+        payroll_report::payroll_members(&app.state, next_from, next_to, &[], false, Some(&carried))
+            .await
+            .expect("members while the stray draft exists");
+    let data = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from: next_from,
+            to: next_to,
+            interim: false,
+            created_on: next_to,
+            carried: Some(carried.clone()),
+        },
+        &members,
+        &config(true, false),
+        &zerf::i18n::Language::from_setting("en"),
+        None,
+    )
+    .await
+    .expect("build while the stray draft exists");
+    assert!(
+        data.late_entry_rows.is_empty(),
+        "the genuine, unrelated correction is suppressed by the stray draft: {:?}",
+        data.late_entry_rows
+            .iter()
+            .map(|row| (row.date, row.minutes))
+            .collect::<Vec<_>>()
+    );
+
+    // Resubmitting and approving the stray draft — completely incidental to
+    // the correction we care about — is what unblocks it.
+    let stray_entries: Vec<i64> = sqlx::query_scalar(
+        "SELECT id FROM time_entries WHERE user_id=$1 AND entry_date=$2",
+    )
+    .bind(assistant_id)
+    .bind(stray_day)
+    .fetch_all(&app.state.pool)
+    .await
+    .expect("find the stray entry");
+    let (status, body) = assistant
+        .post(
+            "/api/v1/time-entries/submit",
+            &json!({"ids": stray_entries}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "submit the stray draft: {body}");
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": stray_entries}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the stray draft: {body}");
+
+    let members =
+        payroll_report::payroll_members(&app.state, next_from, next_to, &[], false, Some(&carried))
+            .await
+            .expect("members after the stray draft settles");
+    let data = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from: next_from,
+            to: next_to,
+            interim: false,
+            created_on: next_to,
+            carried: Some(carried),
+        },
+        &members,
+        &config(true, false),
+        &zerf::i18n::Language::from_setting("en"),
+        None,
+    )
+    .await
+    .expect("build after the stray draft settles");
+    let mut rows: Vec<(NaiveDate, i64)> = data
+        .late_entry_rows
+        .iter()
+        .map(|row| (row.date, row.minutes))
+        .collect();
+    rows.sort();
+    assert_eq!(
+        rows,
+        vec![(stray_day, 60), (worked_day, 120)],
+        "neither correction was lost: the genuine one on worked_day, and the \
+         stray draft's own day, now a real booking with nothing declared for \
+         it yet, both surface once the block clears"
+    );
+
+    app.cleanup().await;
+}
