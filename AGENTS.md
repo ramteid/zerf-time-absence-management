@@ -258,6 +258,16 @@ same month, so the whole day can be compared with its declared total. A legacy
 row with no ledger retains the established behavior: an edit inside the same
 month keeps its marker and a cross-month move clears it.
 
+A legacy day still gets the whole-day break computation, though, not just the
+established marker behavior for *whether* it stays marked. The marked rows
+were never deleted, only marked, so their current minutes are live, queryable
+data — `late_entry_deltas` recomputes them the same way it recomputes the
+whole day, and the correction is the difference. Pricing a newly added shift
+in isolation, as the very first version of this feature did, silently
+under-deducts the break whenever the *combined* day crosses a threshold the
+new shift alone does not — exactly the bug the ledger exists to fix, still
+live for every already-reported day the ledger cannot backfill.
+
 `services::payroll_report::carry_over_boundary` decides how far back that
 reaches, and returns the whole `CarriedDays` scope rather than a single date.
 Three bounds, each guarding a different way of getting it wrong:
@@ -290,11 +300,15 @@ The scope travels in `ReportWindow::carried`. The live path reads candidate
 person-days through `ReportDb::carried_day_entries_before`, calculates their
 current net totals, and subtracts `declared_minutes_for_days`. A
 `PayrollCarryScope` carries the same date bounds plus the exact printed
-person-days, so marking cannot widen beyond the document. A person with an
-unsettled entry in an already-reported month is deferred rather than treated as
-a deletion while a reopened correction is still in progress; unsettled rows in
-a month still owed belong to that month's own report and do not block older
-corrections. `CarriedDays::reported_as`
+person-days, so marking cannot widen beyond the document. A day with an
+unsettled entry — draft, submitted, or an unresolved rejection — is deferred
+rather than treated as a deletion while a reopened correction is still in
+progress; unsettled rows in a month still owed belong to that month's own
+report and do not block older corrections. The deferral is scoped per
+`(user, day)`, not per person: a reopen touches the days it actually reopened,
+so an unrelated day's correction must not wait on a different day's edit, and a
+single abandoned draft nobody ever resubmits cannot suppress every correction
+someone is owed. `CarriedDays::reported_as`
 picks the direction: `None` asks what a report produced now would correct;
 `Some(period)` asks what that period actually declared. Post-migration reports
 read both their regular hours and correction rows through

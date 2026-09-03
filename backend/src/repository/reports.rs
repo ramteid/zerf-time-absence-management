@@ -727,6 +727,14 @@ impl ReportDb {
     /// Unsettled entries in a month whose own report is still owed do not block
     /// corrections from delivered months; that pending month owns those rows.
     ///
+    /// The deferral for a genuinely unsettled row — draft, submitted, or an
+    /// unresolved rejection — is scoped to its own `(user, day)`, not to the
+    /// person as a whole: a reopen touches the days it actually reopened, and
+    /// an unrelated day's correction must not wait on a completely different
+    /// day's edit to finish. Scoping this per person instead would defer every
+    /// correction for someone with even one abandoned, never-resubmitted draft
+    /// anywhere in the carry-over window — which never advances — for good.
+    ///
     /// The returned time range is absent for a ledger-only day. `counts_as_work`
     /// and `already_reported` let the service preserve the pre-ledger fallback:
     /// when no declaration exists, only unmarked work entries count.
@@ -737,8 +745,8 @@ impl ReportDb {
         owed_periods: &[String],
     ) -> AppResult<Vec<CarriedDayEntry>> {
         Ok(sqlx::query_as(
-            "WITH blocked_users AS ( \
-                 SELECT DISTINCT z.user_id \
+            "WITH blocked_days AS ( \
+                 SELECT DISTINCT z.user_id, z.entry_date AS day \
                  FROM time_entries z \
                  WHERE z.entry_date >= $1 AND z.entry_date < $2 \
                  AND to_char(z.entry_date, 'YYYY-MM') <> ALL($3) \
@@ -753,8 +761,9 @@ impl ReportDb {
                  AND to_char(z.entry_date, 'YYYY-MM') <> ALL($3) \
                  AND z.status='approved' AND z.payroll_reported_period IS NULL \
                  AND c.counts_as_work AND z.entry_date >= u.start_date \
-                 AND NOT EXISTS (SELECT 1 FROM blocked_users blocked \
-                                 WHERE blocked.user_id = z.user_id) \
+                 AND NOT EXISTS (SELECT 1 FROM blocked_days blocked \
+                                 WHERE blocked.user_id = z.user_id \
+                                 AND blocked.day = z.entry_date) \
                  UNION \
                  SELECT DISTINCT d.user_id, d.day \
                  FROM payroll_reported_days d \
@@ -762,8 +771,9 @@ impl ReportDb {
                  WHERE d.day >= $1 AND d.day < $2 \
                  AND to_char(d.day, 'YYYY-MM') <> ALL($3) \
                  AND d.day >= u.start_date \
-                 AND NOT EXISTS (SELECT 1 FROM blocked_users blocked \
-                                 WHERE blocked.user_id = d.user_id) \
+                 AND NOT EXISTS (SELECT 1 FROM blocked_days blocked \
+                                 WHERE blocked.user_id = d.user_id \
+                                 AND blocked.day = d.day) \
              ) \
              SELECT wanted.user_id, wanted.day, entry.start_time, entry.end_time, \
                     COALESCE(entry.counts_as_work, FALSE) AS counts_as_work, \

@@ -1542,7 +1542,7 @@ async fn late_entry_deltas(
     let mut marked_work_days: std::collections::HashSet<(i64, NaiveDate)> =
         std::collections::HashSet::new();
     let mut current_entries = Vec::new();
-    let mut unmarked_entries = Vec::new();
+    let mut marked_entries = Vec::new();
     for entry in entries {
         days.insert((entry.user_id, entry.day));
         let (Some(start_time), Some(end_time)) = (entry.start_time, entry.end_time) else {
@@ -1551,20 +1551,28 @@ async fn late_entry_deltas(
         if !entry.counts_as_work {
             continue;
         }
-        if entry.already_reported {
-            marked_work_days.insert((entry.user_id, entry.day));
-        }
         let row = (entry.user_id, entry.day, start_time, end_time);
         current_entries.push(row.clone());
-        if !entry.already_reported {
-            unmarked_entries.push(row);
+        if entry.already_reported {
+            marked_work_days.insert((entry.user_id, entry.day));
+            marked_entries.push(row);
         }
     }
 
     let auto_break = crate::services::reports::load_auto_break_config(&app_state.pool).await?;
     let current_minutes = net_minutes_by_day_with_rules(current_entries, auto_break.as_deref())?;
-    let legacy_unmarked_minutes =
-        net_minutes_by_day_with_rules(unmarked_entries, auto_break.as_deref())?;
+    // The legacy fallback's own comparison point: the marked entries' current
+    // minutes, recomputed exactly as `current_minutes` is — same rules, same
+    // grouping — but over only the rows already accounted for. The marked
+    // rows were never deleted, only marked, so this is live, queryable data,
+    // not an invented baseline. Subtracting it from the whole day's current
+    // total (below) folds the marked hours into the *same* break computation
+    // as the new ones, instead of pricing the new shift as if the already-paid
+    // hours earlier in the day did not exist — which silently under-deducts
+    // the break whenever the combined day crosses a threshold the new shift
+    // alone does not.
+    let legacy_marked_minutes =
+        net_minutes_by_day_with_rules(marked_entries, auto_break.as_deref())?;
     let mut ordered_days: Vec<(i64, NaiveDate)> = days.into_iter().collect();
     ordered_days.sort_unstable();
     let declared_minutes = app_state
@@ -1598,10 +1606,11 @@ async fn late_entry_deltas(
                     )
                 }
                 None => (
-                    legacy_unmarked_minutes
-                        .get(&(user_id, date))
-                        .copied()
-                        .unwrap_or(0),
+                    current_minutes.get(&(user_id, date)).copied().unwrap_or(0)
+                        - legacy_marked_minutes
+                            .get(&(user_id, date))
+                            .copied()
+                            .unwrap_or(0),
                     false,
                 ),
             };

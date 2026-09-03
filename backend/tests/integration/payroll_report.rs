@@ -6502,17 +6502,15 @@ async fn payroll_declared_days_correction_survives_the_person_being_archived() {
     app.cleanup().await;
 }
 
-/// A stray, unrelated draft entry inside the carry-over window silently
-/// defers *every* correction for that person — not just a correction that
-/// touches the same day, and not just for as long as the draft is genuinely
-/// "a reopen in progress". Nothing here is lost or double-paid, but the
-/// deferral has no time bound and raises no notification, so an abandoned
-/// draft nobody ever resubmits can suppress a person's corrections for good,
-/// invisibly. Documents the actual scope of that trade-off with a concrete
-/// case: a completely unrelated month's forgotten draft blocks a correction
-/// on a day it has nothing to do with.
+/// A stray, unrelated draft entry elsewhere in the carry-over window must not
+/// defer a correction on a *different* day. The deferral protects a day whose
+/// own reopen is still in progress from being read as a deletion — it has no
+/// business holding back an unrelated day's already-settled correction, and
+/// scoping it per person rather than per day would let one abandoned,
+/// never-resubmitted draft anywhere in the window (which never advances)
+/// suppress every correction that person is owed, forever, invisibly.
 #[tokio::test]
-async fn payroll_declared_days_unrelated_stray_draft_blocks_every_correction() {
+async fn payroll_declared_days_unrelated_stray_draft_does_not_block_a_different_day() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
     let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
@@ -6633,17 +6631,18 @@ async fn payroll_declared_days_unrelated_stray_draft_blocks_every_correction() {
     )
     .await
     .expect("build while the stray draft exists");
-    assert!(
-        data.late_entry_rows.is_empty(),
-        "the genuine, unrelated correction is suppressed by the stray draft: {:?}",
+    assert_eq!(
         data.late_entry_rows
             .iter()
             .map(|row| (row.date, row.minutes))
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>(),
+        vec![(worked_day, 120)],
+        "an unrelated day's still-unsettled draft must not hold back a \
+         correction on a different, already-settled day"
     );
 
-    // Resubmitting and approving the stray draft — completely incidental to
-    // the correction we care about — is what unblocks it.
+    // Resubmitting and approving the stray draft brings its own day's booking
+    // in too, without changing what was already shown for worked_day.
     let stray_entries: Vec<i64> = sqlx::query_scalar(
         "SELECT id FROM time_entries WHERE user_id=$1 AND entry_date=$2",
     )
@@ -6699,6 +6698,180 @@ async fn payroll_declared_days_unrelated_stray_draft_blocks_every_correction() {
         "neither correction was lost: the genuine one on worked_day, and the \
          stray draft's own day, now a real booking with nothing declared for \
          it yet, both surface once the block clears"
+    );
+
+    app.cleanup().await;
+}
+
+/// The no-ledger fallback must compute the automatic break over the whole
+/// day, not over the newly added shift alone.
+///
+/// A legacy day (no declaration row: reported before migration 047, or its
+/// month settled with nothing to declare) has no stored baseline, so the
+/// correction cannot be read back as "current whole-day total minus what was
+/// declared". But the *marked* entries' own current minutes are still live,
+/// queryable data — they were never deleted, only marked. Recomputing the
+/// combined day (marked + newly added) and subtracting the marked entries'
+/// own recomputed total is therefore exact whenever the auto-break
+/// configuration has not changed since the original report, and is a correct
+/// superset of the auto-break rule the whole ledger feature exists to fix.
+/// Computing the new shift's break in isolation — as though the already-paid
+/// hours earlier in the day did not exist — silently under-deducts the break
+/// whenever the *combined* day crosses a threshold the new shift alone does
+/// not, over-reporting the correction.
+#[tokio::test]
+async fn payroll_no_ledger_fallback_computes_the_break_over_the_whole_day() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, _employee_id, _employee_pw, _monday, category_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "ledger-fallback-break").await;
+    let lead = login_change_pw(&app, "lead-ledger-fallback-break@example.com", &lead_pw).await;
+    let (assistant_id, assistant_password) =
+        create_assistant(&admin, lead_id, "ledger-fallback-break").await;
+    let assistant = login_change_pw(
+        &app,
+        "aushilfe-ledger-fallback-break@example.com",
+        &assistant_password,
+    )
+    .await;
+
+    for (key, value) in [
+        (zerf::services::settings::AUTO_BREAK_ENABLED_KEY, "true"),
+        (
+            zerf::services::settings::AUTO_BREAK_THRESHOLD_HOURS_KEY,
+            "6",
+        ),
+        (
+            zerf::services::settings::AUTO_BREAK_DEDUCTION_MINUTES_KEY,
+            "30",
+        ),
+    ] {
+        app.state
+            .db
+            .settings
+            .save_setting(key, value)
+            .await
+            .expect("configure automatic break");
+    }
+
+    let worked_day = anchor_monday();
+    let worked_iso = worked_day.format("%Y-%m-%d").to_string();
+    let (from, to) = month_bounds(worked_day);
+    let period = from.format("%Y-%m").to_string();
+
+    // The originally reported shift: 08:00-12:00, 240 minutes, under the
+    // 6-hour threshold on its own.
+    let original = create_and_submit_entry(&assistant, &worked_iso, category_id).await;
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [original]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve original shift: {body}");
+    let original_snapshot = app
+        .state
+        .db
+        .time_entries
+        .payroll_entry_snapshot(from, to)
+        .await
+        .expect("snapshot original month");
+    // Settled with no day declaration — a legacy, no-ledger month.
+    app.state
+        .db
+        .reports
+        .record_payroll_report_delivery(
+            &period,
+            from,
+            to,
+            &original_snapshot,
+            &[],
+            Default::default(),
+            &[],
+            &[],
+            &[],
+        )
+        .await
+        .expect("settle original month without a day declaration");
+
+    // A second shift arrives later: 12:20-17:20, 300 minutes — also under 6
+    // hours in isolation, with only a 20-minute gap to the first shift. The
+    // *combined* day (540 raw minutes) crosses the 6-hour threshold and owes
+    // a 30-minute break; the 20-minute gap already taken only credits part of
+    // it, leaving a 10-minute shortfall still due — exactly the partial-gap
+    // rule `compute_day_auto_break` applies to a single person's whole day.
+    let (status, body) = assistant
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": worked_iso,
+                "start_time": "12:20",
+                "end_time": "17:20",
+                "category_id": category_id,
+                "comment": "late second shift, crosses the break threshold combined"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create second shift: {body}");
+    let second_shift = id(&body);
+    let (status, body) = assistant
+        .post(
+            "/api/v1/time-entries/submit",
+            &json!({"ids": [second_shift]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "submit second shift: {body}");
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [second_shift]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve second shift: {body}");
+
+    let reporting_from = to + Duration::days(1);
+    let (_, reporting_to) = month_bounds(reporting_from);
+    let carried = payroll_report::CarriedDays {
+        since: from,
+        before: reporting_from,
+        owed_periods: Vec::new(),
+        reported_as: None,
+    };
+    let assistant_member = app
+        .state
+        .db
+        .users
+        .find_by_id(assistant_id)
+        .await
+        .expect("load assistant")
+        .expect("assistant exists");
+    let data = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from: reporting_from,
+            to: reporting_to,
+            interim: false,
+            created_on: reporting_to,
+            carried: Some(carried),
+        },
+        std::slice::from_ref(&assistant_member),
+        &config(true, false),
+        &zerf::i18n::Language::from_setting("en"),
+        None,
+    )
+    .await
+    .expect("build fallback correction report");
+    assert_eq!(
+        data.late_entry_rows
+            .iter()
+            .map(|row| (row.date, row.minutes))
+            .collect::<Vec<_>>(),
+        vec![(worked_day, 290)],
+        "540 combined raw minutes minus the 10-minute shortfall the 20-minute \
+         gap does not cover (530), less the 240 already declared for the \
+         marked morning shift — not 300, which is what the new shift alone is \
+         worth with no break applied since 5 hours does not cross the \
+         threshold by itself"
     );
 
     app.cleanup().await;
