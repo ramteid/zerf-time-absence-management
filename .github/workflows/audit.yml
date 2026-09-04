@@ -53,11 +53,8 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - name: Install dependencies (no scripts, no audit)
-        run: |
-          if [ -f package-lock.json ]; then npm ci --ignore-scripts --no-audit --no-fund;
-          else npm install --ignore-scripts --no-audit --no-fund; fi
       - name: npm audit (production deps, high+)
-        run: npm audit --omit=dev --audit-level=high
+        # --package-lock-only reads package-lock.json directly without installing
+        # node_modules, which forces npm to use the bulk advisory API instead of
+        # the deprecated /audits/quick endpoint.
+        run: npm audit --omit=dev --audit-level=high --package-lock-only
