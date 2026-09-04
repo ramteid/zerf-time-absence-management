@@ -5,7 +5,7 @@ use crate::error::{AppError, AppResult};
 use crate::middleware::auth::{User, ABSOLUTE_TIMEOUT_HOURS, IDLE_TIMEOUT_HOURS};
 use crate::repository::{SessionDb, UserDb};
 use crate::AppState;
-use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use argon2::{Algorithm, Argon2, Params, Version};
 use rand_core::{OsRng, RngCore};
 
@@ -18,21 +18,17 @@ pub fn argon2_instance() -> Argon2<'static> {
 }
 
 pub fn hash_password(password: &str) -> AppResult<String> {
-    let salt = SaltString::generate(&mut OsRng);
     Ok(argon2_instance()
-        .hash_password(password.as_bytes(), &salt)
+        .hash_password(password.as_bytes())
         .map_err(|e| AppError::Internal(e.to_string()))?
         .to_string())
 }
 
 pub fn verify_password(password: &str, hash: &str) -> bool {
-    if let Ok(parsed) = PasswordHash::new(hash) {
-        argon2_instance()
-            .verify_password(password.as_bytes(), &parsed)
-            .is_ok()
-    } else {
-        false
-    }
+    // argon2 0.6: PasswordVerifier<str> lets us pass the PHC string directly.
+    argon2_instance()
+        .verify_password(password.as_bytes(), hash)
+        .is_ok()
 }
 
 /// Async wrapper: offloads Argon2 hashing to a blocking thread so the Tokio
@@ -338,10 +334,8 @@ mod tests {
         // call inside has `expect`, which would panic on invalid parameters).
         let instance = argon2_instance();
         // Verify it can actually hash a password (smoke test).
-        use argon2::password_hash::{PasswordHasher, SaltString};
-        use rand_core::OsRng;
-        let salt = SaltString::generate(&mut OsRng);
-        assert!(instance.hash_password(b"test", &salt).is_ok());
+        use argon2::password_hash::PasswordHasher;
+        assert!(instance.hash_password(b"test").is_ok());
     }
 
     /// `hash_password_async` / `verify_password_async` are async wrappers that
