@@ -1127,8 +1127,8 @@ const TRANSLATIONS = {
       "Erhält Benachrichtigungen über technische Fehler vom System",
     "When enabled, this admin is alerted in the app and by email about technical errors.":
       "Wenn aktiviert, wird dieser Admin in der App und per E-Mail über technische Fehler benachrichtigt.",
-    "Disabling time tracking will permanently delete all time entries, absences, and edit requests for this user. This cannot be undone.":
-      "Das Deaktivieren der Zeiterfassung löscht dauerhaft alle Zeiteinträge, Abwesenheiten und Bearbeitungsanfragen dieses Benutzers. Diese Aktion kann nicht rückgängig gemacht werden.",
+    "Disabling time tracking hides this user's time entries and absences everywhere in the app instead of deleting them. Submitted entries reset to draft, and pending absence or reopen requests are rejected.":
+      "Das Deaktivieren der Zeiterfassung blendet die Zeiteinträge und Abwesenheiten dieses Benutzers überall in der App aus, statt sie zu löschen. Eingereichte Einträge werden auf Entwurf zurückgesetzt, offene Abwesenheits- oder Wiedereröffnungsanfragen werden abgelehnt.",
     'Type "{phrase}" to confirm': 'Geben Sie "{phrase}" zur Bestätigung ein',
     "I understand": "Ich verstehe",
     "Cannot log time on a day with an approved absence ({kind}). Please cancel or adjust the absence first.":

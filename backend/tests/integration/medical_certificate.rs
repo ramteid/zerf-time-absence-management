@@ -106,7 +106,7 @@ async fn payroll_report_marks_absences_required_once_a_connected_chain_crosses_t
         .state
         .db
         .reports
-        .timesheet_members_for_period(from, to)
+        .timesheet_members_for_period(to)
         .await
         .expect("members");
     let language = zerf::i18n::Language::from_setting("en");

@@ -1301,15 +1301,15 @@ impl ReportDb {
 
     /// All users who should appear in a monthly timesheet export for a given period.
     ///
-    /// Includes users with active tracking and users whose historical rows touch
-    /// the period, even if tracking is now disabled or the account is archived.
+    /// Only users currently active and tracking time qualify. Once someone is
+    /// deactivated or switched to tracking-disabled (pure-admin) mode, none of
+    /// their activity is archived anymore, no matter what it contains — nobody
+    /// can act on a stuck queue entry for such an account (they cannot manage
+    /// their own data, and it is hidden from every other admin's view too), so
+    /// including it would only queue an export that can never become ready.
     /// Users whose current start date is after the period are intentionally
     /// excluded because the renderer would suppress those pre-start rows.
-    pub async fn timesheet_members_for_period(
-        &self,
-        from: NaiveDate,
-        to: NaiveDate,
-    ) -> AppResult<Vec<User>> {
+    pub async fn timesheet_members_for_period(&self, to: NaiveDate) -> AppResult<Vec<User>> {
         const SQL: &str =
             "SELECT id, email, password_hash, first_name, last_name, role, \
              weekly_hours, workdays_per_week, start_date, hire_date, active, must_change_password, created_at, \
@@ -1317,19 +1317,10 @@ impl ReportDb {
              tracks_time, archived_at, \
              receives_error_notifications \
              FROM users \
-             WHERE start_date <= $2 \
-             AND ((active=TRUE AND tracks_time=TRUE) \
-                  OR EXISTS (SELECT 1 FROM time_entries te \
-                             WHERE te.user_id = users.id \
-                             AND te.entry_date BETWEEN $1 AND $2) \
-                  OR EXISTS (SELECT 1 FROM absences ab \
-                             WHERE ab.user_id = users.id \
-                             AND ab.status IN ('approved','cancellation_pending') \
-                             AND ab.start_date <= $2 AND ab.end_date >= $1) \
-             ) \
+             WHERE start_date <= $1 \
+             AND active=TRUE AND tracks_time=TRUE \
              ORDER BY last_name, first_name, id";
         Ok(sqlx::query_as(SQL)
-            .bind(from)
             .bind(to)
             .fetch_all(&self.pool)
             .await?)

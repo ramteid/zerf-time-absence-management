@@ -111,15 +111,12 @@ async fn populate_queue_for_prev_month(state: &AppState, today: NaiveDate) -> Ap
         settings::REPORT_UPLOAD_QUEUE_PERIOD_KEY,
         today,
         |period| async move {
-            let (from, to) = schedule::period_bounds(&period)?;
+            let (_, to) = schedule::period_bounds(&period)?;
 
-            // Include deactivated users who had entries/absences in the period so
-            // the archive export is complete (see ReportDb::timesheet_members_for_period).
-            let members = state
-                .db
-                .reports
-                .timesheet_members_for_period(from, to)
-                .await?;
+            // Only currently active, time-tracking users are queued (see
+            // ReportDb::timesheet_members_for_period) — a deactivated or
+            // tracking-disabled account's activity is never archived again.
+            let members = state.db.reports.timesheet_members_for_period(to).await?;
             let ids: Vec<i64> = members.iter().map(|u| u.id).collect();
 
             state.db.export_queue.populate(&period, &ids).await?;

@@ -275,14 +275,10 @@ pub async fn payroll_members(
         .iter()
         .map(|member| member.id)
         .collect();
-    let mut members = app_state
-        .db
-        .reports
-        .timesheet_members_for_period(from, to)
-        .await?;
-    // The period-scoped query only knows people who are still active or who
-    // have activity in the period, so an assistant who has left since is
-    // missing from it. Their unpaid day is exactly what this is for.
+    let mut members = app_state.db.reports.timesheet_members_for_period(to).await?;
+    // The period-scoped query only knows people who are still active and
+    // tracking time, so an assistant who has left since is missing from it.
+    // Their unpaid day is exactly what this is for.
     let known: std::collections::HashSet<i64> = members.iter().map(|member| member.id).collect();
     // `known` grows as they are added: somebody holding both a carried day and
     // a carried absence appears in both lists, and adding them twice would

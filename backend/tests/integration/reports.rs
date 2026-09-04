@@ -416,7 +416,7 @@ async fn report_export_requeue_preserves_period_after_start_date_change() {
 }
 
 #[tokio::test]
-async fn report_export_queue_includes_tracking_disabled_users_with_history() {
+async fn report_export_queue_excludes_tracking_disabled_users_even_with_history() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
     app.state
@@ -430,8 +430,6 @@ async fn report_export_queue_includes_tracking_disabled_users_with_history() {
 
     let historical_day = next_monday(-75);
     let period = historical_day.format("%Y-%m").to_string();
-    let month_start = NaiveDate::from_ymd_opt(historical_day.year(), historical_day.month(), 1)
-        .expect("valid month start");
     let month_end = NaiveDate::from_ymd_opt(
         historical_day.year(),
         historical_day.month(),
@@ -480,12 +478,12 @@ async fn report_export_queue_includes_tracking_disabled_users_with_history() {
         .state
         .db
         .reports
-        .timesheet_members_for_period(month_start, month_end)
+        .timesheet_members_for_period(month_end)
         .await
         .expect("list export members");
     assert!(
-        members.iter().any(|member| member.id == admin_id),
-        "tracking-disabled users with approved history must still be selected for export"
+        !members.iter().any(|member| member.id == admin_id),
+        "once tracking is disabled, even approved historical activity must not be selected for export again"
     );
 
     zerf::services::reports::requeue_export_for_dates(

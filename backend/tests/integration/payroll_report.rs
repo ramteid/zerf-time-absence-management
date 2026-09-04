@@ -366,7 +366,7 @@ async fn payroll_report_lists_absence_days_and_assistant_hours() {
         .state
         .db
         .reports
-        .timesheet_members_for_period(from, to)
+        .timesheet_members_for_period(to)
         .await
         .expect("members");
     let language = zerf::i18n::Language::from_setting("en");
@@ -532,7 +532,7 @@ async fn payroll_report_absence_rows_are_grouped_by_category_then_name_then_date
         .state
         .db
         .reports
-        .timesheet_members_for_period(from, to)
+        .timesheet_members_for_period(to)
         .await
         .expect("members");
     let language = zerf::i18n::Language::from_setting("de");

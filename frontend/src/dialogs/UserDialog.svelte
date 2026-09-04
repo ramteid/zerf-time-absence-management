@@ -370,13 +370,14 @@
       return;
     }
     // Double-confirmation when disabling time tracking for an existing admin user.
-    // All their time entries, absences, and edit requests will be permanently deleted.
+    // Their time entries and absences are kept but hidden everywhere in the app;
+    // submitted entries reset to draft and pending requests are rejected.
     const wasTracksTime = template.tracks_time ?? true;
     if (!isNew && !tracks_time && wasTracksTime && normalizedRole === "admin") {
       const firstConfirmed = await confirmDialog(
         $t("Disable time tracking?"),
         $t(
-          "Disabling time tracking will permanently delete all time entries, absences, and edit requests for this user. This cannot be undone.",
+          "Disabling time tracking hides this user's time entries and absences everywhere in the app instead of deleting them. Submitted entries reset to draft, and pending absence or reopen requests are rejected.",
         ),
         { danger: true, confirm: $t("Disable time tracking") },
       );
@@ -384,7 +385,7 @@
       const secondConfirmed = await confirmDialog(
         $t("Disable time tracking?"),
         $t(
-          "Disabling time tracking will permanently delete all time entries, absences, and edit requests for this user. This cannot be undone.",
+          "Disabling time tracking hides this user's time entries and absences everywhere in the app instead of deleting them. Submitted entries reset to draft, and pending absence or reopen requests are rejected.",
         ),
         {
           danger: true,
