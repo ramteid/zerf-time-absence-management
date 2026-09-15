@@ -17,8 +17,10 @@ import { test, expect } from "@playwright/test";
 import {
   collectPageErrors,
   pastBookableDateOffset,
+  selectAbsenceKind,
   setDate,
   storageStatePath,
+  waitForSelectOptions,
 } from "./helpers.js";
 import { ASSISTANT, EMPLOYEE, TEAM_LEAD } from "./users.js";
 
@@ -43,7 +45,7 @@ test.describe("employee books a past absence that lands in the report period", (
     // "Sick" is seeded with auto_approve_past, so a sick day in the past needs
     // no approver — which is what puts an *approved* absence inside the report
     // period without another round-trip through the team lead.
-    await dialog.locator("#absence-kind").selectOption({ label: "Sick" });
+    await selectAbsenceKind(dialog, "Sick");
     await setDate(page, "absence-start-date", sickDate);
     await setDate(page, "absence-end-date", sickDate);
     await dialog.locator("#absence-comment").fill("E2E past sick day");
@@ -70,6 +72,7 @@ test.describe("team lead reads another person's employee report", () => {
 
     // Pick the employee by the label the dropdown actually shows, so the test
     // doesn't depend on user ids or on the roster's ordering.
+    await waitForSelectOptions(page, "#reports-user-select", 2);
     await userSelect.selectOption({
       label: `${EMPLOYEE.firstName} ${EMPLOYEE.lastName}`,
     });
@@ -123,6 +126,9 @@ test.describe("team lead reads another person's employee report", () => {
     // particular data shape, instead of trusting that one sample is
     // representative. Each option's value is that person's user id, which is
     // what the report request is keyed on below.
+    // evaluateAll reads once, so wait for the fetched roster first rather
+    // than snapshotting a select that is still empty.
+    await waitForSelectOptions(page, "#reports-user-select", 2);
     const people = await userSelect.locator("option").evaluateAll((options) =>
       options.map((option) => ({ id: option.value, label: option.label })),
     );
