@@ -347,6 +347,34 @@ export async function setDate(page, altInputId, iso) {
   await expect(page.locator(`#${altInputId}`)).toHaveValue(iso);
 }
 
+// Waits until a <select> whose options come from an API call has actually been
+// filled in, and returns it.
+//
+// Playwright's actionability checks wait for the *element*, never for its
+// options, so a select renders visible and empty for as long as its request is
+// in flight. Two things go wrong without this wait: reading the options
+// straight away snapshots an empty list, and selecting one by label spins
+// until the whole test times out and then blames whatever line it was on. Both
+// are timing-dependent, so they surface as rare CI failures on a loaded runner
+// rather than reproducibly. Waiting on the options turns either into a bounded
+// wait that says which select never filled in.
+export async function waitForSelectOptions(scope, selector, minimum = 1) {
+  const options = scope.locator(`${selector} option`);
+  await expect
+    .poll(() => options.count(), {
+      message: `waiting for ${selector} to be populated with at least ${minimum} option(s)`,
+    })
+    .toBeGreaterThanOrEqual(minimum);
+  return scope.locator(selector);
+}
+
+// Picks an absence type in the absence dialog. The type list is fetched, so
+// the select needs the wait above before the label exists to match.
+export async function selectAbsenceKind(dialog, label) {
+  const select = await waitForSelectOptions(dialog, "#absence-kind");
+  await select.selectOption({ label });
+}
+
 // Drives the app's custom TimePicker (src/TimePicker.svelte) — a button that
 // opens a scrollable "drum" of hour/minute columns — via the keyboard
 // digit-entry path the component implements for accessibility. Typing two

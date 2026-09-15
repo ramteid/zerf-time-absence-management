@@ -21,6 +21,7 @@ import {
   bookableDateOffset,
   changeTempPassword,
   readCredentials,
+  selectAbsenceKind,
   setDate,
   setTime,
   signIn,
@@ -172,7 +173,7 @@ test("employee: request absences including an independent leave account", async 
     await page.getByRole("button", { name: "Request Absence" }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
-    await dialog.locator("#absence-kind").selectOption({ label: kindLabel });
+    await selectAbsenceKind(dialog, kindLabel);
     await setDate(page, "absence-start-date", await bookableDateOffset(page.request, startOffset));
     await setDate(page, "absence-end-date", await bookableDateOffset(page.request, endOffset));
     await dialog.locator("#absence-comment").fill(comment);
