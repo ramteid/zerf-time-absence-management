@@ -147,11 +147,24 @@
 		header_up X-Real-IP {remote_host}
 
 		# Don't sit on a stuck upstream forever.
+		#
+		# Deliberately no read_timeout: it is a raw socket deadline that also
+		# covers the idle read Go's connection pool keeps blocked on every
+		# pooled keep-alive connection, so it expires idle connections instead
+		# of bounding a request. A client polling at roughly that same period
+		# then hands its request to a connection whose deadline is already
+		# expiring, and the reply arrives just too late — the 60s notification
+		# poll against read_timeout 60s produced exactly that, as 504s on those
+		# two endpoints and nowhere else.
+		#
+		# write_timeout has no such idle phase (nothing blocks in a write while
+		# pooled) and is kept: it is the only guard against an upstream that
+		# accepts the connection but stops reading, because Go starts
+		# response_header_timeout only once the request write has finished.
 		transport http {
-			dial_timeout      5s
+			dial_timeout            5s
 			response_header_timeout 30s
-			read_timeout      60s
-			write_timeout     30s
+			write_timeout           30s
 		}
 	}
 }
