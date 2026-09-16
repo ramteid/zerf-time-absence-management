@@ -176,6 +176,16 @@ the difference between the year counted with it and without it, never on its
 own, so a week already partly booked cannot cost its quota a second time —
 pricing it alone rejected requests that in fact fit.
 
+`time_calc::counted_days_per_range` is the per-range counterpart, for callers
+that print or bill each range separately and still need those numbers to add up
+to what the week costs: it returns one count per range, attributing the counted
+days in chronological order. The payroll report's absence rows — the ordinary
+table and the catch-up one alike — go through it, per person and across every
+row the document prints for them. Counting each absence with `count_workdays`
+re-applied the quota to each of them, so two sick notes inside one calendar week
+claimed more days of continued pay from a part-time contract than that week can
+ever hold.
+
 The frontend mirrors that calendar rather than keeping a second one:
 `apiMappers.js` exports `countedWorkdays` (the union count, with `countWorkdays`
 as its single-range case, exactly as `count_workdays` delegates in Rust) and

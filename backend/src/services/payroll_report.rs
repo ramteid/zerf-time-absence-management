@@ -23,7 +23,6 @@ use crate::repository::{AbsenceCategory, AbsenceCategoryDb, PayrollReportedConte
 use crate::roles::is_assistant_role;
 use crate::services::reports::MonthExportReadiness;
 use crate::services::settings;
-use crate::time_calc::count_workdays;
 use crate::AppState;
 use chrono::{Datelike, NaiveDate, NaiveTime};
 
@@ -1919,18 +1918,25 @@ async fn build_late_absence_rows(
         .unwrap_or(carried.before);
     let holidays = app_state.db.reports.holiday_set(earliest, latest).await?;
 
-    // (category rank, display name, user id, row) — the shape the shared
-    // illness merge below works on.
-    let mut rows: Vec<(usize, String, i64, PayrollAbsenceRow)> = Vec::new();
-    // The absences this document actually declares something for. They, and
-    // only they, are marked afterwards, so the marked set cannot drift from
-    // the printed one.
-    let mut declared_ids: Vec<i64> = Vec::new();
+    // One printable stretch of one catch-up absence, before its days are known.
+    // Collected first because the weekly quota has to be applied across every
+    // stretch a person is printed for at once, not to each of them separately.
+    struct CarriedSegment<'a> {
+        member: &'a User,
+        absence_id: i64,
+        slug: String,
+        category: &'a (String, String, usize, bool),
+        medical_certificate_required: bool,
+        from: NaiveDate,
+        to: NaiveDate,
+    }
+
+    let mut segments_to_print: Vec<CarriedSegment> = Vec::new();
     for (user_id, absence_id, start_date, end_date, slug, _stored_name) in absences {
         let Some(member) = printed.get(&user_id) else {
             continue;
         };
-        let Some((_, category_name, category_rank, tracks_medical_certificate)) = selected
+        let Some(category) = selected
             .iter()
             .find(|(selected_slug, _, _, _)| selected_slug == &slug)
         else {
@@ -1952,50 +1958,100 @@ async fn build_late_absence_rows(
         if segments.is_empty() {
             continue;
         }
-        let medical_certificate_required =
-            if any_medical_certificate_category && *tracks_medical_certificate {
-                crate::services::medical_certificate::required_map_for_user(app_state, member.id)
-                    .await?
-                    .get(&absence_id)
-                    .copied()
-                    .unwrap_or(false)
-            } else {
-                false
-            };
-        let mut declared_anything = false;
+        let medical_certificate_required = if any_medical_certificate_category && category.3 {
+            crate::services::medical_certificate::required_map_for_user(app_state, member.id)
+                .await?
+                .get(&absence_id)
+                .copied()
+                .unwrap_or(false)
+        } else {
+            false
+        };
         for (segment_from, segment_to) in segments {
-            let days = count_workdays(
-                segment_from,
-                segment_to,
-                &holidays,
-                member.workdays_per_week,
-            );
-            // A stretch covering only weekends or holidays has no payroll
-            // effect — leave it out instead of printing a 0 row.
-            if days <= 0.0 {
-                continue;
-            }
-            declared_anything = true;
-            rows.push((
-                *category_rank,
-                employee_name(member),
-                member.id,
-                PayrollAbsenceRow {
-                    user_id: member.id,
-                    employee: employee_name(member),
-                    category: i18n::absence_kind_label(language, &slug, category_name),
-                    from: segment_from,
-                    to: segment_to,
-                    days,
-                    medical_certificate_required: tracks_medical_certificate
-                        .then_some(medical_certificate_required),
-                },
-            ));
-        }
-        if declared_anything {
-            declared_ids.push(absence_id);
+            segments_to_print.push(CarriedSegment {
+                member,
+                absence_id,
+                slug: slug.clone(),
+                category,
+                medical_certificate_required,
+                from: segment_from,
+                to: segment_to,
+            });
         }
     }
+
+    // (category rank, display name, user id, row) — the shape the shared
+    // illness merge below works on.
+    let mut rows: Vec<(usize, String, i64, PayrollAbsenceRow)> = Vec::new();
+    // The absences this document actually declares something for. They, and
+    // only they, are marked afterwards, so the marked set cannot drift from
+    // the printed one.
+    let mut declared_ids: Vec<i64> = Vec::new();
+    // Per person, because the quota is theirs: two catch-up stretches landing
+    // in one calendar week cost that week once between them, exactly as the
+    // main table's rows do.
+    let mut indices_by_member: std::collections::HashMap<i64, Vec<usize>> =
+        std::collections::HashMap::new();
+    for (index, segment) in segments_to_print.iter().enumerate() {
+        indices_by_member
+            .entry(segment.member.id)
+            .or_default()
+            .push(index);
+    }
+    let mut days_by_index = vec![0.0; segments_to_print.len()];
+    for indices in indices_by_member.values() {
+        let ranges: Vec<(NaiveDate, NaiveDate)> = indices
+            .iter()
+            .map(|index| (segments_to_print[*index].from, segments_to_print[*index].to))
+            .collect();
+        // The window only has to contain the stretches themselves; days outside
+        // them never consume quota.
+        let (Some(window_start), Some(window_end)) = (
+            ranges.iter().map(|(from, _)| *from).min(),
+            ranges.iter().map(|(_, to)| *to).max(),
+        ) else {
+            continue;
+        };
+        let member = segments_to_print[indices[0]].member;
+        let counted = crate::time_calc::counted_days_per_range(
+            &ranges,
+            window_start,
+            window_end,
+            &holidays,
+            member.workdays_per_week,
+        );
+        for (index, days) in indices.iter().zip(counted) {
+            days_by_index[*index] = days;
+        }
+    }
+
+    for (segment, days) in segments_to_print.into_iter().zip(days_by_index) {
+        // A stretch covering only weekends or holidays, or one whose week an
+        // earlier stretch already accounted for, has no payroll effect of its
+        // own — leave it out instead of printing a 0 row.
+        if days <= 0.0 {
+            continue;
+        }
+        let (_, category_name, category_rank, tracks_medical_certificate) = segment.category;
+        rows.push((
+            *category_rank,
+            employee_name(segment.member),
+            segment.member.id,
+            PayrollAbsenceRow {
+                user_id: segment.member.id,
+                employee: employee_name(segment.member),
+                category: i18n::absence_kind_label(language, &segment.slug, category_name),
+                from: segment.from,
+                to: segment.to,
+                days,
+                medical_certificate_required: tracks_medical_certificate
+                    .then_some(segment.medical_certificate_required),
+            },
+        ));
+        declared_ids.push(segment.absence_id);
+    }
+    declared_ids.sort_unstable();
+    declared_ids.dedup();
     // Category, then person, then chronological — the order the main absence
     // table uses, so the reader is not asked to learn a second one, and the
     // order the illness merge below needs to look only at neighbours.
@@ -2071,24 +2127,45 @@ async fn build_absence_rows(
             .reports
             .approved_absence_rows_as_reported(member.id, from, to, reported_as)
             .await?;
-        for (absence_id, start_date, end_date, slug, _stored_name) in absences {
-            let Some((_, category_name, category_rank, tracks_medical_certificate)) = selected
+        // Clamp to the reported month and to the employee's start date first:
+        // days before the contract started are not payroll-relevant and are
+        // hidden everywhere else in the app too.
+        #[allow(clippy::type_complexity)]
+        let printable: Vec<(i64, NaiveDate, NaiveDate, String, &(String, String, usize, bool))> =
+            absences
+                .into_iter()
+                .filter_map(|(absence_id, start_date, end_date, slug, _stored_name)| {
+                    let category = selected
+                        .iter()
+                        .find(|(selected_slug, _, _, _)| selected_slug == &slug)?;
+                    let row_from = start_date.max(from).max(member.start_date);
+                    let row_to = end_date.min(to);
+                    (row_from <= row_to).then_some((absence_id, row_from, row_to, slug, category))
+                })
+                .collect();
+        // One weekly quota belongs to the person's week, not to each request
+        // inside it: everything this document prints for them is counted
+        // together. Counting each absence alone charged a part-time contract
+        // twice for a week two sick notes happened to share, and the document
+        // then claimed more days than that week can ever hold.
+        let counted_days = crate::time_calc::counted_days_per_range(
+            &printable
                 .iter()
-                .find(|(selected_slug, _, _, _)| selected_slug == &slug)
-            else {
-                continue;
-            };
-            // Clamp to the reported month and to the employee's start date:
-            // days before the contract started are not payroll-relevant and are
-            // hidden everywhere else in the app too.
-            let row_from = start_date.max(from).max(member.start_date);
-            let row_to = end_date.min(to);
-            if row_from > row_to {
-                continue;
-            }
-            let days = count_workdays(row_from, row_to, &holidays, member.workdays_per_week);
-            // An absence that only covers non-working days (weekend, holiday)
-            // has no payroll effect — leave it out instead of printing a 0 row.
+                .map(|(_, row_from, row_to, _, _)| (*row_from, *row_to))
+                .collect::<Vec<_>>(),
+            from.max(member.start_date),
+            to,
+            &holidays,
+            member.workdays_per_week,
+        );
+        for ((absence_id, row_from, row_to, slug, category), days) in
+            printable.into_iter().zip(counted_days)
+        {
+            let (_, category_name, category_rank, tracks_medical_certificate) = category;
+            // An absence that only covers non-working days (weekend, holiday),
+            // or whose week is already fully accounted for by an earlier row,
+            // has no payroll effect of its own — leave it out instead of
+            // printing a 0 row.
             if days <= 0.0 {
                 continue;
             }
