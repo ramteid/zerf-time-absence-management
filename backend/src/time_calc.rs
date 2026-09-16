@@ -187,6 +187,43 @@ pub fn counted_workdays(
     counted
 }
 
+/// How many of the counted days each range is charged, when the weekly cap is
+/// applied once across all of them.
+///
+/// Returns one count per input range, in input order. Days are attributed in
+/// chronological order of range start (input order breaks ties), so the first
+/// booking in a week keeps its own days and a later one in the same week is
+/// charged only what the week has left.
+///
+/// This is the per-range counterpart of [`counted_workdays`], for callers that
+/// print or bill each range separately and must still have those numbers add up
+/// to what the week actually costs. Counting each range on its own re-applies
+/// the cap to every one of them, so two absences inside a single calendar week
+/// bill a part-time contract for more days than that week can ever hold.
+pub fn counted_days_per_range(
+    ranges: &[(NaiveDate, NaiveDate)],
+    window_start: NaiveDate,
+    window_end: NaiveDate,
+    holidays: &std::collections::HashSet<NaiveDate>,
+    workdays_per_week: i16,
+) -> Vec<f64> {
+    let mut counts = vec![0.0; ranges.len()];
+    if ranges.is_empty() {
+        return counts;
+    }
+    let mut order: Vec<usize> = (0..ranges.len()).collect();
+    order.sort_by_key(|index| (ranges[*index].0, *index));
+    for day in counted_workdays(ranges, window_start, window_end, holidays, workdays_per_week) {
+        if let Some(owner) = order
+            .iter()
+            .find(|index| day >= ranges[**index].0 && day <= ranges[**index].1)
+        {
+            counts[*owner] += 1.0;
+        }
+    }
+    counts
+}
+
 /// Count effective workdays in `[from, to]`, excluding public holidays.
 ///
 /// Thin wrapper around [`counted_workdays`] over the whole range: the weekly
@@ -650,5 +687,99 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn counted_days_per_range_splits_a_shared_week_between_the_ranges() {
+        // Mon-Tue and Thu-Fri of one week on a three-day contract. Counted
+        // separately that is 2 + 2 = 4 days; the week only ever holds 3.
+        let monday = day(2026, 5, 4);
+        let ranges = [
+            (monday, monday + Duration::days(1)),
+            (monday + Duration::days(3), monday + Duration::days(4)),
+        ];
+        let counted = counted_days_per_range(
+            &ranges,
+            monday,
+            monday + Duration::days(6),
+            &HashSet::new(),
+            3,
+        );
+        assert_eq!(counted, vec![2.0, 1.0]);
+        assert_eq!(counted.iter().sum::<f64>(), 3.0);
+    }
+
+    #[test]
+    fn counted_days_per_range_is_independent_of_the_input_order() {
+        let monday = day(2026, 5, 4);
+        let later_first = [
+            (monday + Duration::days(3), monday + Duration::days(4)),
+            (monday, monday + Duration::days(1)),
+        ];
+        let counted = counted_days_per_range(
+            &later_first,
+            monday,
+            monday + Duration::days(6),
+            &HashSet::new(),
+            3,
+        );
+        // The earlier range keeps its own days wherever it sits in the input.
+        assert_eq!(counted, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn counted_days_per_range_leaves_a_week_within_quota_alone() {
+        let monday = day(2026, 5, 4);
+        let ranges = [
+            (monday, monday + Duration::days(1)),
+            (monday + Duration::days(2), monday + Duration::days(4)),
+        ];
+        let counted = counted_days_per_range(
+            &ranges,
+            monday,
+            monday + Duration::days(6),
+            &HashSet::new(),
+            5,
+        );
+        assert_eq!(counted, vec![2.0, 3.0]);
+    }
+
+    #[test]
+    fn counted_days_per_range_totals_what_counted_workdays_counts() {
+        let monday = day(2026, 5, 4);
+        let window_end = monday + Duration::days(20);
+        let holidays = HashSet::from([monday + Duration::days(9)]);
+        for quota in 1i16..=5 {
+            for offset in 0..10i64 {
+                let ranges = [
+                    (monday, monday + Duration::days(2)),
+                    (
+                        monday + Duration::days(offset),
+                        monday + Duration::days(offset + 3),
+                    ),
+                ];
+                let per_range =
+                    counted_days_per_range(&ranges, monday, window_end, &holidays, quota);
+                let union = counted_workdays(&ranges, monday, window_end, &holidays, quota).len();
+                assert_eq!(
+                    per_range.iter().sum::<f64>(),
+                    union as f64,
+                    "quota {quota}, offset {offset}: the rows must add up to the union"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn counted_days_per_range_handles_no_ranges() {
+        let monday = day(2026, 5, 4);
+        assert!(counted_days_per_range(
+            &[],
+            monday,
+            monday + Duration::days(6),
+            &HashSet::new(),
+            5
+        )
+        .is_empty());
     }
 }

@@ -6876,3 +6876,136 @@ async fn payroll_no_ledger_fallback_computes_the_break_over_the_whole_day() {
 
     app.cleanup().await;
 }
+
+/// A calendar week costs a part-time contract its configured days once, no
+/// matter how many absences share it. Pricing each absence on its own re-applies
+/// the weekly quota to every one of them, so two notes inside one week claimed
+/// more days than that week can ever hold — in a document that goes to the tax
+/// office and decides continued pay.
+#[tokio::test]
+async fn payroll_absence_days_never_exceed_the_week_they_share() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    // A Monday whose whole working week stays inside one calendar month, so the
+    // reported month holds every day under test.
+    let monday = [3i64, 4, 2, 5]
+        .into_iter()
+        .map(|weeks_back| next_monday(-7 * weeks_back))
+        .find(|monday| (*monday + Duration::days(4)).month() == monday.month())
+        .expect("a Monday whose Mon-Fri week stays inside one month");
+    let (from, to) = month_bounds(monday);
+
+    // Three days a week, spread freely across Mon-Fri.
+    let (status, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "parttime-payroll@example.com",
+                "first_name": "Petra", "last_name": "Parttime",
+                "role": "employee", "weekly_hours": 24,
+                "workdays_per_week": 3,
+                "start_date": "2024-01-01",
+                "approver_ids": [1],
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create part-time employee: {body}");
+    let user_id = id(&body);
+
+    // Two payroll-relevant absences inside that single week.
+    let sick = absence_cat(&app.state.pool, "sick").await;
+    app.state
+        .db
+        .absences
+        .create(
+            user_id,
+            sick.id,
+            true,
+            monday,
+            monday + Duration::days(1),
+            None,
+            "approved",
+        )
+        .await
+        .expect("create the Monday-Tuesday sick note");
+    let unpaid = absence_cat(&app.state.pool, "unpaid").await;
+    app.state
+        .db
+        .absences
+        .create(
+            user_id,
+            unpaid.id,
+            false,
+            monday + Duration::days(3),
+            monday + Duration::days(4),
+            None,
+            "approved",
+        )
+        .await
+        .expect("create the Thursday-Friday unpaid leave");
+
+    let members = app
+        .state
+        .db
+        .reports
+        .timesheet_members_for_period(to)
+        .await
+        .expect("members");
+    let language = zerf::i18n::Language::from_setting("en");
+    let data = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from,
+            to,
+            interim: false,
+            created_on: to,
+            carried: None,
+        },
+        &members,
+        &config(false, false),
+        &language,
+        None,
+    )
+    .await
+    .expect("build report data");
+
+    let rows = data.absence_rows.as_ref().expect("absence section enabled");
+    let printed: Vec<(String, NaiveDate, NaiveDate, f64)> = rows
+        .iter()
+        .filter(|row| row.user_id == user_id)
+        .map(|row| (row.category.clone(), row.from, row.to, row.days))
+        .collect();
+    let printed_days: f64 = printed.iter().map(|(_, _, _, days)| days).sum();
+
+    let holidays = app
+        .state
+        .db
+        .reports
+        .holiday_set(from, to)
+        .await
+        .expect("holidays");
+    // The week counted as one, which is what the leave tiles and every other
+    // day count in the app agree on.
+    let week_total = zerf::time_calc::counted_workdays(
+        &[
+            (monday, monday + Duration::days(1)),
+            (monday + Duration::days(3), monday + Duration::days(4)),
+        ],
+        monday,
+        monday + Duration::days(6),
+        &holidays,
+        3,
+    )
+    .len() as f64;
+    assert_eq!(
+        printed_days, week_total,
+        "the printed rows must add up to what the week actually costs: {printed:?}"
+    );
+    assert!(
+        printed_days <= 3.0,
+        "a three-day contract can never owe more than three days in one week: {printed_days}"
+    );
+
+    app.cleanup().await;
+}
