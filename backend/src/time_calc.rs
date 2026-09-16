@@ -325,19 +325,32 @@ pub fn week_leave_accounting(
 
     // For the *target* a holiday counts like any other day the person does not
     // have to work, because that is what a contract day is worth under this
-    // rule. The week can never lose more days than it holds.
-    let lost_days = i64::from((holiday_days + charged_count as u32).min(quota));
+    // rule. The week can never lose more days than the contract puts in it.
+    let lost_days = (holiday_days + charged_count as u32).min(quota);
     let day_value_min = contract_day_minutes(weekly_hours, workdays_per_week);
-    // The week is worth its own days, not the raw weekly hours. Rounding the
-    // day first and multiplying up is what today's per-day target does, so a
-    // five-day contract comes out byte-identical: its contract day and its
-    // potential day are the same number. Rounding the week instead shifted
-    // 33.54 hours a week by two minutes, which is real flextime on a balance
-    // nobody asked to change.
-    let week_target_min = i64::from(workdays_per_week.max(0)) * day_value_min;
+
+    // A week nobody was away in has to come out at exactly the number it has
+    // today, down to the minute: nothing happened in it, and a rounding change
+    // must not move a balance somebody already read. So the untouched week
+    // keeps today's arithmetic — the potential pool times the potential day —
+    // and only the days actually lost are priced as contract days.
+    let potential_day_min = if potential == 0 {
+        0
+    } else {
+        (weekly_hours.max(0.0) / f64::from(potential) * 60.0).round() as i64
+    };
+    let untouched_week_min = i64::from(potential) * potential_day_min;
+    let remaining_target_min = if lost_days >= quota {
+        // Every day the contract holds is gone, so nothing is left to work.
+        // Stated outright rather than subtracted, because the two roundings
+        // would otherwise leave a stray minute behind.
+        0
+    } else {
+        (untouched_week_min - i64::from(lost_days) * day_value_min).max(0)
+    };
     WeekLeaveAccounting {
         charged_dates,
-        remaining_target_min: (week_target_min - lost_days * day_value_min).max(0),
+        remaining_target_min,
     }
 }
 
@@ -1061,6 +1074,48 @@ mod tests {
                     "{weekly_hours}h with {taken} days off must match the \
                      per-day target the app computes today"
                 );
+            }
+        }
+    }
+
+    /// A week nobody was away in must not move by a single minute, on any
+    /// contract. Real part-time hours divide unevenly, and the first draft
+    /// shifted an untouched week by one minute on 23.4 hours over four days and
+    /// by two minutes on 31.2 hours over four days.
+    #[test]
+    fn a_week_with_no_absence_keeps_todays_target_on_every_contract() {
+        let monday = day(2026, 5, 4);
+        for weekly_hours in [40.0f64, 23.4, 31.2, 33.54, 24.0, 11.7, 18.0] {
+            for workdays_per_week in 1i16..=7 {
+                let potential = i64::from(potential_workdays_per_week(workdays_per_week));
+                let today_week =
+                    potential * (weekly_hours / potential as f64 * 60.0).round() as i64;
+                let week = accounting(monday, &[], &[], weekly_hours, workdays_per_week);
+                assert_eq!(
+                    week.remaining_target_min, today_week,
+                    "{weekly_hours}h over {workdays_per_week} days: an untouched \
+                     week must read exactly as it does today"
+                );
+                assert!(week.charged_dates.is_empty());
+            }
+        }
+    }
+
+    /// Taking every day the contract holds leaves nothing to work, whatever the
+    /// hours round to.
+    #[test]
+    fn a_fully_taken_contract_week_leaves_no_minute_behind() {
+        let monday = day(2026, 5, 4);
+        for weekly_hours in [40.0f64, 23.4, 31.2, 33.54, 24.0, 11.7, 18.0] {
+            for workdays_per_week in 1i16..=5 {
+                let offsets: Vec<i64> = (0..i64::from(workdays_per_week)).collect();
+                let week = accounting(monday, &[], &offsets, weekly_hours, workdays_per_week);
+                assert_eq!(
+                    week.remaining_target_min, 0,
+                    "{weekly_hours}h over {workdays_per_week} days: the whole \
+                     contract week was taken"
+                );
+                assert_eq!(week.charged_dates.len(), workdays_per_week as usize);
             }
         }
     }
