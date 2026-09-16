@@ -286,7 +286,11 @@ fn build_break_rules(
     Some(rules)
 }
 
-fn exclusive_threshold_minutes(threshold_hours: f64) -> i64 {
+/// A break threshold in whole minutes, exclusive: work must *exceed* it for
+/// the tier to apply. Flooring here is what makes two tiers comparable — the
+/// settings endpoint, this module and the frontend all decide "is this a
+/// higher tier?" on the same number.
+pub fn exclusive_threshold_minutes(threshold_hours: f64) -> i64 {
     const FLOAT_ROUNDING_EPSILON: f64 = 1e-9;
     (threshold_hours * 60.0 + FLOAT_ROUNDING_EPSILON).floor() as i64
 }

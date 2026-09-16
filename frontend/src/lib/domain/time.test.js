@@ -405,6 +405,39 @@ describe("buildBreakRules", () => {
   });
 });
 
+describe("buildBreakRules tier collapsing", () => {
+  // The settings endpoint compares thresholds in whole minutes, so this pair
+  // can no longer be stored — but a database that already holds it must be
+  // read the same way here as in the backend's `build_break_rules`, which
+  // keeps the first tier.
+  it("treats two thresholds that floor to the same minute as one tier", () => {
+    const rules = buildBreakRules({
+      auto_break_enabled: true,
+      auto_break_threshold_hours: 6.0,
+      auto_break_deduction_minutes: 30,
+      auto_break_threshold_hours_2: 6.008,
+      auto_break_deduction_minutes_2: 60,
+    });
+    expect(rules).toHaveLength(1);
+    expect(rules[0].thresholdMinutes).toBe(360);
+    expect(rules[0].deductionMinutes).toBe(30);
+  });
+
+  it("still keeps a genuinely higher second tier", () => {
+    const rules = buildBreakRules({
+      auto_break_enabled: true,
+      auto_break_threshold_hours: 6,
+      auto_break_deduction_minutes: 30,
+      auto_break_threshold_hours_2: 9,
+      auto_break_deduction_minutes_2: 45,
+    });
+    expect(rules.map((r) => [r.thresholdMinutes, r.deductionMinutes])).toEqual([
+      [360, 30],
+      [540, 45],
+    ]);
+  });
+});
+
 describe("computeDayBreakDeduction", () => {
   // Helper: build a minimal time entry object.
   function entry(startTime, endTime, opts = {}) {

@@ -173,7 +173,16 @@ Everything else — `count_workdays`, `workdays_for_ranges_in_window*`, the leav
 tiles, the team report's taken/planned columns, the carryover chain and the
 leave-account budget check — goes through it. A proposed absence is priced as
 the difference between the year counted with it and without it, never on its
-own, so a week already partly booked cannot cost its quota a second time.
+own, so a week already partly booked cannot cost its quota a second time —
+pricing it alone rejected requests that in fact fit.
+
+Auto-break tiers are compared in **whole minutes** (`exclusive_threshold_minutes`)
+everywhere they are compared at all: the settings endpoint refuses a second
+threshold that does not exceed the first at that resolution, and both
+`services::reports::build_break_rules` and the frontend's `buildBreakRules`
+collapse two tiers that land on the same minute onto the first. Comparing hours
+instead let 6.0 and 6.008 through as two tiers, and the two renderers then
+disagreed about which deduction applied.
 `reports::weeks_in_month_to_judge` decides *which* weeks a completeness check
 sees: every week that overlaps the period and has already started, the one being
 worked included. A week belongs to a month as soon as any of its days do.

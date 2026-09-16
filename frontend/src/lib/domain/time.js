@@ -113,20 +113,24 @@ export function buildBreakRules(settings) {
   const t2 = Number(settings.auto_break_threshold_hours_2);
   const d2 = Number(settings.auto_break_deduction_minutes_2);
   if (Number.isFinite(t2) && t2 > 0 && Number.isFinite(d2) && d2 > 0) {
-    // Avoid duplicate thresholds – last wins would be surprising.
-    if (!rules.some((r) => r.thresholdHours === t2)) {
+    // Compared in whole minutes, the resolution the rule is applied at and the
+    // one the backend uses (`build_break_rules`). Comparing hours instead let
+    // 6.0 and 6.008 through as two tiers, and the backend then credited a
+    // different deduction than this page displayed.
+    const thresholdMinutes = exclusiveThresholdMinutes(t2);
+    if (!rules.some((r) => r.thresholdMinutes === thresholdMinutes)) {
       rules.push({
         thresholdHours: t2,
-        thresholdMinutes: exclusiveThresholdMinutes(t2),
+        thresholdMinutes,
         deductionMinutes: d2,
       });
     }
   }
-  rules.sort((a, b) => a.thresholdHours - b.thresholdHours);
+  rules.sort((a, b) => a.thresholdMinutes - b.thresholdMinutes);
   // Ensure strictly increasing thresholds and positive deductions
   return rules.filter((r, idx) => {
     if (idx === 0) return true;
-    return r.thresholdHours > rules[idx - 1].thresholdHours;
+    return r.thresholdMinutes > rules[idx - 1].thresholdMinutes;
   });
 }
 

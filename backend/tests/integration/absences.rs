@@ -1,6 +1,7 @@
 //! End-to-end absence workflow tests running in a single container for efficiency.
 //! All test cases run sequentially within the same app instance.
 
+use chrono::Datelike;
 use std::collections::HashSet;
 
 use reqwest::StatusCode;
@@ -8,7 +9,7 @@ use serde_json::{json, Value};
 
 use crate::common::TestApp;
 use crate::helpers::{
-    admin_login, bootstrap_team, id, login_change_pw, next_monday, reference_date,
+    absence_cat, admin_login, bootstrap_team, id, login_change_pw, next_monday, reference_date,
     set_flextime_opening_balance, temp_pw,
 };
 
@@ -1579,6 +1580,151 @@ async fn a_week_off_straddling_today_costs_one_weekly_quota() {
         vacation["available"].as_f64().expect("available"),
         entitlement + carryover - 3.0,
         "what is left must match what was actually spent: {vacation}"
+    );
+
+    // The team report splits the same week into taken and planned columns and
+    // must reach the same total — it used to count the two sides as separate
+    // windows, so a lead saw a different number from the employee.
+    let month = monday.format("%Y-%m").to_string();
+    let (status, team) = lead.get(&format!("/api/v1/reports/team?month={month}")).await;
+    assert_eq!(status, StatusCode::OK, "read the team report: {team}");
+    let row = team["rows"]
+        .as_array()
+        .expect("team rows")
+        .iter()
+        .find(|row| row["user_id"].as_i64() == Some(part_timer_id))
+        .unwrap_or_else(|| panic!("part-timer missing from the team report: {team}"));
+    let usage = row["leave_account_usage"]
+        .as_array()
+        .expect("leave account usage")
+        .iter()
+        .find(|usage| usage["category_id"] == vacation["category_id"])
+        .unwrap_or_else(|| panic!("vacation column missing: {row}"));
+    let team_taken = usage["taken_days"].as_f64().expect("taken_days");
+    let team_planned = usage["planned_days"].as_f64().expect("planned_days");
+    assert_eq!(
+        team_taken + team_planned,
+        3.0,
+        "the team report must charge the same three days: {usage}"
+    );
+    assert_eq!(
+        (team_taken, team_planned),
+        (taken, upcoming),
+        "and split them the same way the employee's own tiles do: {usage}"
+    );
+
+    app.cleanup().await;
+}
+
+/// A second booking in a week that already holds one is priced by what it adds,
+/// not by what it would cost alone.
+///
+/// The leave-account budget check counted the proposed range on its own and
+/// added it to the existing bookings, so both got the full weekly quota: a
+/// 3-day/week employee with 3 days left, two of them already booked in a week,
+/// was told they had no budget for one more day in that same week — even though
+/// the week can only ever cost the three days they had.
+#[tokio::test]
+async fn a_second_booking_in_one_week_is_priced_by_what_it_adds() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _, _cat_id) =
+        bootstrap_team(&app, &admin, false).await;
+    let lead = login_change_pw(&app, "lead-r@example.com", &lead_pw).await;
+
+    // The reference date is a Monday. Starting the employee on 1 January of the
+    // same year makes it their first leave-account year, so there is no
+    // carryover and the entitlement below is the whole budget.
+    let monday = reference_date();
+    let year = monday.format("%Y").to_string();
+    let year_start = monday.with_ordinal(1).expect("1 January of the same year");
+
+    let (status, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "tight-budget@example.com",
+                "first_name": "Tina",
+                "last_name": "Tight",
+                "role": "employee",
+                "weekly_hours": 24,
+                "workdays_per_week": 3,
+                "start_date": year_start.to_string(),
+                "approver_ids": [lead_id],
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create employee: {body}");
+    let user_id = id(&body);
+    let employee = login_change_pw(&app, "tight-budget@example.com", &temp_pw(&body)).await;
+
+    // Exactly three vacation days for the year — one week's worth.
+    let vacation = absence_cat(&app.state.pool, "vacation").await;
+    let (status, accounts) = admin
+        .get(&format!("/api/v1/users/{user_id}/leave-accounts"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "load leave accounts: {accounts}");
+    let (status, body) = admin
+        .put(
+            &format!("/api/v1/users/{user_id}"),
+            &json!({
+                "leave_accounts": [{
+                    "category_id": vacation.id,
+                    "base_days": 3,
+                    "current_year_days": 3,
+                    "next_year_days": 3
+                }]
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "set the entitlement to 3 days: {body}");
+
+    // Two days of that week booked and approved.
+    let (status, body) = employee
+        .post(
+            "/api/v1/absences",
+            &json!({
+                "kind": "vacation",
+                "start_date": monday.to_string(),
+                "end_date": (monday + chrono::Duration::days(1)).to_string(),
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "book Monday and Tuesday: {body}");
+    let first_id = id(&body);
+    let (status, body) = lead
+        .post(&format!("/api/v1/absences/{first_id}/approve"), &json!({}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the first booking: {body}");
+
+    // Two more days in the same week. The week is already at two of its three,
+    // so this adds one day, not two — and one day still fits.
+    let (status, body) = employee
+        .post(
+            "/api/v1/absences",
+            &json!({
+                "kind": "vacation",
+                "start_date": (monday + chrono::Duration::days(3)).to_string(),
+                "end_date": (monday + chrono::Duration::days(4)).to_string(),
+            }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "Thursday and Friday of the same week must still fit in the budget: {body}"
+    );
+
+    // And the balance agrees: the whole week cost three days, not four.
+    let (status, balances) = employee
+        .get(&format!("/api/v1/leave-balances/{user_id}?year={year}"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "read leave balances: {balances}");
+    let vacation_balance = vacation_balance(&balances);
+    assert_eq!(
+        vacation_balance["available"].as_f64().expect("available"),
+        0.0,
+        "three days of entitlement, one week off, nothing left: {vacation_balance}"
     );
 
     app.cleanup().await;
