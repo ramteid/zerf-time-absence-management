@@ -7,7 +7,7 @@ use crate::services::absence_balance::{
     validate_flextime_balance, validate_leave_account_balance,
 };
 use crate::AppState;
-use chrono::{DateTime, Duration, NaiveDate, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize, Serializer};
 
 async fn notification_language(pool: &crate::db::DatabasePool) -> i18n::Language {
@@ -1370,7 +1370,7 @@ pub async fn compute_balances(
     use crate::services::absence_balance::{
         carryover_remaining_days, counted_workdays_for_user, effective_leave_account_start_year,
         leave_account_tile_is_visible, leave_account_year_context, parse_expiry_date,
-        total_entitlement_with_carryover, workdays_for_ranges_in_window, CarryoverRemainingInput,
+        total_entitlement_with_carryover, usage_split_at_expiry, CarryoverRemainingInput,
     };
 
     assert_can_access_user(app_state, requester, target_user_id).await?;
@@ -1435,14 +1435,18 @@ pub async fn compute_balances(
             .filter(|absence| absence.status == "approved")
             .map(|absence| (absence.start_date, absence.end_date))
             .collect();
-        let all_ranges: Vec<(NaiveDate, NaiveDate)> = account_absences
+        // Every booking this account holds. The query behind `account_absences`
+        // already limits the statuses to requested, approved and
+        // cancellation-pending — the three that reserve budget — so this is the
+        // full reserved set.
+        let account_ranges: Vec<(NaiveDate, NaiveDate)> = account_absences
             .iter()
             .map(|absence| (absence.start_date, absence.end_date))
             .collect();
         let counted_days = counted_workdays_for_user(
             &app_state.pool,
             target_user.id,
-            &all_ranges,
+            &account_ranges,
             year_from,
             year_to,
         )
@@ -1477,19 +1481,10 @@ pub async fn compute_balances(
         let (effective_entitlement, carryover_days, carryover_expired) =
             leave_account_year_context(&app_state.pool, &target_user, category, year, today)
                 .await?;
-        let carryover_ranges: Vec<_> = account_absences
-            .iter()
-            .filter(|absence| {
-                absence.status == "approved"
-                    || absence.status == "cancellation_pending"
-                    || absence.status == "requested"
-            })
-            .map(|absence| (absence.start_date, absence.end_date))
-            .collect();
         let carryover_remaining = carryover_remaining_days(CarryoverRemainingInput {
             pool: &app_state.pool,
             user_id: target_user.id,
-            leave_account_ranges: &carryover_ranges,
+            leave_account_ranges: &account_ranges,
             year_start: year_from,
             today,
             expiry_date: Some(expiry_date),
@@ -1502,37 +1497,19 @@ pub async fn compute_balances(
             carryover_days,
             carryover_expired,
         );
-        let reserved_ranges: Vec<_> = account_absences
-            .iter()
-            .map(|absence| (absence.start_date, absence.end_date))
-            .collect();
         let available = if carryover_expired {
-            let pre_window_end = std::cmp::min(expiry_date, year_to);
-            let post_window_start = expiry_date + Duration::days(1);
-            let pre_reserved = if year_from <= pre_window_end {
-                workdays_for_ranges_in_window(
-                    &app_state.pool,
-                    target_user.id,
-                    &reserved_ranges,
-                    year_from,
-                    pre_window_end,
-                )
-                .await?
-            } else {
-                0.0
-            };
-            let post_reserved = if post_window_start <= year_to {
-                workdays_for_ranges_in_window(
-                    &app_state.pool,
-                    target_user.id,
-                    &reserved_ranges,
-                    post_window_start,
-                    year_to,
-                )
-                .await?
-            } else {
-                0.0
-            };
+            // Split the year's counted days at the expiry date rather than
+            // counting each side as its own window, which would cap a week
+            // straddling that date twice over.
+            let (pre_reserved, post_reserved) = usage_split_at_expiry(
+                &app_state.pool,
+                target_user.id,
+                &account_ranges,
+                year_from,
+                year_to,
+                expiry_date,
+            )
+            .await?;
             let base_consumed_before_or_on_expiry = (pre_reserved - carryover_days as f64).max(0.0);
             effective_entitlement as f64 - base_consumed_before_or_on_expiry - post_reserved
         } else {

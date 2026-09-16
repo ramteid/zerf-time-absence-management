@@ -207,7 +207,13 @@ pub async fn update_admin_settings(
             if has_tier2_threshold {
                 let threshold2 = body.auto_break_threshold_hours_2.unwrap();
                 let deduction2 = body.auto_break_deduction_minutes_2.unwrap();
-                if threshold2 <= threshold1 {
+                // Compared in whole minutes, which is the resolution the rule
+                // is actually applied at: 6.0 h and 6.008 h are both "more than
+                // 360 minutes" and are not two tiers, however they compare as
+                // hours.
+                if crate::services::reports::exclusive_threshold_minutes(threshold2)
+                    <= crate::services::reports::exclusive_threshold_minutes(threshold1)
+                {
                     return Err(AppError::BadRequest(
                         "auto_break_threshold_hours_2 must be greater than auto_break_threshold_hours."
                             .into(),

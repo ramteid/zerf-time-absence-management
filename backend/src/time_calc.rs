@@ -609,4 +609,46 @@ mod tests {
                 .is_empty()
         );
     }
+
+    /// Whatever the inputs, every day `counted_workdays` returns is a real one:
+    /// inside the window, covered by a range, not a holiday, a potential
+    /// workday, listed once, in calendar order, and never more of them in a
+    /// week than the quota allows. These are the properties every leave-day
+    /// figure in the app rests on, so they are asserted directly rather than
+    /// against a second copy of the arithmetic.
+    #[test]
+    fn counted_workdays_only_ever_returns_real_capped_days() {
+        let base = day(2026, 5, 4); // Monday
+        let window_end = base + Duration::days(20);
+        let holidays = HashSet::from([base + Duration::days(9)]);
+        for quota in 1i16..=5 {
+            for length in 0..14i64 {
+                let ranges = [(base + Duration::days(1), base + Duration::days(1 + length))];
+                let counted = counted_workdays(&ranges, base, window_end, &holidays, quota);
+
+                let unique: HashSet<NaiveDate> = counted.iter().copied().collect();
+                assert_eq!(unique.len(), counted.len(), "no day counted twice");
+                assert!(
+                    counted.windows(2).all(|pair| pair[0] < pair[1]),
+                    "days come back in calendar order"
+                );
+                for date in &counted {
+                    assert!(*date >= base && *date <= window_end, "inside the window");
+                    assert!(!holidays.contains(date), "never a holiday");
+                    assert!(is_potential_workday(*date, quota), "a potential workday");
+                    assert!(
+                        ranges.iter().any(|(start, end)| date >= start && date <= end),
+                        "covered by a range"
+                    );
+                }
+                for monday in counted.iter().map(|d| week_monday(*d)).collect::<HashSet<_>>() {
+                    let in_week = counted
+                        .iter()
+                        .filter(|date| week_monday(**date) == monday)
+                        .count();
+                    assert!(in_week <= quota as usize, "the weekly cap holds");
+                }
+            }
+        }
+    }
 }
