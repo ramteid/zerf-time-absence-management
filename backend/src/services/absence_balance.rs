@@ -1,38 +1,6 @@
 use crate::error::{AppError, AppResult};
 use chrono::{Datelike, Duration, NaiveDate};
 
-/// Count contract workdays in a date range for a specific user.
-/// Respects the user's workdays_per_week configuration (1-7 days per week).
-/// Excludes public holidays.
-pub async fn workdays(
-    pool: &crate::db::DatabasePool,
-    user_id: i64,
-    from: NaiveDate,
-    to: NaiveDate,
-) -> AppResult<f64> {
-    use crate::repository::AbsenceDb;
-    AbsenceDb::new(pool.clone())
-        .workdays_for_user(user_id, from, to)
-        .await
-}
-
-/// Sum of approved (and cancellation_pending) absence workdays for a specific
-/// category. Used by the team report for per-kind columns (vacation taken,
-/// sick taken). Callers pass the category id resolved up front so the
-/// repository query is a tight indexed lookup.
-pub async fn workdays_total_for_category(
-    pool: &crate::db::DatabasePool,
-    user_id: i64,
-    category_id: i64,
-    from: NaiveDate,
-    to: NaiveDate,
-) -> AppResult<f64> {
-    use crate::repository::AbsenceDb;
-    AbsenceDb::new(pool.clone())
-        .workdays_total_for_category(user_id, category_id, from, to)
-        .await
-}
-
 /// Enforce the backdating window for auto-approve (sick-like) categories.
 /// Other categories already have their start date bounded by the user's Zerf
 /// start_date and pass through approval; this guard exists specifically to
@@ -187,6 +155,52 @@ pub async fn workdays_for_ranges_in_window(
     ))
 }
 
+/// [`crate::time_calc::counted_workdays`] for one user, loading their holidays and
+/// weekly day count. The counterpart of [`workdays_for_ranges_in_window`] for
+/// callers that need the individual days rather than just their number.
+pub async fn counted_workdays_for_user(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    ranges: &[(NaiveDate, NaiveDate)],
+    window_start: NaiveDate,
+    window_end: NaiveDate,
+) -> AppResult<Vec<NaiveDate>> {
+    if ranges.is_empty() || window_end < window_start {
+        return Ok(Vec::new());
+    }
+    let absence_db = crate::repository::AbsenceDb::new(pool.clone());
+    let holidays = absence_db.holidays_set(window_start, window_end).await?;
+    let workdays_per_week = absence_db.user_workdays_per_week(user_id).await?;
+    Ok(crate::time_calc::counted_workdays(
+        ranges,
+        window_start,
+        window_end,
+        &holidays,
+        workdays_per_week,
+    ))
+}
+
+/// Leave days of `ranges` inside `[year_from, year_to]`, split into the part on
+/// or before the carryover expiry date and the part after it.
+///
+/// The split happens *after* counting, never before. Counting the two windows
+/// separately would apply the weekly cap to each of them, so a single calendar
+/// week straddling the expiry date could be billed for more days than a week
+/// can ever cost (see [`crate::time_calc::counted_workdays`]).
+pub async fn usage_split_at_expiry(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    ranges: &[(NaiveDate, NaiveDate)],
+    year_from: NaiveDate,
+    year_to: NaiveDate,
+    expiry: NaiveDate,
+) -> AppResult<(f64, f64)> {
+    let days = counted_workdays_for_user(pool, user_id, ranges, year_from, year_to).await?;
+    let pre_window_end = std::cmp::min(expiry, year_to);
+    let before_or_on_expiry = days.iter().filter(|day| **day <= pre_window_end).count() as f64;
+    Ok((before_or_on_expiry, days.len() as f64 - before_or_on_expiry))
+}
+
 /// Count workdays for already-loaded absence ranges with a caller-provided
 /// calendar. Team reports use this after loading every account range and the
 /// month's holidays in bulk, avoiding a database round trip for every
@@ -198,57 +212,14 @@ pub fn workdays_for_ranges_in_window_with_calendar(
     holidays: &std::collections::HashSet<NaiveDate>,
     workdays_per_week: i16,
 ) -> f64 {
-    // Clamp and collect.
-    let mut clamped: Vec<(NaiveDate, NaiveDate)> = Vec::new();
-    for (s, e) in ranges {
-        if let Some((cs, ce)) = clamp_range_to_window(*s, *e, window_start, window_end) {
-            clamped.push((cs, ce));
-        }
-    }
-    if clamped.is_empty() {
-        return 0.0;
-    }
-    // Sort for efficient coverage check.
-    clamped.sort_by_key(|(s, _)| *s);
-
-    if workdays_per_week <= 0 {
-        // Irregular: count calendar days (excluding holidays) in union.
-        let mut count = 0.0;
-        let mut day = window_start;
-        while day <= window_end {
-            if holidays.contains(&day) {
-                day += Duration::days(1);
-                continue;
-            }
-            if clamped.iter().any(|(s, e)| day >= *s && day <= *e) {
-                count += 1.0;
-            }
-            day += Duration::days(1);
-        }
-        return count;
-    }
-
-    // Count effective days per ISO week for the union of ranges.
-    let mut effective_days_by_week: std::collections::HashMap<NaiveDate, i16> =
-        std::collections::HashMap::new();
-    let mut day = window_start;
-    while day <= window_end {
-        if !crate::time_calc::is_potential_workday(day, workdays_per_week) || holidays.contains(&day) {
-            day += Duration::days(1);
-            continue;
-        }
-        // Is day covered by any clamped range?
-        let covered = clamped.iter().any(|(s, e)| day >= *s && day <= *e);
-        if covered {
-            let monday = crate::time_calc::week_monday(day);
-            *effective_days_by_week.entry(monday).or_insert(0) += 1;
-        }
-        day += Duration::days(1);
-    }
-    effective_days_by_week
-        .into_values()
-        .map(|days| std::cmp::min(days, workdays_per_week) as f64)
-        .sum()
+    crate::time_calc::counted_workdays(
+        ranges,
+        window_start,
+        window_end,
+        holidays,
+        workdays_per_week,
+    )
+    .len() as f64
 }
 
 /// The date that anchors annual-leave proration and carryover-source-year
@@ -446,46 +417,35 @@ pub async fn carryover_days_into_year(
 
         // Carryover source is scoped to the account booked on the absence,
         // not to the displayed absence category or its current cost type.
+        let source_ranges = absence_db
+            .leave_account_absence_ranges_in_year(
+                user.id,
+                category.id,
+                year_from,
+                year_to,
+                statuses,
+            )
+            .await?;
         let base_usage = if let Some(expiry) = expiry_date {
-            let pre_window_end = std::cmp::min(expiry, year_to);
-            let post_window_start = expiry + Duration::days(1);
-            let pre_usage = if year_from <= pre_window_end {
-                absence_db
-                    .leave_account_workdays_total_filtered(
-                        user.id,
-                        category.id,
-                        year_from,
-                        pre_window_end,
-                        statuses,
-                    )
-                    .await?
-            } else {
-                0.0
-            };
-            let post_usage = if post_window_start <= year_to {
-                absence_db
-                    .leave_account_workdays_total_filtered(
-                        user.id,
-                        category.id,
-                        post_window_start,
-                        year_to,
-                        statuses,
-                    )
-                    .await?
-            } else {
-                0.0
-            };
+            let (pre_usage, post_usage) = usage_split_at_expiry(
+                pool,
+                user.id,
+                &source_ranges,
+                year_from,
+                year_to,
+                expiry,
+            )
+            .await?;
             post_usage + (pre_usage - incoming_carryover as f64).max(0.0)
         } else {
-            let total_usage = absence_db
-                .leave_account_workdays_total_filtered(
-                    user.id,
-                    category.id,
-                    year_from,
-                    year_to,
-                    statuses,
-                )
-                .await?;
+            let total_usage = workdays_for_ranges_in_window(
+                pool,
+                user.id,
+                &source_ranges,
+                year_from,
+                year_to,
+            )
+            .await?;
             (total_usage - incoming_carryover as f64).max(0.0)
         };
 
@@ -557,18 +517,8 @@ async fn carryover_from_source_ranges(
     let expiry = parse_expiry_date(expiry_setting, source_year).ok_or_else(|| {
         AppError::Internal("Leave-account category has an invalid carryover expiry.".into())
     })?;
-    let pre_window_end = std::cmp::min(expiry, year_to);
-    let post_window_start = expiry + Duration::days(1);
-    let pre_usage = if year_from <= pre_window_end {
-        workdays_for_ranges_in_window(pool, user_id, ranges, year_from, pre_window_end).await?
-    } else {
-        0.0
-    };
-    let post_usage = if post_window_start <= year_to {
-        workdays_for_ranges_in_window(pool, user_id, ranges, post_window_start, year_to).await?
-    } else {
-        0.0
-    };
+    let (pre_usage, post_usage) =
+        usage_split_at_expiry(pool, user_id, ranges, year_from, year_to, expiry).await?;
     let base_usage = post_usage + (pre_usage - incoming_carryover as f64).max(0.0);
     Ok((effective_entitlement - base_usage.round() as i64).max(0))
 }
@@ -751,12 +701,10 @@ pub async fn validate_flextime_balance(
     exclude_id: Option<i64>,
 ) -> AppResult<()> {
     use crate::repository::AbsenceDb;
-    // Assistants have no flextime account; irregular schedules have no fixed target.
-    if crate::roles::is_assistant_role(&user.role) || user.workdays_per_week == 0 {
-        return Ok(());
-    }
+    // Assistants have no flextime account; a schedule with no potential workday
+    // pool has no target to spend against.
     let base_days = crate::time_calc::potential_workdays_per_week(user.workdays_per_week);
-    if base_days == 0 {
+    if crate::roles::is_assistant_role(&user.role) || base_days == 0 {
         return Ok(());
     }
     let target_per_day_min = (user.weekly_hours / f64::from(base_days) * 60.0).round() as i64;
@@ -934,35 +882,19 @@ async fn validate_leave_account_year(
     // Carryover, when present, may only cover pre-expiry consumption, even after
     // it has expired – past absences that used it while it was valid keep that
     // coverage (mirrors compute_balances display logic).
-    let pre_window_end = std::cmp::min(expiry, year_to);
-    let post_window_start = expiry + Duration::days(1);
-
-    let pre_existing = if year_from <= pre_window_end {
-        workdays_for_ranges_in_window(pool, user_id, existing_ranges, year_from, pre_window_end)
-            .await?
-    } else {
-        0.0
-    };
-    let pre_proposed = if let Some(range) =
-        clamp_range_to_window(proposed_start, proposed_end, year_from, pre_window_end)
-    {
-        workdays(pool, user_id, range.0, range.1).await?
-    } else {
-        0.0
-    };
-    let post_existing = if post_window_start <= year_to {
-        workdays_for_ranges_in_window(pool, user_id, existing_ranges, post_window_start, year_to)
-            .await?
-    } else {
-        0.0
-    };
-    let post_proposed = if let Some(range) =
-        clamp_range_to_window(proposed_start, proposed_end, post_window_start, year_to)
-    {
-        workdays(pool, user_id, range.0, range.1).await?
-    } else {
-        0.0
-    };
+    //
+    // What the proposal costs is the difference between the year counted with it
+    // and the year counted without it, never the proposal counted on its own: a
+    // week already partly booked cannot cost its weekly quota a second time, and
+    // pricing the proposal in isolation rejected requests that in fact fit.
+    let (pre_existing, post_existing) =
+        usage_split_at_expiry(pool, user_id, existing_ranges, year_from, year_to, expiry).await?;
+    let mut combined_ranges: Vec<(NaiveDate, NaiveDate)> = existing_ranges.to_vec();
+    combined_ranges.push((proposed_start, proposed_end));
+    let (pre_combined, post_combined) =
+        usage_split_at_expiry(pool, user_id, &combined_ranges, year_from, year_to, expiry).await?;
+    let pre_proposed = (pre_combined - pre_existing).max(0.0);
+    let post_proposed = (post_combined - post_existing).max(0.0);
 
     // Whether carryover is still usable for new pre-expiry bookings.
     let effective_carryover = if today > expiry { 0 } else { carryover_days };
@@ -1012,18 +944,6 @@ async fn validate_leave_account_year(
         ));
     }
     Ok(())
-}
-
-/// Compute workdays per category (used by team report). Replaces the legacy
-/// `workdays_per_kind` helper that hardcoded slug-based filtering.
-pub async fn workdays_per_category(
-    pool: &crate::db::DatabasePool,
-    user_id: i64,
-    category_id: i64,
-    from: NaiveDate,
-    to: NaiveDate,
-) -> AppResult<f64> {
-    workdays_total_for_category(pool, user_id, category_id, from, to).await
 }
 
 /// Total workdays across all categories whose `auto_approve_past` flag is set

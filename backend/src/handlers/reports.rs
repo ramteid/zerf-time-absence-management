@@ -18,7 +18,7 @@ use axum::{
     response::Response,
     Json,
 };
-use chrono::{Datelike, Duration, NaiveDate};
+use chrono::{Datelike, NaiveDate};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -246,10 +246,8 @@ pub async fn team(
     let leave_account_definitions = Arc::new(leave_account_definitions);
     let account_ranges_by_user = Arc::new(account_ranges_by_user);
 
-    // Taken includes today; planned starts tomorrow.
+    // Taken includes today; everything the month still holds after it is planned.
     let leave_taken_end = today.min(month_end);
-    let tomorrow = today + Duration::days(1);
-    let leave_planned_start = tomorrow.max(month_start);
 
     // Spawn one Tokio task per team member so all per-user DB round-trips
     // run concurrently.  A semaphore caps simultaneous DB-holding tasks at 8
@@ -286,31 +284,24 @@ pub async fn team(
                         .get(&(team_member.id, definition.category_id))
                         .map(Vec::as_slice)
                         .unwrap_or(&[]);
-                    let taken_days = if absence_count_start <= leave_taken_end {
-                        crate::services::absence_balance::workdays_for_ranges_in_window(
+                    // Count the whole month once and then split the counted days
+                    // at today. Counting "up to today" and "from tomorrow" as two
+                    // windows applies the weekly cap to each of them, so a week
+                    // off that happens to straddle today was billed twice.
+                    let counted_days =
+                        crate::services::absence_balance::counted_workdays_for_user(
                             &pool,
                             team_member.id,
                             ranges,
                             absence_count_start,
-                            leave_taken_end,
-                        )
-                        .await?
-                    } else {
-                        0.0
-                    };
-                    let planned_start = leave_planned_start.max(team_member.start_date);
-                    let planned_days = if planned_start <= month_end {
-                        crate::services::absence_balance::workdays_for_ranges_in_window(
-                            &pool,
-                            team_member.id,
-                            ranges,
-                            planned_start,
                             month_end,
                         )
-                        .await?
-                    } else {
-                        0.0
-                    };
+                        .await?;
+                    let taken_days = counted_days
+                        .iter()
+                        .filter(|day| **day <= leave_taken_end)
+                        .count() as f64;
+                    let planned_days = counted_days.len() as f64 - taken_days;
                     leave_account_usage.push(LeaveAccountUsage {
                         category_id: definition.category_id,
                         taken_days,
@@ -356,7 +347,13 @@ pub async fn team(
                                 &pool,
                                 team_member.id,
                                 team_member.start_date,
-                                month_end.min(today),
+                                month_end.min(
+                                    crate::services::reports::flextime_effective_through(
+                                        &pool,
+                                        team_member.start_date,
+                                    )
+                                    .await,
+                                ),
                             )
                             .await?
                         }
@@ -398,7 +395,13 @@ pub async fn team(
                                 team_member.id,
                                 team_member.start_date,
                                 month_start,
-                                month_end.min(today),
+                                month_end.min(
+                                    crate::services::reports::flextime_effective_through(
+                                        &pool,
+                                        team_member.start_date,
+                                    )
+                                    .await,
+                                ),
                             )
                             .await?,
                         )

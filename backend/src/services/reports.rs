@@ -215,8 +215,9 @@ fn target_minutes_per_day(weekly_hours: f64, workdays_per_week: i16) -> i64 {
 
 /// Loads the auto-break configuration from the database.
 /// Returns `Some(rules)` when the feature is enabled and at least tier-1 is valid,
-/// or `None` when the feature is off. Rules are sorted ascending by threshold so the
-/// highest applicable rule can be found by scanning from the end.
+/// or `None` when the feature is off. Thresholds are strictly increasing, which
+/// is what makes "the highest applicable tier wins" a single, unambiguous
+/// answer — the same invariant the frontend's `buildBreakRules` enforces.
 pub(crate) async fn load_auto_break_config(
     pool: &crate::db::DatabasePool,
 ) -> AppResult<Option<Vec<(i64, i64)>>> {
@@ -234,30 +235,55 @@ pub(crate) async fn load_auto_break_config(
         crate::services::settings::load_setting(pool, AUTO_BREAK_THRESHOLD_HOURS_KEY, "").await?;
     let deduction1_str =
         crate::services::settings::load_setting(pool, AUTO_BREAK_DEDUCTION_MINUTES_KEY, "").await?;
-    let (Some(t1), Some(d1)) = (
-        threshold1_str.parse::<f64>().ok().filter(|&t| t > 0.0),
-        deduction1_str.parse::<i64>().ok().filter(|&d| d > 0),
-    ) else {
-        return Ok(None);
-    };
-    let mut rules: Vec<(i64, i64)> = vec![(exclusive_threshold_minutes(t1), d1)];
-
-    // Optional tier-2: only added when both fields are valid.
+    // Optional tier-2: only considered when both of its fields are valid.
     let threshold2_str =
         crate::services::settings::load_setting(pool, AUTO_BREAK_THRESHOLD_HOURS_2_KEY, "").await?;
     let deduction2_str =
         crate::services::settings::load_setting(pool, AUTO_BREAK_DEDUCTION_MINUTES_2_KEY, "")
             .await?;
-    if let (Some(t2), Some(d2)) = (
+    let tier2 = match (
         threshold2_str.parse::<f64>().ok().filter(|&t| t > 0.0),
         deduction2_str.parse::<i64>().ok().filter(|&d| d > 0),
     ) {
-        rules.push((exclusive_threshold_minutes(t2), d2));
-        // Ensure ascending threshold order for correct highest-rule selection.
-        rules.sort_by_key(|(threshold, _)| *threshold);
-    }
+        (Some(t2), Some(d2)) => Some((t2, d2)),
+        _ => None,
+    };
+    Ok(build_break_rules(
+        threshold1_str.parse::<f64>().ok().filter(|&t| t > 0.0),
+        deduction1_str.parse::<i64>().ok().filter(|&d| d > 0),
+        tier2,
+    ))
+}
 
-    Ok(Some(rules))
+/// Assemble the break tiers from raw settings values.
+///
+/// No tier-1 means no feature: a second tier on its own says nothing about
+/// when a break becomes due. The second tier is kept only when it is a
+/// genuinely higher one. Two tiers landing on the same whole minute are not a
+/// two-tier rule at all, and keeping both would make the credited hours depend
+/// on which of them the selection happened to pick — while the time-tracking
+/// page, which drops the duplicate (see `buildBreakRules` in
+/// `frontend/src/lib/domain/time.js`), showed the other one's deduction. The
+/// settings endpoint already refuses to store a second threshold that is not
+/// greater; this also covers a value written straight into the database and
+/// one that collapses onto the first once rounded to minutes.
+fn build_break_rules(
+    threshold1_hours: Option<f64>,
+    deduction1_minutes: Option<i64>,
+    tier2: Option<(f64, i64)>,
+) -> Option<Vec<(i64, i64)>> {
+    let (threshold1_hours, deduction1_minutes) = (threshold1_hours?, deduction1_minutes?);
+    let mut rules = vec![(
+        exclusive_threshold_minutes(threshold1_hours),
+        deduction1_minutes,
+    )];
+    if let Some((threshold2_hours, deduction2_minutes)) = tier2 {
+        let threshold2 = exclusive_threshold_minutes(threshold2_hours);
+        if rules.iter().all(|(threshold, _)| threshold2 > *threshold) {
+            rules.push((threshold2, deduction2_minutes));
+        }
+    }
+    Some(rules)
 }
 
 fn exclusive_threshold_minutes(threshold_hours: f64) -> i64 {
@@ -364,10 +390,20 @@ async fn build_range_with_user_core(
     let mut current_date = from;
     while current_date <= to {
         let holiday = holiday_map.get(&current_date).cloned();
+        // When several absences cover the same day (only reachable through a
+        // race or a manual database edit), the one that removes the day's work
+        // target wins. `build_flextime_for_user` resolves overlaps the same
+        // way; picking whichever row came back first made the month report and
+        // the flextime ledger disagree about whether the day carried a target.
+        // `min_by_key` keeps the first row among equals, so the non-overlapping
+        // case is unchanged.
         let active_absence = approved_absence_rows
             .iter()
-            .find(|(_, abs_start, abs_end, _, _)| {
+            .filter(|(_, abs_start, abs_end, _, _)| {
                 current_date >= *abs_start && current_date <= *abs_end
+            })
+            .min_by_key(|(_, _, _, kind, _)| {
+                u8::from(!absence_removes_target(&category_flags, kind))
             });
         let absence = active_absence.map(|(_, _, _, kind, _)| kind.clone());
         let absence_name = active_absence.map(|(_, _, _, _, name)| name.clone());
@@ -501,6 +537,35 @@ async fn build_range_with_user_core(
     })
 }
 
+/// The latest date a flextime adjustment may already have taken effect on.
+///
+/// Adjustments are authoritative the moment their effective date arrives, but
+/// not before: a booking dated in the future must not already move a balance
+/// rendered "as of" today. This bounds every adjustment query behind every
+/// balance view, so they all answer the question the same way.
+///
+/// It is `today.max(start_date)`, not plain `today`: for a user whose contract
+/// starts in the future, an opening balance is routinely booked on that future
+/// start date ahead of time (`services::users::create` does exactly this), and
+/// it must show up the moment a view reaches that date — plain `today` would
+/// hide it until the person's actual first day, weeks after it was already
+/// booked, and would show a balance of zero next to a ledger that already has
+/// the carry-in on it. It is deliberately `start_date`, not the flextime
+/// cutoff (which sits one day *before* start_date in this same situation,
+/// having no approved week to point to yet): capping at the cutoff would
+/// exclude the start date's own opening balance, the one thing this exists to
+/// show. `validate_flextime_balance`'s separate `sum_from(cutoff + 1)` covers
+/// everything after the cutoff up to (and beyond) today, so nothing here needs
+/// its own upper-unbounded case.
+pub async fn flextime_effective_through(
+    pool: &crate::db::DatabasePool,
+    user_start_date: NaiveDate,
+) -> NaiveDate {
+    crate::services::settings::app_today(pool)
+        .await
+        .max(user_start_date)
+}
+
 /// Build the per-day flextime ledger for an already-resolved user across
 /// `from..=to`. Returns both the ledger days and the cutoff date (end of the
 /// last fully approved week, or start_date-1 if none exists).
@@ -543,24 +608,7 @@ pub async fn build_flextime_for_user(
     )
     .await?;
 
-    // Adjustments are authoritative the moment their effective date arrives,
-    // but not before: a booking dated in the future must not already move a
-    // balance rendered "as of" today. `effective_through` bounds every
-    // adjustment query below. It's `today.max(user.start_date)`, not plain
-    // `today`: for a user whose contract starts in the future, an opening
-    // balance is routinely booked on that future start date ahead of time
-    // (`services::users::create` does exactly this), and it must show up the
-    // moment the range reaches that date — plain `today` would hide it until
-    // the person's actual first day, weeks after it was already booked. It is
-    // deliberately `start_date`, not `cutoff_date` (which sits one day
-    // *before* start_date in this same situation, having no approved week to
-    // point to yet): capping at the cutoff would exclude the start date's own
-    // opening balance, the one thing this exists to show.
-    // `validate_flextime_balance`'s separate `sum_from(cutoff + 1)` covers
-    // everything after the cutoff up to (and beyond) today, so nothing here
-    // needs its own upper-unbounded case.
-    let today = crate::services::settings::app_today(pool).await;
-    let effective_through = today.max(user.start_date);
+    let effective_through = flextime_effective_through(pool, user.start_date).await;
 
     let adjustments_db = crate::repository::FlextimeAdjustmentDb::new(pool.clone());
 
@@ -1047,19 +1095,21 @@ pub async fn approved_weeks(
         cutoff_date: user_start_date - Duration::days(1),
     };
 
-    // Assistant role: no flextime account.
-    if workdays_per_week == 0 {
+    // No potential workday pool at all means there is no target to measure
+    // against and so no balance to accumulate. (This is not the assistant
+    // check it used to claim to be: assistants are stored with
+    // `workdays_per_week = 7`, so that test never matched one. Their callers
+    // return early on the role, which is the canonical switch.)
+    if crate::time_calc::potential_workdays_per_week(workdays_per_week) == 0 {
         return Ok(no_history);
     }
 
     let today = crate::services::settings::app_today(pool).await;
-    let last_elapsed_week_monday = {
-        let mut candidate = crate::time_calc::week_monday(today);
-        if candidate + Duration::days(6) >= today {
-            candidate -= Duration::days(7);
-        }
-        candidate
-    };
+    // Only weeks that are over are judged: the week being worked can still
+    // gain entries, so "every required day is approved" would be a verdict on
+    // an unfinished week. The week containing today therefore never qualifies,
+    // which is simply the Monday before its own.
+    let last_elapsed_week_monday = crate::time_calc::week_monday(today) - Duration::days(7);
 
     if last_elapsed_week_monday < user_start_date {
         return Ok(no_history);
@@ -1199,13 +1249,16 @@ pub async fn submission_status_for_month(
     if complete_week_mondays.is_empty() {
         return Ok((true, true));
     }
-    let check_from = complete_week_mondays[0];
-    let check_to = *complete_week_mondays.last().unwrap() + Duration::days(6);
     // Include requested absences: the employee cannot log entries on pending
     // absence days, so those days must be excused to prevent an unsatisfiable
     // completeness requirement in the user-facing Submissions tile.
     let (holiday_set, absent_days, submitted_dates, incomplete_dates) =
         load_week_check_data(pool, user_id, &complete_week_mondays, true).await?;
+    // A month is a closed period, so only its own days are judged — the same
+    // clamp `all_weeks_submitted_for_month` uses, so the dashboard and the team
+    // report can never disagree about the same month. Without it a draft booked
+    // on the 1st of the next month, or on the last days of the previous one,
+    // left this month permanently "not submitted".
     if !check_weeks_all_submitted(
         &complete_week_mondays,
         &holiday_set,
@@ -1214,13 +1267,15 @@ pub async fn submission_status_for_month(
         &incomplete_dates,
         user_start_date,
         workdays_per_week,
-        None,
+        Some((month_start, month_end)),
     ) {
         return Ok((false, false));
     }
     let reports_db = crate::repository::ReportDb::new(pool.clone());
+    // Likewise bounded to the month: an entry waiting for approval in a
+    // neighbouring month says nothing about whether this month is approved.
     let has_pending = reports_db
-        .has_pending_submitted_entries_in_range(user_id, check_from, check_to)
+        .has_pending_submitted_entries_in_range(user_id, month_start, month_end)
         .await?;
     Ok((true, !has_pending))
 }
@@ -1748,7 +1803,11 @@ async fn build_overtime_rows_with_cutoff(
     // are reported in the start month, so the loops can never skip one.
     let adjustment_by_month: HashMap<String, i64> =
         crate::repository::FlextimeAdjustmentDb::new(pool.clone())
-            .totals_by_month(target_user_id, user_start_date, today)
+            .totals_by_month(
+                target_user_id,
+                user_start_date,
+                flextime_effective_through(pool, user_start_date).await,
+            )
             .await?
             .into_iter()
             .collect();
@@ -1821,10 +1880,13 @@ pub async fn cumulative_at_month_end(
     // far". Every early return below is a case where the worked part is
     // provably zero, leaving just the bookings.
     //
-    // Capped at today as well as at the month end: for the current month the
-    // month end is still ahead, and a booking dated later in it has not moved
-    // the balance yet.
-    let adjustments_cutoff = month_end.min(crate::services::settings::app_today(pool).await);
+    // Capped at the month end as well as at the date bookings can have taken
+    // effect by: for the current month the month end is still ahead, and a
+    // booking dated later in it has not moved the balance yet. The second
+    // bound is `flextime_effective_through`, the same one the ledger itself
+    // uses, so a carry-in booked on a start date still to come is not counted
+    // here as zero while the ledger already shows it.
+    let adjustments_cutoff = month_end.min(flextime_effective_through(pool, user_start_date).await);
     let adjustments_through_month_end = adjustments_db
         .sum_through(target_user_id, user_start_date, adjustments_cutoff)
         .await?;
@@ -1856,7 +1918,7 @@ pub async fn cumulative_at_month_end(
         // subtraction would remove bookings the row never counted.
         let last_row_end = month_bounds(&last_row.month)?
             .1
-            .min(crate::services::settings::app_today(pool).await);
+            .min(flextime_effective_through(pool, user_start_date).await);
         let adjustments_through_last_row = adjustments_db
             .sum_through(target_user_id, user_start_date, last_row_end)
             .await?;
@@ -3296,5 +3358,54 @@ mod tests {
         let to = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap(); // 365 diff = 366 inclusive
         assert_eq!((to - from).num_days(), 365);
         assert!(validate_range(from, to).is_ok());
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // build_break_rules
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// Without a first tier there is no rule at all, whatever the second says.
+    #[test]
+    fn build_break_rules_requires_the_first_tier() {
+        assert!(build_break_rules(None, Some(30), Some((9.0, 45))).is_none());
+        assert!(build_break_rules(Some(6.0), None, Some((9.0, 45))).is_none());
+    }
+
+    /// Hours become exclusive minute thresholds; a valid higher tier is kept.
+    #[test]
+    fn build_break_rules_keeps_a_genuinely_higher_second_tier() {
+        assert_eq!(
+            build_break_rules(Some(6.0), Some(30), Some((9.0, 45))),
+            Some(vec![(360, 30), (540, 45)])
+        );
+    }
+
+    /// A second tier that is not higher is dropped rather than silently
+    /// overriding the first. Keeping it made the credited hours disagree with
+    /// the deduction the time-tracking page shows, which drops it too.
+    #[test]
+    fn build_break_rules_drops_a_second_tier_that_is_not_higher() {
+        assert_eq!(
+            build_break_rules(Some(6.0), Some(30), Some((6.0, 60))),
+            Some(vec![(360, 30)])
+        );
+        assert_eq!(
+            build_break_rules(Some(9.0), Some(45), Some((6.0, 30))),
+            Some(vec![(540, 45)])
+        );
+        // Collapses onto the first once rounded to whole minutes.
+        assert_eq!(
+            build_break_rules(Some(6.0), Some(30), Some((6.008, 60))),
+            Some(vec![(360, 30)])
+        );
+    }
+
+    /// A missing second tier simply leaves the single-tier rule.
+    #[test]
+    fn build_break_rules_without_a_second_tier_yields_one_rule() {
+        assert_eq!(
+            build_break_rules(Some(6.5), Some(30), None),
+            Some(vec![(390, 30)])
+        );
     }
 }

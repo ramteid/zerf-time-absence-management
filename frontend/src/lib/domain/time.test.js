@@ -203,6 +203,31 @@ describe("time domain helpers", () => {
     ).toBe(4 * perDayMinutes);
   });
 
+  it("gives no weekly target when the contract has no potential workdays", () => {
+    // workdays_per_week = 0 means "no potential workday pool" and the backend
+    // reports a zero target for it. Coercing the stored 0 to the default 5
+    // showed a target here that no report ever agreed with.
+    const week = buildWeekDays(new Date(2026, 0, 5), [], [], []);
+    expect(
+      weekTargetMinutes({
+        weekdays: week.weekdays,
+        weekendDays: week.weekendDays,
+        currentUser: { weekly_hours: 40, workdays_per_week: 0 },
+        todayIso: "2026-01-31",
+      }),
+    ).toBe(0);
+
+    // A missing field still falls back to the five-weekday default.
+    expect(
+      weekTargetMinutes({
+        weekdays: week.weekdays,
+        weekendDays: week.weekendDays,
+        currentUser: { weekly_hours: 40 },
+        todayIso: "2026-01-31",
+      }),
+    ).toBe(5 * 8 * 60);
+  });
+
   it("keeps partial status for mixed draft and non-draft weeks", () => {
     const entries = [{ status: "draft" }, { status: "approved" }];
     expect(

@@ -167,6 +167,19 @@ describe("dashboard domain helpers", () => {
     expect(entryMinutes({ category_id: 1 }, [])).toBe(0);
   });
 
+  it("entryMinutes ignores rejected entries", () => {
+    // The break deduction applied to the same week skips rejected entries, so
+    // counting them here inflated the total shown to the approver.
+    const entry = {
+      start_time: "09:00:00",
+      end_time: "10:30:00",
+      category_id: 1,
+      status: "rejected",
+    };
+    const categories = [{ id: 1, counts_as_work: true }];
+    expect(entryMinutes(entry, categories)).toBe(0);
+  });
+
   it("weekStartOf maps an entry date to the Monday of its ISO week", () => {
     // 2026-01-07 is a Wednesday → week start is Monday 2026-01-05.
     expect(weekStartOf("2026-01-07")).toBe("2026-01-05");

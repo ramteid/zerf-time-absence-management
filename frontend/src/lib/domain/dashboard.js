@@ -1,7 +1,6 @@
 import {
   addDays,
   dateKey,
-  durMin,
   fmtDateShort,
   isoDate,
   monday,
@@ -9,7 +8,7 @@ import {
 } from "../../format.js";
 import { absenceKindLabel } from "../../i18n.js";
 import { sortByIsoDateAndStartTime } from "./dates.js";
-import { computeDayBreakDeduction, entryCountsAsWork } from "./time.js";
+import { computeDayBreakDeduction, creditedEntryMinutes } from "./time.js";
 import { userNameFromRows } from "./users.js";
 
 function monthKey(year, month) {
@@ -57,19 +56,12 @@ export function currentWeekIsOpen(checks) {
   );
 }
 
+// Credited minutes of one entry. Delegates to the shared helper so a week
+// total and the break deduction applied to it always agree on which entries
+// exist: this used to count rejected entries, which `computeDayBreakDeduction`
+// ignores, so a rejected row inflated the week shown to the approver.
 export function entryMinutes(entry, categories = []) {
-  if (
-    !entry?.start_time ||
-    !entry?.end_time ||
-    !entryCountsAsWork(entry, categories)
-  ) {
-    return 0;
-  }
-  const start = entry.start_time.slice(0, 5);
-  const end = entry.end_time.slice(0, 5);
-  const minutes = durMin(start, end);
-  if (!Number.isFinite(minutes) || minutes < 0) return 0;
-  return Math.max(0, minutes);
+  return creditedEntryMinutes(entry, categories);
 }
 
 export function weekStartOf(entryDate) {

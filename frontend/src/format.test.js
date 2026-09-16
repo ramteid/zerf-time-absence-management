@@ -144,6 +144,18 @@ describe("durMin", () => {
   it("returns negative for reversed times", () => {
     expect(durMin("12:00", "08:00")).toBe(-240);
   });
+
+  it("rejects clock values that are not real times", () => {
+    // Accepting these while the break calculation rejected them made the
+    // logged total and the break deduction disagree about which entries exist.
+    expect(durMin("08:00", "08:75")).toBeNaN();
+    expect(durMin("25:00", "26:00")).toBeNaN();
+    expect(durMin("08:00", "09:00:99")).toBeNaN();
+  });
+
+  it("accepts the HH:MM:SS form the backend serialises and drops the seconds", () => {
+    expect(durMin("08:00:00", "09:00:30")).toBe(60);
+  });
 });
 
 describe("isoWeek", () => {

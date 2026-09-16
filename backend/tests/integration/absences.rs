@@ -1494,3 +1494,92 @@ async fn absence_category_cost_flag_change_blocked_when_in_use() {
 
     app.cleanup().await;
 }
+
+/// A calendar week off costs a reduced-hours contract its weekly quota once —
+/// even when today falls in the middle of it.
+///
+/// The leave balance reports "already taken" and "approved upcoming"
+/// separately. Counting those two windows independently applied the weekly cap
+/// to each of them, so a 3-day/week employee away Mon-Fri over today was billed
+/// 3 days for the part up to today plus 2 more for the rest: 5 leave days for a
+/// week that can only ever cost 3.
+#[tokio::test]
+async fn a_week_off_straddling_today_costs_one_weekly_quota() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _, _cat_id) =
+        bootstrap_team(&app, &admin, false).await;
+    let lead = login_change_pw(&app, "lead-r@example.com", &lead_pw).await;
+
+    // The reference date is a Monday, so a Mon-Fri absence starting today is
+    // exactly the straddling case: one day taken, four still upcoming.
+    let monday = reference_date();
+    let friday = monday + chrono::Duration::days(4);
+    let year = monday.format("%Y").to_string();
+
+    let (status, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "part-timer@example.com",
+                "first_name": "Petra",
+                "last_name": "Parttime",
+                "role": "employee",
+                "weekly_hours": 24,
+                "workdays_per_week": 3,
+                "start_date": "2024-01-01",
+                "approver_ids": [lead_id],
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create part-time employee: {body}");
+    let part_timer_id = id(&body);
+    let part_timer =
+        login_change_pw(&app, "part-timer@example.com", &temp_pw(&body)).await;
+
+    let (status, body) = part_timer
+        .post(
+            "/api/v1/absences",
+            &json!({
+                "kind": "vacation",
+                "start_date": monday.to_string(),
+                "end_date": friday.to_string(),
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "request the week off: {body}");
+    let absence_id = id(&body);
+    let (status, body) = lead
+        .post(&format!("/api/v1/absences/{absence_id}/approve"), &json!({}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the week off: {body}");
+
+    let (status, balances) = part_timer
+        .get(&format!(
+            "/api/v1/leave-balances/{part_timer_id}?year={year}"
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "read leave balances: {balances}");
+    let vacation = vacation_balance(&balances);
+    let taken = vacation["already_taken"].as_f64().expect("already_taken");
+    let upcoming = vacation["approved_upcoming"]
+        .as_f64()
+        .expect("approved_upcoming");
+    assert_eq!(
+        taken + upcoming,
+        3.0,
+        "a 3-day contract's week off costs three leave days, not five: {vacation}"
+    );
+
+    let entitlement = vacation["annual_entitlement"]
+        .as_f64()
+        .expect("annual_entitlement");
+    let carryover = vacation["carryover_days"].as_f64().unwrap_or(0.0);
+    assert_eq!(
+        vacation["available"].as_f64().expect("available"),
+        entitlement + carryover - 3.0,
+        "what is left must match what was actually spent: {vacation}"
+    );
+
+    app.cleanup().await;
+}

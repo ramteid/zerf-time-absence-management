@@ -1,5 +1,6 @@
 import {
   addDays,
+  clockMinutes,
   dateKey,
   durMin,
   formatTimeValue,
@@ -82,29 +83,6 @@ export function creditedEntryMinutes(entry, categoryRows) {
   );
   if (!Number.isFinite(minutes) || minutes < 0) return 0;
   return Math.max(0, minutes);
-}
-
-/**
- * Parses an "HH:MM" or "HH:MM:SS" time string into total minutes since midnight.
- * Returns NaN for invalid input, 0 for null/empty.
- */
-function parseHHMM(s) {
-  if (!s) return 0;
-  const parts = String(s).trim().split(":");
-  if (parts.length < 2 || parts.length > 3) return NaN;
-  const h = Number(parts[0]);
-  const m = Number(parts[1]);
-  if (!Number.isFinite(h) || !Number.isFinite(m)) return NaN;
-  if (h < 0 || h > 23 || m < 0 || m > 59) return NaN;
-  if (parts[2] !== undefined) {
-    // Entries are minute-granular (the UI only ever offers HH:MM); a
-    // trailing ":SS" only shows up because the backend's TIME column
-    // serializes with seconds. Validate it's a real time, then discard it —
-    // there's no fraction-of-a-minute to add, seconds don't round up here.
-    const sec = Number(parts[2]);
-    if (!Number.isFinite(sec) || sec < 0 || sec > 59) return NaN;
-  }
-  return h * 60 + m;
 }
 
 function exclusiveThresholdMinutes(thresholdHours) {
@@ -203,8 +181,8 @@ export function computeDayBreakInfo(items, categories, rules) {
   const eligible = items
     .filter((e) => e.status !== "rejected" && entryCountsAsWork(e, categories))
     .map((e) => ({
-      start: parseHHMM(e.start_time),
-      end: parseHHMM(e.end_time),
+      start: clockMinutes(e.start_time),
+      end: clockMinutes(e.end_time),
     }))
     .filter(
       (r) =>
@@ -401,8 +379,11 @@ export function weekTargetMinutes({
   todayIso,
 }) {
   const weeklyHours = Number(currentUser?.weekly_hours || 0);
-  const workdaysPerWeek = Number(currentUser?.workdays_per_week || 5);
-  if (workdaysPerWeek <= 0) return 0;
+  // Only a missing field falls back to the default. A stored 0 means "no
+  // potential workdays", which the backend turns into a zero target — coercing
+  // it to 5 showed a weekly target here that no report ever agreed with.
+  const workdaysPerWeek = Number(currentUser?.workdays_per_week ?? 5);
+  if (!Number.isFinite(workdaysPerWeek) || workdaysPerWeek <= 0) return 0;
   // Mirrors the backend `target_minutes_per_day`: weekly hours are spread
   // evenly across the whole potential-workday pool (always 5 for 1-5 day
   // contracts, not the contracted day count), and each eligible day carries
