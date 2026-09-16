@@ -390,6 +390,55 @@ describe("buildBreakRules", () => {
     ]);
   });
 
+  it("drops a second tier that is not the higher one", () => {
+    // `build_break_rules` keeps only the higher tier. A page that kept both
+    // would deduct 30 minutes off a seven-hour day that the reports credit in
+    // full, because the backend only ever has the nine-hour rule.
+    const rules = buildBreakRules({
+      auto_break_enabled: true,
+      auto_break_threshold_hours: 9,
+      auto_break_deduction_minutes: 45,
+      auto_break_threshold_hours_2: 6,
+      auto_break_deduction_minutes_2: 30,
+    });
+    expect(rules).toEqual([
+      { thresholdHours: 9, thresholdMinutes: 540, deductionMinutes: 45 },
+    ]);
+  });
+
+  it("drops a second tier that collapses onto the first in whole minutes", () => {
+    const rules = buildBreakRules({
+      auto_break_enabled: true,
+      auto_break_threshold_hours: 6,
+      auto_break_deduction_minutes: 30,
+      auto_break_threshold_hours_2: 6.008,
+      auto_break_deduction_minutes_2: 60,
+    });
+    expect(rules).toEqual([
+      { thresholdHours: 6, thresholdMinutes: 360, deductionMinutes: 30 },
+    ]);
+  });
+
+  it("applies nothing at all when the first tier is missing", () => {
+    // The backend's `build_break_rules` returns no rules when tier 1 is
+    // absent; a lone tier 2 is not a fallback for it.
+    expect(
+      buildBreakRules({
+        auto_break_enabled: true,
+        auto_break_threshold_hours_2: 9,
+        auto_break_deduction_minutes_2: 45,
+      }),
+    ).toEqual([]);
+    expect(
+      buildBreakRules({
+        auto_break_enabled: true,
+        auto_break_threshold_hours: 6,
+        auto_break_threshold_hours_2: 9,
+        auto_break_deduction_minutes_2: 45,
+      }),
+    ).toEqual([]);
+  });
+
   it("stores fractional thresholds as backend-compatible exclusive minute floors", () => {
     const rules = buildBreakRules({
       auto_break_enabled: true,

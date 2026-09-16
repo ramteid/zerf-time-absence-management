@@ -204,9 +204,13 @@ Auto-break tiers are compared in **whole minutes** (`exclusive_threshold_minutes
 everywhere they are compared at all: the settings endpoint refuses a second
 threshold that does not exceed the first at that resolution, and both
 `services::reports::build_break_rules` and the frontend's `buildBreakRules`
-collapse two tiers that land on the same minute onto the first. Comparing hours
-instead let 6.0 and 6.008 through as two tiers, and the two renderers then
-disagreed about which deduction applied. Every "total hours" figure takes the
+keep a second tier only when it is *strictly higher* at that resolution —
+equal or lower, it is dropped rather than applied. Comparing hours instead let
+6.0 and 6.008 through as two tiers, and the two renderers then disagreed about
+which deduction applied. Neither builder leans on the endpoint's validation:
+they are handed whatever is stored and must agree on it, which is also why
+both return no rules at all when tier 1 is missing — a lone tier 2 is not a
+fallback for it. Every "total hours" figure takes the
 report's own break-adjusted `actual_min` rather than re-summing the raw entry
 minutes printed beside it — the server-side CSV, the timesheet PDF
 (`range_total_minutes`) and the browser's own CSV export (`buildTimesheetCsv`)
