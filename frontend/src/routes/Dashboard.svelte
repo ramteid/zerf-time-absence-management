@@ -42,6 +42,10 @@
 
   // ── Approval workflow state (team leads and admins only) ──────────────────────
   let pendingEntries = [];
+  // Approved entries on the same days as the pending submissions. Not part of
+  // any week being decided — they only tell the week totals how much automatic
+  // break each day already carries (see `buildPendingWeeks`).
+  let approvedEntriesOnPendingDays = [];
   let pendingWeeks = [];
   let pendingAbsences = [];
   let pendingReopens = [];
@@ -196,6 +200,7 @@
     const canApprove = !!$currentUser?.permissions?.can_approve;
     if (!canApprove) {
       pendingEntries = [];
+      approvedEntriesOnPendingDays = [];
       pendingAbsences = [];
       pendingReopens = [];
       users = [];
@@ -211,16 +216,19 @@
     try {
       const {
         submittedTimeEntries,
+        approvedTimeEntries,
         requestedAbsences,
         pendingReopenRequests,
         users: teamMembers,
       } = await getApprovalDashboard();
       pendingEntries = submittedTimeEntries;
+      approvedEntriesOnPendingDays = approvedTimeEntries;
       pendingAbsences = requestedAbsences;
       pendingReopens = pendingReopenRequests;
       users = teamMembers;
     } catch (error) {
       pendingEntries = [];
+      approvedEntriesOnPendingDays = [];
       pendingAbsences = [];
       pendingReopens = [];
       users = [];
@@ -288,6 +296,7 @@
     users,
     $categories,
     buildBreakRules($settings),
+    approvedEntriesOnPendingDays,
   );
 
   $: currentOvertimeRow =

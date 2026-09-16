@@ -212,6 +212,21 @@ minutes printed beside it — the server-side CSV, the timesheet PDF
 (`range_total_minutes`) and the browser's own CSV export (`buildTimesheetCsv`)
 alike. The entry rows deliberately stay raw; only the total is net, and
 re-summing the rows to get it silently drops the deduction.
+
+The break belongs to a **day**, never to a set of entries, which is why the
+approval queue is priced as a difference. A day can hold approved hours and a
+fresh submission at once — nothing stops booking more time into a week that was
+already signed off — so `buildPendingWeeks` states what approving the week
+*adds*: for each day it touches, the credited minutes of the whole day minus
+what that day credits already. It is handed the approved entries of those days
+for exactly this (`getApprovalDashboard` fetches them over the span of the
+submissions, and falling back to none costs the totals their precision rather
+than the approver their queue). Deducting the break over the submitted entries
+alone read four hours added to an approved five as a full four, when the day
+crosses the six-hour tier and only three and a half are credited. The week total
+is floored at zero: a couple of minutes that tip a day over a tier genuinely
+credit less than nothing, but a negative figure on an approval card reads as an
+error rather than as the edge case it is.
 `reports::weeks_in_month_to_judge` decides *which* weeks a completeness check
 sees: every week that overlaps the period and has already started, the one being
 worked included. A week belongs to a month as soon as any of its days do.

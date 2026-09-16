@@ -86,4 +86,72 @@ describe("getApprovalDashboard", () => {
     expect(result.requestedAbsences).toEqual(mockAbsences);
     expect(result.pendingReopenRequests).toEqual(mockReopens);
   });
+
+  it("asks for the approved hours already sitting on the pending days", async () => {
+    // The automatic break is a property of the whole day, so the week totals
+    // cannot be worked out from the submitted entries alone.
+    const submitted = [
+      { id: 10, user_id: 3, entry_date: "2026-01-08", status: "submitted" },
+      { id: 11, user_id: 3, entry_date: "2026-01-06", status: "submitted" },
+    ];
+    const approved = [
+      { id: 9, user_id: 3, entry_date: "2026-01-06", status: "approved" },
+    ];
+    api.mockImplementation(async (path) => {
+      if (path === "/time-entries/all?status=submitted") return submitted;
+      if (path === "/users") return [employee];
+      if (path.startsWith("/time-entries/all?status=approved")) return approved;
+      return [];
+    });
+    const result = await getApprovalDashboard();
+    // Bounded by the span of the submissions themselves, oldest to newest.
+    expect(api).toHaveBeenCalledWith(
+      "/time-entries/all?status=approved&from=2026-01-06&to=2026-01-08",
+    );
+    expect(result.approvedTimeEntries).toEqual(approved);
+  });
+
+  it("does not ask for approved hours when nothing is pending", async () => {
+    await getApprovalDashboard();
+    expect(api).not.toHaveBeenCalledWith(
+      expect.stringContaining("status=approved"),
+    );
+  });
+
+  it("still delivers the queue when the approved-hours request fails", async () => {
+    // Losing the context costs the totals their precision; losing the queue
+    // would cost the approver the page.
+    const submitted = [
+      { id: 10, user_id: 3, entry_date: "2026-01-06", status: "submitted" },
+    ];
+    api.mockImplementation(async (path) => {
+      if (path === "/time-entries/all?status=submitted") return submitted;
+      if (path === "/users") return [employee];
+      if (path.startsWith("/time-entries/all?status=approved")) {
+        throw new Error("boom");
+      }
+      return [];
+    });
+    const result = await getApprovalDashboard();
+    expect(result.submittedTimeEntries).toEqual(submitted);
+    expect(result.approvedTimeEntries).toEqual([]);
+  });
+
+  it("caps the window at the range the endpoint accepts", async () => {
+    // A submission left pending for years must not produce a request the API
+    // refuses, taking the whole dashboard down with it.
+    const submitted = [
+      { id: 10, user_id: 3, entry_date: "2020-01-06", status: "submitted" },
+      { id: 11, user_id: 3, entry_date: "2026-01-08", status: "submitted" },
+    ];
+    api.mockImplementation(async (path) => {
+      if (path === "/time-entries/all?status=submitted") return submitted;
+      if (path === "/users") return [employee];
+      return [];
+    });
+    await getApprovalDashboard();
+    expect(api).toHaveBeenCalledWith(
+      "/time-entries/all?status=approved&from=2025-01-08&to=2026-01-08",
+    );
+  });
 });
