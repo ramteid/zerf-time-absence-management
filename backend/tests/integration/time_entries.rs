@@ -477,3 +477,114 @@ async fn approved_hours_of_a_pending_day_are_readable_by_the_approver() {
 
     app.cleanup().await;
 }
+
+/// What approving such a day actually credits, measured on the server.
+///
+/// The approval queue states the same figure, and it can only get there by
+/// pricing the submission against the whole day. This test is that figure's
+/// anchor: it asks the month report what the day credited before and after,
+/// so the number the browser is expected to show is never just a number
+/// somebody reasoned their way to.
+#[tokio::test]
+async fn approving_a_second_shift_credits_the_whole_days_break() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    // More than six hours of work costs 30 minutes of break.
+    for (key, value) in [
+        (zerf::services::settings::AUTO_BREAK_ENABLED_KEY, "true"),
+        (zerf::services::settings::AUTO_BREAK_THRESHOLD_HOURS_KEY, "6"),
+        (
+            zerf::services::settings::AUTO_BREAK_DEDUCTION_MINUTES_KEY,
+            "30",
+        ),
+    ] {
+        app.state
+            .db
+            .settings
+            .save_setting(key, value)
+            .await
+            .expect("configure automatic break");
+    }
+
+    let (_lead_id, lead_pw, emp_id, emp_pw, monday_iso, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "whole-day-break").await;
+    let lead = login_change_pw(&app, "lead-whole-day-break@example.com", &lead_pw).await;
+    let employee = login_change_pw(&app, "emp-whole-day-break@example.com", &emp_pw).await;
+    let month = &monday_iso[0..7];
+
+    // Credited minutes of that day, as the month report states them.
+    async fn credited_on_the_day(
+        client: &crate::common::TestClient,
+        user_id: i64,
+        month: &str,
+        day_iso: &str,
+    ) -> i64 {
+        let (st, body) = client
+            .get(&format!(
+                "/api/v1/reports/month?user_id={user_id}&month={month}"
+            ))
+            .await;
+        assert_eq!(st, StatusCode::OK, "month report: {body}");
+        body["days"]
+            .as_array()
+            .expect("days")
+            .iter()
+            .find(|day| day["date"].as_str() == Some(day_iso))
+            .expect("the booked day")["actual_min"]
+            .as_i64()
+            .expect("actual_min")
+    }
+
+    async fn book_and_approve(
+        employee: &crate::common::TestClient,
+        lead: &crate::common::TestClient,
+        day_iso: &str,
+        category_id: i64,
+        start: &str,
+        end: &str,
+    ) {
+        let (st, body) = employee
+            .post(
+                "/api/v1/time-entries",
+                &json!({
+                    "entry_date": day_iso, "start_time": start, "end_time": end,
+                    "category_id": category_id
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "book {start}-{end}: {body}");
+        let entry_id = id(&body);
+        let (st, body) = employee
+            .post("/api/v1/time-entries/submit", &json!({"ids": [entry_id]}))
+            .await;
+        assert_eq!(st, StatusCode::OK, "submit {start}-{end}: {body}");
+        let (st, body) = lead
+            .post(
+                "/api/v1/time-entries/batch-approve",
+                &json!({"ids": [entry_id]}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "approve {start}-{end}: {body}");
+    }
+
+    // Five hours, comfortably under the threshold: credited in full.
+    book_and_approve(&employee, &lead, &monday_iso, cat_id, "08:00", "13:00").await;
+    let before = credited_on_the_day(&lead, emp_id, month, &monday_iso).await;
+    assert_eq!(before, 300, "five hours, no break due yet");
+
+    // Four more hours take the day to nine, which owes 30 minutes of break.
+    book_and_approve(&employee, &lead, &monday_iso, cat_id, "13:00", "17:00").await;
+    let after = credited_on_the_day(&lead, emp_id, month, &monday_iso).await;
+    assert_eq!(after, 510, "nine hours less the day's 30-minute break");
+
+    // So the second shift credits 3:30, not the 4:00 its own row shows — which
+    // is exactly what the approval queue has to state before it is approved.
+    assert_eq!(
+        after - before,
+        210,
+        "the second shift adds three and a half hours, not four"
+    );
+
+    app.cleanup().await;
+}
