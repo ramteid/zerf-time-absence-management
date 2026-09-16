@@ -7009,3 +7009,116 @@ async fn payroll_absence_days_never_exceed_the_week_they_share() {
 
     app.cleanup().await;
 }
+
+/// The row that ends up with no days of its own is still marked as reported.
+/// Leaving it unmarked would hand it to a later report's catch-up section,
+/// which counts it alone — and would then hand over exactly the days this
+/// document withheld, putting the over-claim back one month later.
+#[tokio::test]
+async fn an_absence_absorbed_by_its_week_is_still_marked_as_reported() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    let monday = [3i64, 4, 2, 5]
+        .into_iter()
+        .map(|weeks_back| next_monday(-7 * weeks_back))
+        .find(|monday| (*monday + Duration::days(4)).month() == monday.month())
+        .expect("a Monday whose Mon-Fri week stays inside one month");
+    let (from, to) = month_bounds(monday);
+
+    let (status, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "absorbed-payroll@example.com",
+                "first_name": "Pia", "last_name": "Parttime",
+                "role": "employee", "weekly_hours": 24,
+                "workdays_per_week": 3,
+                "start_date": "2024-01-01",
+                "approver_ids": [1],
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create part-time employee: {body}");
+    let user_id = id(&body);
+
+    // Monday to Wednesday already uses the whole three-day week ...
+    let sick = absence_cat(&app.state.pool, "sick").await;
+    let sick_absence = app
+        .state
+        .db
+        .absences
+        .create(
+            user_id,
+            sick.id,
+            true,
+            monday,
+            monday + Duration::days(2),
+            None,
+            "approved",
+        )
+        .await
+        .expect("create the Monday-Wednesday sick note");
+    // ... leaving nothing for the Thursday-Friday unpaid leave to claim.
+    let unpaid = absence_cat(&app.state.pool, "unpaid").await;
+    let unpaid_absence = app
+        .state
+        .db
+        .absences
+        .create(
+            user_id,
+            unpaid.id,
+            false,
+            monday + Duration::days(3),
+            monday + Duration::days(4),
+            None,
+            "approved",
+        )
+        .await
+        .expect("create the Thursday-Friday unpaid leave");
+
+    let members = app
+        .state
+        .db
+        .reports
+        .timesheet_members_for_period(to)
+        .await
+        .expect("members");
+    let language = zerf::i18n::Language::from_setting("en");
+    let data = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from,
+            to,
+            interim: false,
+            created_on: to,
+            carried: None,
+        },
+        &members,
+        &config(false, false),
+        &language,
+        None,
+    )
+    .await
+    .expect("build report data");
+
+    let rows = data.absence_rows.as_ref().expect("absence section enabled");
+    let printed: Vec<(String, f64)> = rows
+        .iter()
+        .filter(|row| row.user_id == user_id)
+        .map(|row| (row.category.clone(), row.days))
+        .collect();
+    assert_eq!(
+        printed,
+        vec![(sick.name.clone(), 3.0)],
+        "the week is spent on the sick note; the unpaid leave prints nothing"
+    );
+    assert!(
+        data.reported_absence_ids.contains(&sick_absence.id)
+            && data.reported_absence_ids.contains(&unpaid_absence.id),
+        "both absences were accounted for and must be marked: {:?}",
+        data.reported_absence_ids
+    );
+
+    app.cleanup().await;
+}

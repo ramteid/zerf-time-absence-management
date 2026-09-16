@@ -2026,8 +2026,14 @@ async fn build_late_absence_rows(
     }
 
     for (segment, days) in segments_to_print.into_iter().zip(days_by_index) {
+        // Declared whatever this stretch's own day count came to: the document
+        // counted its week, and an earlier stretch may hold every day that week
+        // has. Leaving it undeclared would hand the absence to the next
+        // report's catch-up section, which — counting it alone — would give it
+        // the days this document deliberately did not.
+        declared_ids.push(segment.absence_id);
         // A stretch covering only weekends or holidays, or one whose week an
-        // earlier stretch already accounted for, has no payroll effect of its
+        // earlier stretch already accounts for, has no payroll effect of its
         // own — leave it out instead of printing a 0 row.
         if days <= 0.0 {
             continue;
@@ -2048,7 +2054,6 @@ async fn build_late_absence_rows(
                     .then_some(segment.medical_certificate_required),
             },
         ));
-        declared_ids.push(segment.absence_id);
     }
     declared_ids.sort_unstable();
     declared_ids.dedup();
@@ -2162,14 +2167,19 @@ async fn build_absence_rows(
             printable.into_iter().zip(counted_days)
         {
             let (_, category_name, category_rank, tracks_medical_certificate) = category;
+            // Marked whatever its own day count came to, because the document
+            // did account for it: its week was counted, and an earlier row may
+            // simply have held every day that week has. Leaving it unmarked
+            // would hand it to a later report's catch-up section, where —
+            // counted on its own, away from the row that absorbed it — it would
+            // claim the days this document deliberately did not give it.
+            ids.push(absence_id);
             // An absence that only covers non-working days (weekend, holiday),
-            // or whose week is already fully accounted for by an earlier row,
-            // has no payroll effect of its own — leave it out instead of
-            // printing a 0 row.
+            // or whose week an earlier row already accounts for, has no payroll
+            // effect of its own — leave it out instead of printing a 0 row.
             if days <= 0.0 {
                 continue;
             }
-            ids.push(absence_id);
             rows.push((
                 *category_rank,
                 employee_name(member),
