@@ -79,7 +79,9 @@ function creditedDayMinutes(dayEntries, categories, breakRules) {
     0,
   );
   if (!breakRules.length) return credited;
-  return credited - computeDayBreakDeduction(dayEntries, categories, breakRules);
+  return (
+    credited - computeDayBreakDeduction(dayEntries, categories, breakRules)
+  );
 }
 
 export function buildPendingWeeks(

@@ -93,6 +93,10 @@ jobs:
         run: |
           if [ -f package-lock.json ]; then npm ci --no-audit --no-fund;
           else npm install --no-audit --no-fund; fi
+      # The job has always been named for this check but never ran it, so
+      # formatting drifted in whenever somebody forgot to run it by hand.
+      - name: Prettier check
+        run: npm run format
       - name: Vitest tests
         run: npm test
       - name: Build
