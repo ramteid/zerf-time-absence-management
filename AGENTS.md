@@ -184,7 +184,10 @@ table and the catch-up one alike — go through it, per person and across every
 row the document prints for them. Counting each absence with `count_workdays`
 re-applied the quota to each of them, so two sick notes inside one calendar week
 claimed more days of continued pay from a part-time contract than that week can
-ever hold.
+ever hold. A row left with no days of its own is still marked as reported: the
+document did account for it, an earlier row simply held every day the week has,
+and leaving it unmarked would hand it to a later report's catch-up section —
+which, counting it alone, gives it exactly the days this document withheld.
 
 The frontend mirrors that calendar rather than keeping a second one:
 `apiMappers.js` exports `countedWorkdays` (the union count, with `countWorkdays`
