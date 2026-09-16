@@ -35,7 +35,7 @@
     teamCategoryRowTotal,
     dedupeAbsences,
   } from "../../lib/domain/reports.js";
-  import { countWorkdays, holidayDateSet } from "../../apiMappers.js";
+  import { holidayDateSet, withAbsenceDays } from "../../apiMappers.js";
   import { tracksOwnTime } from "../../rolePolicy.js";
   import { findUserById, userWorkdaysPerWeek } from "../../lib/domain/users.js";
 
@@ -245,21 +245,35 @@
     // totals for part-time staff, so wait until every row has its metadata.
     if (matchedUsers.some((user) => !user)) return null;
 
-    return data.raw.map((absence, index) => {
-      const clampedFrom =
-        absence.start_date > data.from ? absence.start_date : data.from;
-      const clampedTo = absence.end_date < data.to ? absence.end_date : data.to;
-      const days =
-        clampedTo < clampedFrom
-          ? 0
-          : countWorkdays(
-              clampedFrom,
-              clampedTo,
-              data.holidayDates,
-              userWorkdaysPerWeek(matchedUsers[index]),
-            );
-      return { ...absence, days };
+    // Counted per person and all at once, never absence by absence: a weekly
+    // quota is charged once across every absence sharing that calendar week,
+    // so these rows add up to the leave columns beside them.
+    const byUser = new Map();
+    data.raw.forEach((absence, index) => {
+      const userId = absence.user_id;
+      if (!byUser.has(userId)) {
+        byUser.set(userId, {
+          workdaysPerWeek: userWorkdaysPerWeek(matchedUsers[index]),
+          absences: [],
+        });
+      }
+      byUser.get(userId).absences.push(absence);
     });
+    const daysById = new Map();
+    for (const { workdaysPerWeek, absences } of byUser.values()) {
+      for (const absence of withAbsenceDays(absences, {
+        from: data.from,
+        to: data.to,
+        holidays: data.holidayDates,
+        workdaysPerWeek,
+      })) {
+        daysById.set(absence.id, absence.days);
+      }
+    }
+    return data.raw.map((absence) => ({
+      ...absence,
+      days: daysById.get(absence.id) ?? 0,
+    }));
   }
 
   $: teamAbsences = absenceRowsForRoster(teamAbsenceData, users);

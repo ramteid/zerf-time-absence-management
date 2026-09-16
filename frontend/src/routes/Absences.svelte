@@ -1,7 +1,12 @@
 <script>
   import { api } from "../api.js";
   import { currentUser, settings, toast } from "../stores.js";
-  import { countWorkdays, holidayDateSet } from "../apiMappers.js";
+  import {
+    countWorkdays,
+    holidayDateSet,
+    withAbsenceDays,
+  } from "../apiMappers.js";
+  import { userWorkdaysPerWeek } from "../lib/domain/users.js";
   import { t, absenceKindLabel, statusLabel, formatDayCount } from "../i18n.js";
   import { fmtDate, parseDate, appTodayDate } from "../format.js";
   import Icon from "../Icons.svelte";
@@ -118,16 +123,44 @@
       : $t("Cancel absence");
   }
 
+  // Absence days use the user's weekly day quota (flexible for 1-5 day
+  // schedules) and exclude public holidays. The live bookings are counted
+  // together so one calendar week costs its quota once no matter how many
+  // absences share it — these rows have to add up to the leave balance shown
+  // above them. A rejected or cancelled request consumes nothing, so it is
+  // kept out of that shared count and simply shows its own length.
+  $: liveAbsences = absences.filter(
+    (absence) =>
+      absence.status !== "rejected" && absence.status !== "cancelled",
+  );
+  $: liveAbsenceDays = new Map(
+    withAbsenceDays(liveAbsences, {
+      from: liveAbsences.reduce(
+        (earliest, absence) =>
+          !earliest || absence.start_date < earliest
+            ? absence.start_date
+            : earliest,
+        "",
+      ),
+      to: liveAbsences.reduce(
+        (latest, absence) =>
+          absence.end_date > latest ? absence.end_date : latest,
+        "",
+      ),
+      holidays: holidayDates,
+      workdaysPerWeek: userWorkdaysPerWeek($currentUser),
+    }).map((absence) => [absence.id, absence.days]),
+  );
   $: absenceRows = absences.map((absence) => ({
     ...absence,
-    // Count absence days using the user's weekly day quota (flexible for 1-5
-    // day schedules) and excluding public holidays.
-    days: countWorkdays(
-      absence.start_date,
-      absence.end_date,
-      holidayDates,
-      $currentUser?.workdays_per_week || 5,
-    ),
+    days:
+      liveAbsenceDays.get(absence.id) ??
+      countWorkdays(
+        absence.start_date,
+        absence.end_date,
+        holidayDates,
+        userWorkdaysPerWeek($currentUser),
+      ),
     editable: canEdit(absence),
     cancellable: canCancel(absence),
   }));

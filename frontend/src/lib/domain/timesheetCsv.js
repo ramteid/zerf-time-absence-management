@@ -99,21 +99,15 @@ export function buildTimesheetCsv({
       }
     }
   }
-  // Total row counts only approved work-crediting entries — mirrors the
-  // backend's official balance rules.
-  const totalMin = report.days.reduce(
-    (sum, day) =>
-      sum +
-      (day.entries || []).reduce(
-        (entrySum, entry) =>
-          entrySum +
-          (entry.status === "approved" && entry.counts_as_work !== false
-            ? entry.minutes || 0
-            : 0),
-        0,
-      ),
-    0,
-  );
+  // The report's own actual minutes: approved work-crediting entries with the
+  // automatic break already deducted. Re-summing the raw entry minutes listed
+  // above skips that deduction, so on any installation with automatic breaks
+  // switched on this total came out higher than the same figure everywhere
+  // else in the app — the backend's CSV export takes `actual_min` for exactly
+  // this reason. The day-level fallback keeps an older cached response working.
+  const totalMin = Number.isFinite(report.actual_min)
+    ? report.actual_min
+    : report.days.reduce((sum, day) => sum + (day.actual_min || 0), 0);
   rows.push(
     csvEncode([
       "",

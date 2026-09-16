@@ -52,13 +52,17 @@ describe("flextimeBounds", () => {
 });
 
 describe("buildTimesheetCsv", () => {
+  // Shaped like a real `/reports/range` response: the server sends the
+  // already break-adjusted `actual_min` alongside the raw entry minutes.
   const baseReport = {
+    actual_min: 480,
     days: [
       {
         date: "2026-05-04",
         weekday: "Monday",
         absence: null,
         holiday: null,
+        actual_min: 480,
         entries: [
           {
             start_time: "08:00",
@@ -76,6 +80,7 @@ describe("buildTimesheetCsv", () => {
         weekday: "Tuesday",
         absence: null,
         holiday: null,
+        actual_min: 0,
         entries: [],
       },
     ],
@@ -101,12 +106,14 @@ describe("buildTimesheetCsv", () => {
 
   it("excludes non-approved and non-crediting entries from the total", () => {
     const report = {
+      actual_min: 0,
       days: [
         {
           date: "2026-05-04",
           weekday: "Monday",
           absence: null,
           holiday: null,
+          actual_min: 0,
           entries: [
             {
               start_time: "08:00",
@@ -131,6 +138,43 @@ describe("buildTimesheetCsv", () => {
     const csv = buildTimesheetCsv({ report, flextimeData: [], translate });
     const totalRow = csv.split("\r\n").at(-1);
     expect(totalRow).toContain("0:00");
+  });
+
+  it("reports the total with the automatic break already deducted", () => {
+    // A 9-hour day with automatic breaks on: the entry row still shows the
+    // booked 9:00, but the day credits 8:15 and the total has to say so.
+    // Re-summing the entry minutes here would contradict the same figure on
+    // the Reports page, in the server-side CSV, and in the PDF.
+    const report = {
+      actual_min: 495,
+      days: [
+        {
+          date: "2026-05-04",
+          weekday: "Monday",
+          absence: null,
+          holiday: null,
+          actual_min: 495,
+          entries: [
+            {
+              start_time: "08:00",
+              end_time: "17:00",
+              category: "Development",
+              minutes: 540,
+              status: "approved",
+              counts_as_work: true,
+            },
+          ],
+        },
+      ],
+    };
+    const rows = buildTimesheetCsv({
+      report,
+      flextimeData: [],
+      translate,
+    }).split("\r\n");
+    expect(rows[1]).toContain("9:00");
+    expect(rows.at(-1)).toContain("Total");
+    expect(rows.at(-1)).toContain("8:15");
   });
 
   it("appends opening/closing flextime balance rows when flextime data is present", () => {

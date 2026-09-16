@@ -97,23 +97,27 @@ pub async fn account(
             auth_user.workdays_per_week,
         )
         .await?;
-        let today = crate::services::settings::app_today(&app_state.pool).await;
-        // Read the ledger through today rather than through the cutoff so a
-        // booking dated after the last approved week is visible immediately —
-        // otherwise an admin would book a correction and see nothing change.
-        let read_through = today.max(cutoff);
-        let balance = if read_through < auth_user.start_date {
-            0
-        } else {
-            let (days, _) = crate::services::reports::build_flextime_for_user(
-                &app_state.pool,
-                &auth_user,
-                read_through,
-                read_through,
-            )
-            .await?;
-            days.first().map(|day| day.cumulative_min).unwrap_or(0)
-        };
+        // Read the ledger through the date bookings can have taken effect by,
+        // not through the cutoff, so a correction dated after the last approved
+        // week is visible immediately — otherwise an admin would book one and
+        // see nothing change. `flextime_effective_through` is that date
+        // everywhere else too (`today.max(start_date)`), and the `max` matters:
+        // reading through plain today reported a zero balance for a new hire
+        // whose contract starts next month, beside a ledger already carrying
+        // the hours they brought with them.
+        let read_through = crate::services::reports::flextime_effective_through(
+            &app_state.pool,
+            auth_user.start_date,
+        )
+        .await;
+        let (days, _) = crate::services::reports::build_flextime_for_user(
+            &app_state.pool,
+            &auth_user,
+            read_through,
+            read_through,
+        )
+        .await?;
+        let balance = days.first().map(|day| day.cumulative_min).unwrap_or(0);
         (Some(balance), Some(cutoff))
     } else {
         (None, None)

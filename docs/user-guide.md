@@ -1340,6 +1340,12 @@ Monday-to-Friday holiday, it costs three days — even when today falls in the
 middle of it, so part of the week shows under "already taken" and the rest under
 "approved upcoming".
 
+The same holds when one week contains more than one booking. Two separate
+requests inside one calendar week still cost that week's days once between them,
+not once each, so the day counts shown in your absence list and in the reports
+always add up to what the balance says. The first booking in the week keeps its
+own days and a later one in the same week costs only what is left.
+
 Cross-year requests are validated per year: days in year Y consume that
 account's budget for Y, while days in year Y+1 consume its budget for Y+1.
 

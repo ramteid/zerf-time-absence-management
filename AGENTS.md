@@ -176,13 +176,29 @@ the difference between the year counted with it and without it, never on its
 own, so a week already partly booked cannot cost its quota a second time —
 pricing it alone rejected requests that in fact fit.
 
+The frontend mirrors that calendar rather than keeping a second one:
+`apiMappers.js` exports `countedWorkdays` (the union count, with `countWorkdays`
+as its single-range case, exactly as `count_workdays` delegates in Rust) and
+`withAbsenceDays`, which attributes the counted days to the absences that
+produced them in chronological order. Every page showing a leave-day figure —
+the Absences list, the person report's stat cards, the team report's absence
+table — goes through `withAbsenceDays`. Counting each absence on its own, which
+is what those pages used to do, re-applied the weekly quota per absence: for a
+part-timer with two bookings in one calendar week the page reported more leave
+than that week can ever cost, and contradicted the balance shown beside it.
+
 Auto-break tiers are compared in **whole minutes** (`exclusive_threshold_minutes`)
 everywhere they are compared at all: the settings endpoint refuses a second
 threshold that does not exceed the first at that resolution, and both
 `services::reports::build_break_rules` and the frontend's `buildBreakRules`
 collapse two tiers that land on the same minute onto the first. Comparing hours
 instead let 6.0 and 6.008 through as two tiers, and the two renderers then
-disagreed about which deduction applied.
+disagreed about which deduction applied. Every "total hours" figure takes the
+report's own break-adjusted `actual_min` rather than re-summing the raw entry
+minutes printed beside it — the server-side CSV, the timesheet PDF
+(`range_total_minutes`) and the browser's own CSV export (`buildTimesheetCsv`)
+alike. The entry rows deliberately stay raw; only the total is net, and
+re-summing the rows to get it silently drops the deduction.
 `reports::weeks_in_month_to_judge` decides *which* weeks a completeness check
 sees: every week that overlaps the period and has already started, the one being
 worked included. A week belongs to a month as soon as any of its days do.
@@ -492,6 +508,11 @@ a view reaches that date. Every balance view (the ledger, the monthly overtime
 rows, the team report's balance and monthly-movement columns) bounds its
 adjustment queries with it; when one of them used plain `today` instead, that
 employee's balance read zero beside a ledger that already carried the booking.
+The account dialog (`services::flextime_adjustments::account`) has no adjustment
+query of its own — it reads the ledger for a single day — so it bounds *that
+day* with the same function. Reading it at `today.max(cutoff)` instead reported
+zero for a new hire whose contract starts next month, because their cutoff (and
+so the day read) still lies before their own start date.
 
 A week is judged only once it is over: `approved_weeks` never looks at the week
 containing today, because "every required day is approved" would be a verdict on
