@@ -313,17 +313,20 @@ pub fn week_leave_accounting(
         }
     }
 
-    // A week can lose at most the days the contract has in it. Holidays are
-    // taken off that allowance first, because they are free: a holiday falling
-    // in a week somebody then takes off saves them a leave day rather than
-    // being paid for twice.
+    // A public holiday saves a leave day only where the leave day would have
+    // fallen on it. That day is simply not chargeable, which the loop above
+    // already took care of. A holiday elsewhere in the week grants no discount
+    // on the days that are booked: the contract does not say which weekdays
+    // are worked, so a holiday the person may never have worked cannot be
+    // assumed to have spared them one.
     let quota = u32::try_from(workdays_per_week).unwrap_or(0);
-    let holidays_within_quota = holiday_days.min(quota);
-    let absence_allowance = quota.saturating_sub(holidays_within_quota) as usize;
-    let charged_count = absence_dates.len().min(absence_allowance);
+    let charged_count = absence_dates.len().min(quota as usize);
     let charged_dates = absence_dates[..charged_count].to_vec();
 
-    let lost_days = i64::from(holidays_within_quota) + charged_count as i64;
+    // For the *target* a holiday counts like any other day the person does not
+    // have to work, because that is what a contract day is worth under this
+    // rule. The week can never lose more days than it holds.
+    let lost_days = i64::from((holiday_days + charged_count as u32).min(quota));
     let day_value_min = contract_day_minutes(weekly_hours, workdays_per_week);
     // The week is worth its own days, not the raw weekly hours. Rounding the
     // day first and multiplying up is what today's per-day target does, so a
@@ -1094,14 +1097,24 @@ mod tests {
     }
 
     #[test]
-    fn a_holiday_in_a_week_taken_off_saves_a_leave_day() {
-        // Monday is a public holiday; the rest of the week is booked off.
+    fn a_holiday_beside_the_booked_days_grants_no_discount() {
+        // Monday is a public holiday; Tuesday to Friday are booked off. The
+        // holiday is not one of the booked days, so it saves no leave: the
+        // contract does not pin which weekdays are worked, and a Monday the
+        // person may never have worked cannot be assumed to have spared them
+        // a day.
         let week = accounting(day(2026, 5, 4), &[0], &[1, 2, 3, 4], 24.0, 3);
-        assert_eq!(
-            week.charged_dates.len(),
-            2,
-            "the holiday already took one of the three days the week holds"
-        );
+        assert_eq!(week.charged_dates.len(), 3, "the full three days are spent");
+        assert_eq!(week.remaining_target_min, 0, "the week is fully covered");
+    }
+
+    #[test]
+    fn a_holiday_under_the_booked_days_does_save_one() {
+        // A five-day contract booking the whole week, with Monday a holiday.
+        // Monday is one of the booked days and costs nothing, so four leave
+        // days cover the week instead of five.
+        let week = accounting(day(2026, 5, 4), &[0], &[0, 1, 2, 3, 4], 40.0, 5);
+        assert_eq!(week.charged_dates.len(), 4);
         assert_eq!(week.remaining_target_min, 0);
     }
 
@@ -1260,14 +1273,15 @@ mod tests {
     }
 
     #[test]
-    fn a_new_year_week_with_its_holiday_costs_two_days_not_four() {
+    fn a_new_year_week_with_its_holiday_costs_three_days_not_four() {
         // The case that actually occurs in Germany: whenever weekdays straddle
         // the turn of the year, New Year's Day is one of them and is a public
-        // holiday. It takes one of the three days the week holds for free, so
-        // two leave days buy the rest of it.
+        // holiday. It is inside the booked range, so it costs nothing, and the
+        // week's three days go on the remaining weekdays.
         //
         // Today's rule charges four for this week: three from 2025 (Monday to
-        // Wednesday) plus one from 2026 (the Friday).
+        // Wednesday) plus one from 2026 (the Friday), because each side of the
+        // boundary is capped on its own.
         let monday = day(2025, 12, 29);
         let holidays = HashSet::from([day(2026, 1, 1)]);
         let ranges = [(monday, day(2026, 1, 2))];
@@ -1287,9 +1301,12 @@ mod tests {
             24.0,
             3,
         );
-        assert_eq!(in_2025, vec![monday, monday + Duration::days(1)]);
+        assert_eq!(
+            in_2025,
+            vec![monday, monday + Duration::days(1), monday + Duration::days(2)]
+        );
         assert!(in_2026.is_empty());
-        assert_eq!(in_2025.len() + in_2026.len(), 2);
+        assert_eq!(in_2025.len() + in_2026.len(), 3);
 
         // And the week is fully bought out: nothing is left to work.
         let absence_days: HashSet<NaiveDate> = (0..5i64)

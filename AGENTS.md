@@ -232,9 +232,13 @@ visible, but it is not the cause.
 `contract_day_minutes` implement the replacement rule: a leave day is worth
 `weekly_hours / workdays_per_week` and removes exactly that much target, a week
 is accounted for whole (so a week split by a year or month boundary is charged
-once, not once per side), and a public holiday costs the week a day for free
-and therefore *saves* a leave day rather than being paid for twice. **Nothing
-calls them yet** — they carry the rule and its worked examples so it can be
+once, not once per side), and a public holiday saves a leave day only where a
+booked day falls on it. A holiday elsewhere in the week grants no discount on
+the days that are booked, because the contract does not pin which weekdays are
+worked and a holiday the person may never have worked cannot be assumed to have
+spared them one. For the *target* a holiday still counts as a day not worked,
+like any other, since that is what a contract day is worth under this rule.
+**Nothing calls them yet** — they carry the rule and its worked examples so it can be
 reviewed before any running calculation moves. A five-day contract must come
 out byte-identical, which is why the week's target is `workdays_per_week ×
 contract_day_minutes` and not `weekly_hours × 60`: rounding the week instead of
