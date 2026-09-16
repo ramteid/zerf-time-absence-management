@@ -469,13 +469,20 @@ pub struct WorkSchedule {
 
 impl WorkSchedule {
     /// A contract with known working days, given as ISO weekday numbers where
-    /// Monday is 1 and Sunday is 7. Numbers outside that range are ignored;
-    /// an empty result is not a schedule and yields `None`, because "works no
-    /// days" is a different statement from "days not recorded".
+    /// Monday is 1 and Friday is 5.
+    ///
+    /// Saturday and Sunday are not accepted: work is recorded Monday to Friday,
+    /// and the stored pattern is constrained to those five days, so a schedule
+    /// the database would refuse must not be constructible here either.
+    ///
+    /// Numbers outside the range are ignored, and an empty result is not a
+    /// schedule and yields `None` — "works no days" is a different statement
+    /// from "days not recorded", and the second is what no schedule at all
+    /// means.
     pub fn fixed(weekdays: &[u8]) -> Option<Self> {
         let mut bits = 0u8;
         for day in weekdays {
-            if (1..=7).contains(day) {
+            if (1..=5).contains(day) {
                 bits |= 1 << (day - 1);
             }
         }
@@ -530,6 +537,64 @@ impl WorkSchedule {
             return 0;
         }
         (weekly_hours / f64::from(days) * 60.0).round() as i64
+    }
+}
+
+/// A person's working days over time.
+///
+/// Zerf stores no flextime or leave figure: it recomputes each of them from
+/// scratch on every query. A single stored pattern would therefore be applied
+/// to the whole past as well, so the day somebody's working days change, every
+/// week they ever worked is re-judged under the new pattern — every past Monday
+/// loses its target and every past Friday gains one, with nothing on the record
+/// to say why.
+///
+/// Each entry states "from this date on, these are the working days". A change
+/// adds an entry rather than replacing one, and a week asks which pattern was
+/// in force on its Monday. Everything else stays live, so a sick note entered
+/// for a past week still takes effect at once.
+#[derive(Debug, Clone)]
+pub struct WorkScheduleHistory {
+    /// Ascending by the date each pattern starts applying.
+    entries: Vec<(NaiveDate, WorkSchedule)>,
+    /// Used for dates before the first entry, and for people who have no
+    /// entries at all — the assistants, who have no work target to place.
+    fallback: WorkSchedule,
+}
+
+impl WorkScheduleHistory {
+    /// Build from stored entries in any order, plus the schedule to use where
+    /// no entry reaches.
+    pub fn new(entries: Vec<(NaiveDate, WorkSchedule)>, fallback: WorkSchedule) -> Self {
+        let mut entries = entries;
+        entries.sort_by_key(|(valid_from, _)| *valid_from);
+        Self { entries, fallback }
+    }
+
+    /// A person whose working days were never recorded.
+    pub fn without_history(fallback: WorkSchedule) -> Self {
+        Self {
+            entries: Vec::new(),
+            fallback,
+        }
+    }
+
+    /// The schedule in force on `date`: the latest entry that had already begun.
+    ///
+    /// An entry beginning exactly on `date` counts, because `valid_from` names
+    /// the first day the pattern applies to.
+    pub fn on(&self, date: NaiveDate) -> WorkSchedule {
+        self.entries
+            .iter()
+            .rev()
+            .find(|(valid_from, _)| *valid_from <= date)
+            .map(|(_, schedule)| *schedule)
+            .unwrap_or(self.fallback)
+    }
+
+    /// True when no entry was ever recorded.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
     }
 }
 
@@ -1874,6 +1939,8 @@ mod tests {
     const WED: u8 = 3;
     const THU: u8 = 4;
     const FRI: u8 = 5;
+    // Saturday and Sunday exist here only so the tests can show they are
+    // refused; no contract is recorded on them.
     const SAT: u8 = 6;
     const SUN: u8 = 7;
 
@@ -1916,6 +1983,7 @@ mod tests {
         assert!(WorkSchedule::fixed(&[]).is_none());
         assert!(WorkSchedule::fixed(&[0]).is_none());
         assert!(WorkSchedule::fixed(&[8]).is_none());
+        assert!(WorkSchedule::fixed(&[6, 7]).is_none(), "no weekend-only contract");
         assert!(WorkSchedule::fixed(&[0, 8, 9]).is_none());
         assert!(WorkSchedule::fixed(&[MON]).is_some());
     }
@@ -1948,13 +2016,15 @@ mod tests {
     }
 
     #[test]
-    fn a_weekend_schedule_is_allowed() {
-        let monday = day(2026, 5, 4);
-        let weekend = WorkSchedule::fixed(&[SAT, SUN]).unwrap();
-        assert_eq!(weekend.days_per_week(), 2);
-        assert!(weekend.covers(monday + Duration::days(5)));
-        assert!(weekend.covers(monday + Duration::days(6)));
-        assert!(!weekend.covers(monday));
+    fn a_weekend_schedule_is_refused() {
+        // Work is recorded Monday to Friday and the stored pattern is limited
+        // to those days, so a weekend schedule must not be constructible.
+        assert!(WorkSchedule::fixed(&[SAT, SUN]).is_none());
+        assert!(WorkSchedule::fixed(&[SAT]).is_none());
+        // A weekend day alongside real ones is simply dropped.
+        let schedule = WorkSchedule::fixed(&[MON, SAT]).unwrap();
+        assert_eq!(schedule.days_per_week(), 1);
+        assert!(!schedule.covers(day(2026, 5, 9)), "Saturday is never worked");
     }
 
     #[test]
@@ -2421,6 +2491,116 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ── The pattern's own history ────────────────────────────────────────────
+
+    #[test]
+    fn a_person_without_recorded_days_always_gets_the_fallback() {
+        let history = WorkScheduleHistory::without_history(
+            WorkSchedule::without_fixed_days(7));
+        assert!(history.is_empty());
+        assert!(!history.on(day(2026, 5, 4)).has_fixed_days());
+        assert_eq!(history.on(day(2026, 5, 4)).days_per_week(), 7);
+    }
+
+    #[test]
+    fn a_date_before_the_first_entry_gets_the_fallback() {
+        let history = WorkScheduleHistory::new(
+            vec![(day(2026, 7, 1), sabine())],
+            WorkSchedule::without_fixed_days(5),
+        );
+        assert!(!history.on(day(2026, 6, 30)).has_fixed_days());
+        assert_eq!(history.on(day(2026, 7, 1)), sabine(), "the first day counts");
+    }
+
+    #[test]
+    fn a_change_of_working_days_leaves_the_past_alone() {
+        // Sabine works Monday to Thursday from her first day, and moves to
+        // Tuesday to Friday on 2027-03-01. Weeks before that date must keep
+        // the pattern they were actually worked under.
+        let history = WorkScheduleHistory::new(
+            vec![(day(2026, 7, 1), sabine()), (day(2027, 3, 1), orell())],
+            WorkSchedule::without_fixed_days(5),
+        );
+        assert_eq!(history.on(day(2026, 7, 1)), sabine());
+        assert_eq!(history.on(day(2027, 1, 4)), sabine(), "a week well before");
+        assert_eq!(history.on(day(2027, 2, 28)), sabine(), "the day before");
+        assert_eq!(history.on(day(2027, 3, 1)), orell(), "the day itself");
+        assert_eq!(history.on(day(2028, 1, 3)), orell(), "long after");
+    }
+
+    #[test]
+    fn a_past_weeks_target_does_not_move_when_the_days_change() {
+        // The property the history exists for, stated in minutes. A week in
+        // January 2027 asks for Sabine's four days whether or not she changes
+        // pattern in March.
+        let before = WorkScheduleHistory::new(
+            vec![(day(2026, 7, 1), sabine())],
+            WorkSchedule::without_fixed_days(5),
+        );
+        let after = WorkScheduleHistory::new(
+            vec![(day(2026, 7, 1), sabine()), (day(2027, 3, 1), orell())],
+            WorkSchedule::without_fixed_days(5),
+        );
+        let january = day(2027, 1, 4); // a Monday
+        let target_before = scheduled_week_target_min(
+            &before.on(january), january, day(2026, 7, 1),
+            &HashSet::new(), &HashSet::new(), 23.4);
+        let target_after = scheduled_week_target_min(
+            &after.on(january), january, day(2026, 7, 1),
+            &HashSet::new(), &HashSet::new(), 23.4);
+        assert_eq!(target_before, 4 * 351);
+        assert_eq!(
+            target_after, target_before,
+            "recording a later change must not move a week already worked"
+        );
+    }
+
+    #[test]
+    fn a_past_leave_day_does_not_move_when_the_days_change() {
+        // A Monday taken off in January 2027, under a Monday-to-Thursday
+        // pattern. Recording a move to Tuesday-to-Friday in March must not
+        // make that Monday free in hindsight.
+        let january_monday = day(2027, 1, 4);
+        let history = WorkScheduleHistory::new(
+            vec![(day(2026, 7, 1), sabine()), (day(2027, 3, 1), orell())],
+            WorkSchedule::without_fixed_days(5),
+        );
+        let charged = scheduled_leave_days(
+            &history.on(january_monday),
+            &[(january_monday, january_monday)],
+            day(2026, 7, 1),
+            day(2027, 1, 1),
+            day(2027, 12, 31),
+            &HashSet::new(),
+        );
+        assert_eq!(charged, vec![january_monday]);
+    }
+
+    #[test]
+    fn entries_may_arrive_in_any_order() {
+        let jumbled = WorkScheduleHistory::new(
+            vec![(day(2027, 3, 1), orell()), (day(2026, 7, 1), sabine())],
+            WorkSchedule::without_fixed_days(5),
+        );
+        assert_eq!(jumbled.on(day(2027, 1, 4)), sabine());
+        assert_eq!(jumbled.on(day(2027, 6, 1)), orell());
+    }
+
+    #[test]
+    fn the_newest_entry_that_has_begun_wins() {
+        let history = WorkScheduleHistory::new(
+            vec![
+                (day(2026, 1, 1), full_time()),
+                (day(2026, 7, 1), sabine()),
+                (day(2027, 3, 1), orell()),
+            ],
+            WorkSchedule::without_fixed_days(5),
+        );
+        assert_eq!(history.on(day(2026, 6, 30)), full_time());
+        assert_eq!(history.on(day(2026, 12, 31)), sabine());
+        assert_eq!(history.on(day(2030, 1, 1)), orell());
     }
 
     #[test]
