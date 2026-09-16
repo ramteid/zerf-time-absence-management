@@ -218,6 +218,28 @@ The payroll report's absence rows are the deliberate exception: they union per
 was this person absent", and a document claiming five absent days in a week
 somebody works four is wrong whatever the days were booked as.
 
+**A leave day is not yet worth a contract day, and that is a known defect.**
+Today a leave day removes one *potential* day of target (`weekly_hours / 5`)
+while the leave account is charged per calendar workday capped at
+`workdays_per_week`. Those two units disagree, so on a three-day, 24-hour
+contract the same three leave days buy a whole week off when booked Monday to
+Friday and 60% of a week when booked Monday to Wednesday. Booking the days
+somebody actually works costs them the leave days *and* leaves them nearly ten
+hours short for the week. The year boundary is where this first became
+visible, but it is not the cause.
+
+`time_calc::week_leave_accounting`, `counted_leave_days` and
+`contract_day_minutes` implement the replacement rule: a leave day is worth
+`weekly_hours / workdays_per_week` and removes exactly that much target, a week
+is accounted for whole (so a week split by a year or month boundary is charged
+once, not once per side), and a public holiday costs the week a day for free
+and therefore *saves* a leave day rather than being paid for twice. **Nothing
+calls them yet** — they carry the rule and its worked examples so it can be
+reviewed before any running calculation moves. A five-day contract must come
+out byte-identical, which is why the week's target is `workdays_per_week ×
+contract_day_minutes` and not `weekly_hours × 60`: rounding the week instead of
+the day shifted a 33.54-hour contract by two minutes a week.
+
 Auto-break tiers are compared in **whole minutes** (`exclusive_threshold_minutes`)
 everywhere they are compared at all: the settings endpoint refuses a second
 threshold that does not exceed the first at that resolution, and both
