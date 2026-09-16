@@ -278,8 +278,15 @@ pub fn contract_day_minutes(weekly_hours: f64, workdays_per_week: i16) -> i64 {
 /// `absence_days` holds the days a target-removing absence covers. Days that
 /// are public holidays are ignored there — a holiday already costs the week a
 /// day, and charging leave on top would bill the same day twice.
+///
+/// `contract_start` is the employee's first day. Days before it are not part
+/// of the contract: they cost no leave and carry no target, the same way every
+/// other view hides content before a start date. Leaving them out entirely
+/// charged somebody who joined on a Wednesday for the Monday and Tuesday
+/// before they were hired.
 pub fn week_leave_accounting(
     week_monday: NaiveDate,
+    contract_start: NaiveDate,
     holidays: &std::collections::HashSet<NaiveDate>,
     absence_days: &std::collections::HashSet<NaiveDate>,
     weekly_hours: f64,
@@ -291,7 +298,9 @@ pub fn week_leave_accounting(
     if potential == 0 {
         let mut charged: Vec<NaiveDate> = (0..7i64)
             .map(|offset| week_monday + Duration::days(offset))
-            .filter(|date| !holidays.contains(date) && absence_days.contains(date))
+            .filter(|date| {
+                *date >= contract_start && !holidays.contains(date) && absence_days.contains(date)
+            })
             .collect();
         charged.sort_unstable();
         return WeekLeaveAccounting {
@@ -300,10 +309,19 @@ pub fn week_leave_accounting(
         };
     }
 
+    // Days before the contract began are not part of this week for this
+    // employee. They drop out of the baseline further down rather than being
+    // subtracted from it: counting them as lost as well takes them off twice,
+    // which read a new starter's first week as 141 minutes where it is 843.
     let mut holiday_days = 0u32;
     let mut absence_dates: Vec<NaiveDate> = Vec::new();
+    let mut days_in_contract = 0u32;
     for offset in 0..i64::from(potential) {
         let date = week_monday + Duration::days(offset);
+        if date < contract_start {
+            continue;
+        }
+        days_in_contract += 1;
         if holidays.contains(&date) {
             holiday_days += 1;
             continue;
@@ -325,8 +343,11 @@ pub fn week_leave_accounting(
 
     // For the *target* a holiday counts like any other day the person does not
     // have to work, because that is what a contract day is worth under this
-    // rule. The week can never lose more days than the contract puts in it.
-    let lost_days = (holiday_days + charged_count as u32).min(quota);
+    // rule. The week can never lose more days than it actually holds for this
+    // employee, which is the smaller of the contract's weekly days and the days
+    // of the week that lie inside the contract at all.
+    let losable_days = quota.min(days_in_contract);
+    let lost_days = (holiday_days + charged_count as u32).min(losable_days);
     let day_value_min = contract_day_minutes(weekly_hours, workdays_per_week);
 
     // A week nobody was away in has to come out at exactly the number it has
@@ -339,9 +360,11 @@ pub fn week_leave_accounting(
     } else {
         (weekly_hours.max(0.0) / f64::from(potential) * 60.0).round() as i64
     };
-    let untouched_week_min = i64::from(potential) * potential_day_min;
-    let remaining_target_min = if lost_days >= quota {
-        // Every day the contract holds is gone, so nothing is left to work.
+    // Only the days the contract actually covers form the baseline, so a first
+    // week beginning mid-week starts from the days that exist for the employee.
+    let untouched_week_min = i64::from(days_in_contract) * potential_day_min;
+    let remaining_target_min = if lost_days >= losable_days {
+        // Every day this week holds for them is gone, so nothing is left.
         // Stated outright rather than subtracted, because the two roundings
         // would otherwise leave a stray minute behind.
         0
@@ -365,8 +388,16 @@ pub fn week_leave_accounting(
 /// `ranges` must carry the absences' real bounds, not bounds already clamped to
 /// the window, or the days lying just outside it cannot be seen. `holidays`
 /// likewise has to cover the whole weeks at both ends of the window.
+///
+/// **The caller must also fetch every absence touching those boundary weeks,
+/// not only the ones overlapping the window.** A year- or month-scoped query
+/// returns only absences overlapping its own period. Two separate bookings on
+/// one account either side of a boundary, inside a single calendar week, then
+/// reach each window as a lone range, and each window prices that week on its
+/// own — which is the double charge this function exists to remove.
 pub fn counted_leave_days(
     ranges: &[(NaiveDate, NaiveDate)],
+    contract_start: NaiveDate,
     window_start: NaiveDate,
     window_end: NaiveDate,
     holidays: &std::collections::HashSet<NaiveDate>,
@@ -392,6 +423,7 @@ pub fn counted_leave_days(
             .collect();
         let week = week_leave_accounting(
             monday,
+            contract_start,
             holidays,
             &absence_days,
             weekly_hours,
@@ -981,6 +1013,10 @@ mod tests {
             .collect()
     }
 
+    /// A start date long before every week under test, so the existing cases
+    /// read as they did before the contract start became a parameter.
+    const LONG_HIRED: (i32, u32, u32) = (2000, 1, 1);
+
     fn accounting(
         monday: NaiveDate,
         holiday_offsets: &[i64],
@@ -990,6 +1026,7 @@ mod tests {
     ) -> WeekLeaveAccounting {
         week_leave_accounting(
             monday,
+            day(LONG_HIRED.0, LONG_HIRED.1, LONG_HIRED.2),
             &days_of(monday, holiday_offsets),
             &days_of(monday, absence_offsets),
             weekly_hours,
@@ -1272,6 +1309,7 @@ mod tests {
         let ranges = [(monday, day(2026, 1, 2))];
         let in_2025 = counted_leave_days(
             &ranges,
+            day(2000, 1, 1),
             day(2025, 1, 1),
             day(2025, 12, 31),
             &HashSet::new(),
@@ -1280,6 +1318,7 @@ mod tests {
         );
         let in_2026 = counted_leave_days(
             &ranges,
+            day(2000, 1, 1),
             day(2026, 1, 1),
             day(2026, 12, 31),
             &HashSet::new(),
@@ -1308,6 +1347,7 @@ mod tests {
         let ranges = [(monday, day(2025, 1, 3))];
         let in_2024 = counted_leave_days(
             &ranges,
+            day(2000, 1, 1),
             day(2024, 1, 1),
             day(2024, 12, 31),
             &HashSet::new(),
@@ -1316,6 +1356,7 @@ mod tests {
         );
         let in_2025 = counted_leave_days(
             &ranges,
+            day(2000, 1, 1),
             day(2025, 1, 1),
             day(2025, 12, 31),
             &HashSet::new(),
@@ -1342,6 +1383,7 @@ mod tests {
         let ranges = [(monday, day(2026, 1, 2))];
         let in_2025 = counted_leave_days(
             &ranges,
+            day(2000, 1, 1),
             day(2025, 1, 1),
             day(2025, 12, 31),
             &holidays,
@@ -1350,6 +1392,7 @@ mod tests {
         );
         let in_2026 = counted_leave_days(
             &ranges,
+            day(2000, 1, 1),
             day(2026, 1, 1),
             day(2026, 12, 31),
             &holidays,
@@ -1367,7 +1410,7 @@ mod tests {
         let absence_days: HashSet<NaiveDate> = (0..5i64)
             .map(|offset| monday + Duration::days(offset))
             .collect();
-        let week = week_leave_accounting(monday, &holidays, &absence_days, 24.0, 3);
+        let week = week_leave_accounting(monday, day(2000, 1, 1), &holidays, &absence_days, 24.0, 3);
         assert_eq!(week.remaining_target_min, 0);
     }
 
@@ -1379,6 +1422,7 @@ mod tests {
         let ranges = [(monday, monday + Duration::days(4))];
         let charged = counted_leave_days(
             &ranges,
+            day(2000, 1, 1),
             day(2026, 1, 1),
             day(2026, 12, 31),
             &HashSet::new(),
@@ -1395,6 +1439,7 @@ mod tests {
         let ranges = [(monday, monday + Duration::days(4))];
         let august = counted_leave_days(
             &ranges,
+            day(2000, 1, 1),
             day(2026, 8, 1),
             day(2026, 8, 31),
             &HashSet::new(),
@@ -1403,6 +1448,7 @@ mod tests {
         );
         let september = counted_leave_days(
             &ranges,
+            day(2000, 1, 1),
             day(2026, 9, 1),
             day(2026, 9, 30),
             &HashSet::new(),
@@ -1423,6 +1469,7 @@ mod tests {
         ];
         let charged = counted_leave_days(
             &ranges,
+            day(2000, 1, 1),
             day(2026, 5, 1),
             day(2026, 5, 31),
             &HashSet::new(),
@@ -1436,6 +1483,7 @@ mod tests {
     fn counted_leave_days_ignores_ranges_outside_the_window() {
         let charged = counted_leave_days(
             &[(day(2026, 3, 2), day(2026, 3, 6))],
+            day(2000, 1, 1),
             day(2026, 5, 1),
             day(2026, 5, 31),
             &HashSet::new(),
@@ -1445,10 +1493,117 @@ mod tests {
         assert!(charged.is_empty());
     }
 
+    // ── The contract's own start date ────────────────────────────────────────
+
+    #[test]
+    fn days_before_the_contract_began_cost_nothing_at_all() {
+        // Somebody hired on Wednesday 2026-07-01. Monday and Tuesday of that
+        // week are before their first day.
+        let monday = day(2026, 6, 29);
+        let start = day(2026, 7, 1);
+        let week = week_leave_accounting(
+            monday,
+            start,
+            &HashSet::new(),
+            &HashSet::new(),
+            23.4,
+            4,
+        );
+        // Three weekdays exist for them, each worth today's potential day of
+        // 281 minutes, and two of the contract's four days are gone with the
+        // days that never belonged to it.
+        // Three weekdays exist for them, each worth today's 281 minutes. The
+        // Monday and Tuesday before they were hired take nothing off, because
+        // they were never part of this week for this employee.
+        assert_eq!(week.remaining_target_min, 3 * 281);
+        assert!(week.charged_dates.is_empty());
+    }
+
+    #[test]
+    fn a_first_week_charges_no_leave_before_the_start_date() {
+        let monday = day(2026, 6, 29);
+        let start = day(2026, 7, 1);
+        // An absence covering the whole week, which cannot really happen but
+        // proves the days before the start are never billed.
+        let absences: HashSet<NaiveDate> =
+            (0..5i64).map(|offset| monday + Duration::days(offset)).collect();
+        let week =
+            week_leave_accounting(monday, start, &HashSet::new(), &absences, 23.4, 4);
+        assert_eq!(
+            week.charged_dates,
+            vec![start, start + Duration::days(1), start + Duration::days(2)],
+            "only Wednesday, Thursday and Friday can cost leave"
+        );
+        assert_eq!(week.remaining_target_min, 0);
+    }
+
+    #[test]
+    fn a_week_entirely_before_the_start_date_is_empty() {
+        let week = week_leave_accounting(
+            day(2026, 6, 22),
+            day(2026, 7, 1),
+            &HashSet::new(),
+            &HashSet::new(),
+            23.4,
+            4,
+        );
+        assert!(week.charged_dates.is_empty());
+        assert_eq!(week.remaining_target_min, 0);
+    }
+
+    #[test]
+    fn counted_leave_days_skips_everything_before_the_start_date() {
+        let charged = counted_leave_days(
+            &[(day(2026, 6, 29), day(2026, 7, 3))],
+            day(2026, 7, 1),
+            day(2026, 1, 1),
+            day(2026, 12, 31),
+            &HashSet::new(),
+            23.4,
+            4,
+        );
+        assert_eq!(
+            charged,
+            vec![day(2026, 7, 1), day(2026, 7, 2), day(2026, 7, 3)]
+        );
+    }
+
+    /// The one thing a caller has to get right, written down as a test so it
+    /// cannot be forgotten: a window-scoped query hands over only the absences
+    /// overlapping its own period, and two bookings on one account either side
+    /// of a boundary inside one week then get priced twice.
+    #[test]
+    fn a_window_that_cannot_see_the_whole_week_charges_it_twice() {
+        let old_year = (day(2025, 12, 29), day(2025, 12, 30));
+        let new_year = (day(2026, 1, 1), day(2026, 1, 2));
+        let hired = day(2020, 1, 1);
+        let no_holidays = HashSet::new();
+
+        // Handed both bookings, each window prices the shared week correctly.
+        let both = [old_year, new_year];
+        let in_2025 = counted_leave_days(
+            &both, hired, day(2025, 1, 1), day(2025, 12, 31), &no_holidays, 24.0, 3);
+        let in_2026 = counted_leave_days(
+            &both, hired, day(2026, 1, 1), day(2026, 12, 31), &no_holidays, 24.0, 3);
+        assert_eq!(in_2025.len() + in_2026.len(), 3, "the week is worth three days");
+
+        // Handed only its own booking, each window charges the week on its own.
+        let alone_2025 = counted_leave_days(
+            &[old_year], hired, day(2025, 1, 1), day(2025, 12, 31), &no_holidays, 24.0, 3);
+        let alone_2026 = counted_leave_days(
+            &[new_year], hired, day(2026, 1, 1), day(2026, 12, 31), &no_holidays, 24.0, 3);
+        assert_eq!(
+            alone_2025.len() + alone_2026.len(),
+            4,
+            "four days for a three-day week — the caller must fetch both bookings"
+        );
+    }
+
     #[test]
     fn counted_leave_days_handles_an_empty_or_inverted_request() {
         assert!(counted_leave_days(
             &[],
+            day(2000, 1, 1),
             day(2026, 5, 1),
             day(2026, 5, 31),
             &HashSet::new(),
@@ -1458,6 +1613,7 @@ mod tests {
         .is_empty());
         assert!(counted_leave_days(
             &[(day(2026, 5, 4), day(2026, 5, 8))],
+            day(2000, 1, 1),
             day(2026, 5, 31),
             day(2026, 5, 1),
             &HashSet::new(),
@@ -1481,6 +1637,7 @@ mod tests {
                     let ranges = [(start, start + Duration::days(length))];
                     let charged = counted_leave_days(
                         &ranges,
+                        day(2000, 1, 1),
                         year_start,
                         day(2026, 12, 31),
                         &holidays,
