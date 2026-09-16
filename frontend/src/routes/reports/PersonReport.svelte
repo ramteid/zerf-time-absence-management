@@ -22,7 +22,7 @@
   } from "../../format.js";
   import {
     normalizeMonthReport,
-    countWorkdays,
+    withAbsenceDays,
     holidayDateSet,
   } from "../../apiMappers.js";
   import Icon from "../../Icons.svelte";
@@ -155,20 +155,15 @@
       years.map((year) => getHolidaysByYear(year)),
     );
     const holidayDates = holidayDateSet(holidayLists.flat());
-    return raw.map((a) => {
-      const clampedFrom =
-        a.start_date > absenceFrom ? a.start_date : absenceFrom;
-      const clampedTo = a.end_date < absenceTo ? a.end_date : absenceTo;
-      const days =
-        clampedTo < clampedFrom
-          ? 0
-          : countWorkdays(
-              clampedFrom,
-              clampedTo,
-              holidayDates,
-              workdaysPerWeek,
-            );
-      return { ...a, days };
+    // Counted together, so one calendar week's quota is charged once across
+    // every absence that shares it. Pricing each absence on its own billed a
+    // part-timer's split week twice, and the stat cards above then disagreed
+    // with the leave balance right beside them.
+    return withAbsenceDays(raw, {
+      from: absenceFrom,
+      to: absenceTo,
+      holidays: holidayDates,
+      workdaysPerWeek,
     });
   }
 

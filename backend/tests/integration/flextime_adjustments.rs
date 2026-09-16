@@ -1102,3 +1102,231 @@ async fn a_booking_in_a_past_month_requeues_its_export() {
 
     app.cleanup().await;
 }
+
+/// A new hire whose contract has not started yet still has the hours they
+/// brought with them on the record from the moment the account is created. The
+/// account dialog is where an admin checks that carry-in, and it has to agree
+/// with the ledger: `/reports/flextime` reports the booking on the start date,
+/// so a balance of zero beside it means the dialog is reading the ledger
+/// through a date the booking has not reached.
+#[tokio::test]
+async fn a_carry_in_for_a_start_date_still_ahead_is_already_on_the_account() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    // Far enough ahead that the cutoff (start_date - 1, nothing approved yet)
+    // is itself in the future, which is what the balance read must survive.
+    let start_day = reference_date() + chrono::Duration::days(30);
+    let start_iso = start_day.format("%Y-%m-%d").to_string();
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "ahead@example.com",
+                "first_name": "Nadja", "last_name": "Neu",
+                "role": "employee", "weekly_hours": 39,
+                "start_date": start_iso,
+                "approver_ids": [1],
+                "flextime_opening_balance_min": 600
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create a future starter: {body}");
+    let user_id = id(&body);
+
+    // The ledger already carries it on the start date.
+    let days = flextime_days(&admin, user_id, &start_iso, &start_iso).await;
+    assert_eq!(
+        days[0]["adjustment_min"], 600,
+        "the ledger books the carry-in on the start date: {days:?}"
+    );
+    assert_eq!(days[0]["cumulative_min"], 600);
+
+    // ... and so must the account dialog the admin actually looks at.
+    let (st, account) = admin
+        .get(&format!("/api/v1/users/{user_id}/flextime-account"))
+        .await;
+    assert_eq!(st, StatusCode::OK, "flextime account: {account}");
+    assert_eq!(
+        account["balance_min"], 600,
+        "the carry-in of a contract still ahead is already booked: {account}"
+    );
+
+    app.cleanup().await;
+}
+
+/// The same flextime balance is reachable through four very different code
+/// paths: the day ledger built from the contract start, the day ledger *seeded*
+/// from a month boundary (which reconstructs everything before it rather than
+/// walking it), the monthly overtime rows the dashboard reads, and the account
+/// dialog. They must return the same number — a disagreement is a seeding bug,
+/// and nobody can tell which of the four screens is lying.
+#[tokio::test]
+async fn every_path_to_the_flextime_balance_reports_the_same_number() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let today = reference_date();
+
+    let start_day = next_monday(-35);
+    let start_iso = start_day.format("%Y-%m-%d").to_string();
+    let work_monday = next_monday(-21);
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "crosspath@example.com",
+                "first_name": "Carla", "last_name": "Cross",
+                "role": "employee", "weekly_hours": 39,
+                "start_date": start_iso,
+                "approver_ids": [1],
+                "flextime_opening_balance_min": 600
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create user: {body}");
+    let user_id = id(&body);
+    let employee = login_change_pw(&app, "crosspath@example.com", &temp_pw(&body)).await;
+
+    let (_, categories) = admin.get("/api/v1/categories").await;
+    let cat_id = categories.as_array().unwrap()[0]["id"].as_i64().unwrap();
+
+    // A whole approved week, so the cutoff moves past it and worked time
+    // actually contributes to the balance.
+    let mut entry_ids = Vec::new();
+    for offset in 0..5i64 {
+        let day = (work_monday + chrono::Duration::days(offset))
+            .format("%Y-%m-%d")
+            .to_string();
+        let (st, body) = employee
+            .post(
+                "/api/v1/time-entries",
+                &json!({
+                    "entry_date": day, "start_time": "08:00", "end_time": "12:00",
+                    "category_id": cat_id, "comment": "work"
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create entry for {day}: {body}");
+        entry_ids.push(id(&body));
+    }
+    let (st, body) = employee
+        .post("/api/v1/time-entries/submit", &json!({"ids": entry_ids}))
+        .await;
+    assert_eq!(st, StatusCode::OK, "submit the week: {body}");
+    let (st, body) = admin
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": entry_ids}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "approve the week: {body}");
+
+    // One booking that has taken effect and one that has not, so the cap on
+    // "effective on or before" is exercised on every path as well.
+    for (date, minutes) in [(today, -90), (today + chrono::Duration::days(5), -500)] {
+        let (st, body) = admin
+            .post(
+                &format!("/api/v1/users/{user_id}/flextime-adjustments"),
+                &json!({
+                    "effective_date": date.format("%Y-%m-%d").to_string(),
+                    "minutes": minutes,
+                    "reason": "correction"
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "book adjustment: {body}");
+    }
+
+    let (st, account) = admin
+        .get(&format!("/api/v1/users/{user_id}/flextime-account"))
+        .await;
+    assert_eq!(st, StatusCode::OK, "flextime account: {account}");
+    let cutoff: chrono::NaiveDate = account["balance_as_of"]
+        .as_str()
+        .expect("balance_as_of")
+        .parse()
+        .expect("a cutoff date");
+    assert!(
+        cutoff >= work_monday + chrono::Duration::days(6),
+        "the approved week must have moved the cutoff: {account}"
+    );
+    let account_balance = account["balance_min"].as_i64().expect("balance_min");
+
+    // Path 1: the ledger walked from the contract start.
+    let month_end = {
+        let first_of_next = if cutoff.month() == 12 {
+            chrono::NaiveDate::from_ymd_opt(cutoff.year() + 1, 1, 1)
+        } else {
+            chrono::NaiveDate::from_ymd_opt(cutoff.year(), cutoff.month() + 1, 1)
+        }
+        .expect("a valid month");
+        first_of_next - chrono::Duration::days(1)
+    };
+    let month_end_iso = month_end.format("%Y-%m-%d").to_string();
+    let walked = flextime_days(&admin, user_id, &start_iso, &month_end_iso).await;
+    let walked_balance = walked
+        .last()
+        .expect("day rows")
+        .get("cumulative_min")
+        .and_then(serde_json::Value::as_i64)
+        .expect("cumulative_min");
+
+    // Path 2: the same day, reached by seeding instead of walking.
+    let seeded = flextime_days(&admin, user_id, &month_end_iso, &month_end_iso).await;
+    assert_eq!(
+        seeded[0]["cumulative_min"], walked_balance,
+        "seeding the ledger from a month boundary must reconstruct the walked balance: {seeded:?}"
+    );
+
+    // Path 3: the monthly overtime row the dashboard reads.
+    let (st, overtime) = admin
+        .get(&format!(
+            "/api/v1/reports/overtime?user_id={user_id}&year={}",
+            cutoff.year()
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK, "overtime rows: {overtime}");
+    let cutoff_month = format!("{:04}-{:02}", cutoff.year(), cutoff.month());
+    let row = overtime["rows"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .find(|row| row["month"] == cutoff_month)
+        .unwrap_or_else(|| panic!("no row for {cutoff_month}: {overtime}"));
+    assert_eq!(
+        row["cumulative_min"], walked_balance,
+        "the month row and the day ledger must agree on that month's closing balance: {row}"
+    );
+
+    // Path 4: the account dialog, against the ledger read on today.
+    let today_iso = today.format("%Y-%m-%d").to_string();
+    let ledger_today = flextime_days(&admin, user_id, &today_iso, &today_iso).await;
+    assert_eq!(
+        ledger_today[0]["cumulative_min"], account_balance,
+        "the account dialog states the ledger's balance for today: {ledger_today:?}"
+    );
+
+    // ... and the dashboard's row for the running month states the same.
+    let (st, overtime_now) = admin
+        .get(&format!(
+            "/api/v1/reports/overtime?user_id={user_id}&year={}",
+            today.year()
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK, "overtime rows: {overtime_now}");
+    let current_month = format!("{:04}-{:02}", today.year(), today.month());
+    let current_row = overtime_now["rows"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .find(|row| row["month"] == current_month)
+        .unwrap_or_else(|| panic!("no row for {current_month}: {overtime_now}"));
+    assert_eq!(
+        current_row["cumulative_min"], account_balance,
+        "the running month's row is the balance the account dialog shows: {current_row}"
+    );
+
+    app.cleanup().await;
+}

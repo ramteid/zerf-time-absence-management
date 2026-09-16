@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  countedWorkdays,
   countWorkdays,
   holidayDateSet,
   normalizeMonthReport,
+  withAbsenceDays,
 } from "./apiMappers.js";
 
 describe("holidayDateSet", () => {
@@ -280,5 +282,97 @@ describe("normalizeMonthReport", () => {
         days: 1,
       },
     ]);
+  });
+});
+
+describe("countedWorkdays", () => {
+  // 2026-05-04 is a Monday.
+  it("charges one week's quota once across several ranges", () => {
+    const split = countedWorkdays(
+      [
+        ["2026-05-04", "2026-05-05"],
+        ["2026-05-06", "2026-05-08"],
+      ],
+      "2026-05-04",
+      "2026-05-08",
+      new Set(),
+      3,
+    );
+    expect(split).toEqual(["2026-05-04", "2026-05-05", "2026-05-06"]);
+    // ... which is exactly what the same week booked as one range costs.
+    expect(countWorkdays("2026-05-04", "2026-05-08", new Set(), 3)).toBe(3);
+  });
+
+  it("ignores the part of a range that falls outside the window", () => {
+    expect(
+      countedWorkdays(
+        [["2026-04-27", "2026-05-15"]],
+        "2026-05-04",
+        "2026-05-05",
+        new Set(),
+        5,
+      ),
+    ).toEqual(["2026-05-04", "2026-05-05"]);
+  });
+
+  it("counts every non-holiday day for an irregular schedule", () => {
+    expect(
+      countedWorkdays(
+        [["2026-05-08", "2026-05-10"]],
+        "2026-05-08",
+        "2026-05-10",
+        new Set(["2026-05-09"]),
+        0,
+      ),
+    ).toEqual(["2026-05-08", "2026-05-10"]);
+  });
+});
+
+describe("withAbsenceDays", () => {
+  // Two bookings inside one calendar week on a three-day contract. Counted
+  // separately they cost 2 + 3 = 5 days; the week can never cost more than 3.
+  const week = [
+    { id: 1, start_date: "2026-05-04", end_date: "2026-05-05" },
+    { id: 2, start_date: "2026-05-06", end_date: "2026-05-08" },
+  ];
+
+  it("splits one week's quota between the absences that share it", () => {
+    const rows = withAbsenceDays(week, {
+      from: "2026-05-01",
+      to: "2026-05-31",
+      workdaysPerWeek: 3,
+    });
+    expect(rows.map((row) => row.days)).toEqual([2, 1]);
+    expect(rows.reduce((total, row) => total + row.days, 0)).toBe(3);
+  });
+
+  it("charges the later booking only what the week has left", () => {
+    // Order in the input must not change the answer.
+    const rows = withAbsenceDays([week[1], week[0]], {
+      from: "2026-05-01",
+      to: "2026-05-31",
+      workdaysPerWeek: 3,
+    });
+    expect(rows.map((row) => ({ id: row.id, days: row.days }))).toEqual([
+      { id: 2, days: 1 },
+      { id: 1, days: 2 },
+    ]);
+  });
+
+  it("leaves a full-quota week unchanged", () => {
+    const rows = withAbsenceDays(week, {
+      from: "2026-05-01",
+      to: "2026-05-31",
+      workdaysPerWeek: 5,
+    });
+    expect(rows.map((row) => row.days)).toEqual([2, 3]);
+  });
+
+  it("clamps each absence to the window", () => {
+    const rows = withAbsenceDays(
+      [{ id: 1, start_date: "2026-04-27", end_date: "2026-05-08" }],
+      { from: "2026-05-04", to: "2026-05-05", workdaysPerWeek: 5 },
+    );
+    expect(rows[0].days).toBe(2);
   });
 });
