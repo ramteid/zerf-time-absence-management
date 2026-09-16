@@ -126,51 +126,79 @@ pub fn is_potential_workday(date: NaiveDate, workdays_per_week: i16) -> bool {
     }
 }
 
-/// Count effective workdays in `[from, to]`, excluding public holidays,
-/// without forcing fixed weekdays for 1-5 day contracts.
+/// The individual days a set of date ranges costs, in calendar order, with the
+/// weekly cap applied **once** across the whole window.
 ///
-/// The range is split by ISO week; each week's effective days are capped by
-/// the configured `workdays_per_week`. This preserves the weekly day quota
-/// while allowing flexible distribution across the week's potential day pool.
-/// For irregular users (`workdays_per_week <= 0`), we count all calendar days
-/// excluding holidays (no weekly cap) to avoid unlimited leave.
+/// This is the single implementation of Zerf's leave-day calendar. Callers that
+/// only need the total take `.len()`; callers that have to split the same window
+/// into buckets (already taken vs. still upcoming, before vs. after a carryover
+/// expiry) walk the returned dates instead of counting two narrower windows.
+/// Counting narrower windows applies the weekly cap to each of them, so one
+/// calendar week off could be billed twice over — a 3-day/week employee away
+/// Mon-Fri was charged 3 days for Mon-Wed plus 2 for Thu-Fri instead of the 3
+/// the week can ever cost.
+///
+/// Ranges are treated as a union, never summed: two bookings inside one week
+/// together still cost only what that week is worth.
+///
+/// Within a week the earliest covered days are the ones that count, so the
+/// result is deterministic and a day's bucket never depends on how the caller
+/// happens to slice the window.
+pub fn counted_workdays(
+    ranges: &[(NaiveDate, NaiveDate)],
+    window_start: NaiveDate,
+    window_end: NaiveDate,
+    holidays: &std::collections::HashSet<NaiveDate>,
+    workdays_per_week: i16,
+) -> Vec<NaiveDate> {
+    let clamped: Vec<(NaiveDate, NaiveDate)> = ranges
+        .iter()
+        .map(|(start, end)| ((*start).max(window_start), (*end).min(window_end)))
+        .filter(|(start, end)| start <= end)
+        .collect();
+    if clamped.is_empty() {
+        return Vec::new();
+    }
+
+    // An irregular schedule has no weekly quota to cap against, so every
+    // covered non-holiday calendar day counts.
+    let irregular = potential_workdays_per_week(workdays_per_week) == 0;
+
+    let mut counted = Vec::new();
+    let mut used_in_week: std::collections::HashMap<NaiveDate, i16> =
+        std::collections::HashMap::new();
+    let mut date = window_start;
+    while date <= window_end {
+        let is_candidate = !holidays.contains(&date)
+            && (irregular || is_potential_workday(date, workdays_per_week));
+        if is_candidate && clamped.iter().any(|(start, end)| date >= *start && date <= *end) {
+            if irregular {
+                counted.push(date);
+            } else {
+                let used = used_in_week.entry(week_monday(date)).or_insert(0);
+                if *used < workdays_per_week {
+                    *used += 1;
+                    counted.push(date);
+                }
+            }
+        }
+        date += Duration::days(1);
+    }
+    counted
+}
+
+/// Count effective workdays in `[from, to]`, excluding public holidays.
+///
+/// Thin wrapper around [`counted_workdays`] over the whole range: the weekly
+/// cap, the potential-day pool and the irregular-schedule rule all live there,
+/// so a range count and a per-day leave count can never drift apart.
 pub fn count_workdays(
     from: NaiveDate,
     to: NaiveDate,
     holidays: &std::collections::HashSet<NaiveDate>,
     workdays_per_week: i16,
 ) -> f64 {
-    if to < from {
-        return 0.0;
-    }
-    if workdays_per_week <= 0 {
-        // Irregular schedule: count calendar days minus holidays, no weekly cap.
-        let mut count = 0.0;
-        let mut day = from;
-        while day <= to {
-            if !holidays.contains(&day) {
-                count += 1.0;
-            }
-            day += Duration::days(1);
-        }
-        return count;
-    }
-
-    let mut effective_days_by_week: std::collections::HashMap<NaiveDate, i16> =
-        std::collections::HashMap::new();
-    let mut date = from;
-    while date <= to {
-        if is_potential_workday(date, workdays_per_week) && !holidays.contains(&date) {
-            let monday = week_monday(date);
-            *effective_days_by_week.entry(monday).or_insert(0) += 1;
-        }
-        date += Duration::days(1);
-    }
-
-    effective_days_by_week
-        .into_values()
-        .map(|days| i16::min(days, workdays_per_week) as f64)
-        .sum()
+    counted_workdays(&[(from, to)], from, to, holidays, workdays_per_week).len() as f64
 }
 
 pub fn parse_hhmm_or_hhmmss(value: &str) -> Option<NaiveTime> {
@@ -193,6 +221,7 @@ pub fn parse_stored_time(value: &str) -> AppResult<NaiveTime> {
 mod tests {
     use super::*;
     use chrono::NaiveDate;
+    use std::collections::HashSet;
 
     #[test]
     fn week_monday_returns_monday_for_any_weekday() {
@@ -434,6 +463,150 @@ mod tests {
         assert_eq!(
             compute_day_auto_break(&[(t(8, 0), t(15, 0)), (t(15, 20), t(16, 20))], &[(360, 30)]),
             10
+        );
+    }
+
+    fn day(year: i32, month: u32, day: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(year, month, day).expect("valid date")
+    }
+
+    /// How many days a set of ranges costs inside one window on its own — the
+    /// shape every caller used before the buckets were cut out of a single
+    /// count.
+    fn count_over_window(
+        ranges: &[(NaiveDate, NaiveDate)],
+        window_start: NaiveDate,
+        window_end: NaiveDate,
+        holidays: &HashSet<NaiveDate>,
+        workdays_per_week: i16,
+    ) -> f64 {
+        counted_workdays(ranges, window_start, window_end, holidays, workdays_per_week).len() as f64
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // counted_workdays
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// 2026-05-11 is a Monday. A reduced-hours contract (3 days a week) taking
+    /// the whole calendar week off spends three leave days, never five.
+    #[test]
+    fn counted_workdays_caps_a_full_week_at_the_weekly_quota() {
+        let holidays = HashSet::new();
+        let counted = counted_workdays(
+            &[(day(2026, 5, 11), day(2026, 5, 15))],
+            day(2026, 5, 1),
+            day(2026, 5, 31),
+            &holidays,
+            3,
+        );
+        assert_eq!(counted.len(), 3);
+        // The earliest days of the week are the ones that count, so the answer
+        // does not depend on where a caller later splits the list.
+        assert_eq!(
+            counted,
+            vec![day(2026, 5, 11), day(2026, 5, 12), day(2026, 5, 13)]
+        );
+    }
+
+    /// The regression this helper exists for: counting "up to Wednesday" and
+    /// "from Thursday" as two windows applied the weekly cap to each of them,
+    /// billing one week off as 3 + 2 = 5 days. Splitting the counted days
+    /// instead keeps the total at what the week can cost.
+    #[test]
+    fn counted_workdays_split_mid_week_still_totals_the_weekly_quota() {
+        let holidays = HashSet::new();
+        let counted = counted_workdays(
+            &[(day(2026, 5, 11), day(2026, 5, 15))],
+            day(2026, 5, 1),
+            day(2026, 5, 31),
+            &holidays,
+            3,
+        );
+        let wednesday = day(2026, 5, 13);
+        let taken = counted.iter().filter(|d| **d <= wednesday).count();
+        let upcoming = counted.len() - taken;
+        assert_eq!(taken + upcoming, 3);
+
+        // Counting the two halves as separate windows is what used to happen.
+        let separately = count_over_window(
+            &[(day(2026, 5, 11), day(2026, 5, 15))],
+            day(2026, 5, 1),
+            wednesday,
+            &holidays,
+            3,
+        ) + count_over_window(
+            &[(day(2026, 5, 11), day(2026, 5, 15))],
+            day(2026, 5, 14),
+            day(2026, 5, 31),
+            &holidays,
+            3,
+        );
+        assert_eq!(separately, 5.0, "the old two-window count over-charged");
+    }
+
+    /// Two separate bookings inside one week are a union, not a sum: together
+    /// they can still only cost what the week is worth.
+    #[test]
+    fn counted_workdays_unions_several_ranges_in_one_week() {
+        let holidays = HashSet::new();
+        let counted = counted_workdays(
+            &[
+                (day(2026, 5, 11), day(2026, 5, 12)),
+                (day(2026, 5, 13), day(2026, 5, 15)),
+            ],
+            day(2026, 5, 1),
+            day(2026, 5, 31),
+            &holidays,
+            4,
+        );
+        assert_eq!(counted.len(), 4);
+    }
+
+    /// Holidays and weekends never count, and a five-day contract is billed
+    /// for exactly the workdays it covers.
+    #[test]
+    fn counted_workdays_skips_weekends_and_holidays() {
+        let holidays = HashSet::from([day(2026, 5, 14)]);
+        let counted = counted_workdays(
+            &[(day(2026, 5, 11), day(2026, 5, 17))],
+            day(2026, 5, 1),
+            day(2026, 5, 31),
+            &holidays,
+            5,
+        );
+        assert_eq!(counted, vec![day(2026, 5, 11), day(2026, 5, 12), day(2026, 5, 13), day(2026, 5, 15)]);
+    }
+
+    /// An irregular schedule has no quota to cap against, so every covered
+    /// non-holiday calendar day counts — weekends included.
+    #[test]
+    fn counted_workdays_counts_every_day_for_irregular_schedules() {
+        let holidays = HashSet::from([day(2026, 5, 14)]);
+        let counted = counted_workdays(
+            &[(day(2026, 5, 11), day(2026, 5, 17))],
+            day(2026, 5, 1),
+            day(2026, 5, 31),
+            &holidays,
+            0,
+        );
+        assert_eq!(counted.len(), 6);
+    }
+
+    /// Ranges outside the window contribute nothing, and an empty list is 0.
+    #[test]
+    fn counted_workdays_ignores_ranges_outside_the_window() {
+        let holidays = HashSet::new();
+        assert!(counted_workdays(
+            &[(day(2026, 4, 1), day(2026, 4, 30))],
+            day(2026, 5, 1),
+            day(2026, 5, 31),
+            &holidays,
+            5,
+        )
+        .is_empty());
+        assert!(
+            counted_workdays(&[], day(2026, 5, 1), day(2026, 5, 31), &holidays, 5)
+                .is_empty()
         );
     }
 }

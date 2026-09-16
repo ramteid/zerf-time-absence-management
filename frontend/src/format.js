@@ -238,17 +238,35 @@ export function minToHM(min) {
     String(absoluteMinutes % 60).padStart(2, "0")
   );
 }
+/// Minutes since midnight for an "HH:MM" or "HH:MM:SS" clock time, or NaN when
+/// the value is not a real time. Entries are minute-granular (the UI only ever
+/// offers HH:MM); a trailing ":SS" only appears because the backend's TIME
+/// column serialises with seconds, so it is validated and then discarded.
+///
+/// The component ranges are checked rather than just the shape: a value like
+/// "8:75" or "25:00" is not a time, and accepting it here while the break
+/// calculation rejected it made the logged total and the break deduction
+/// disagree about which entries exist at all.
+export function clockMinutes(value) {
+  if (!value) return NaN;
+  const parts = String(value).trim().split(":");
+  if (parts.length < 2 || parts.length > 3) return NaN;
+  const hours = Number(parts[0]);
+  const minutes = Number(parts[1]);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return NaN;
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return NaN;
+  if (parts[2] !== undefined) {
+    const seconds = Number(parts[2]);
+    if (!Number.isFinite(seconds) || seconds < 0 || seconds > 59) return NaN;
+  }
+  return hours * 60 + minutes;
+}
 export function durMin(start, end) {
-  const parse = (s) => {
-    if (!s) return NaN;
-    const parts = String(s).trim().split(":").map(Number);
-    if (parts.length < 2 || parts.some((n) => !Number.isFinite(n))) return NaN;
-    return parts[0] * 60 + (parts[1] || 0);
-  };
-  const bh = parse(start);
-  const eh = parse(end);
-  if (!Number.isFinite(bh) || !Number.isFinite(eh)) return NaN;
-  return eh - bh;
+  const startMinutes = clockMinutes(start);
+  const endMinutes = clockMinutes(end);
+  if (!Number.isFinite(startMinutes) || !Number.isFinite(endMinutes))
+    return NaN;
+  return endMinutes - startMinutes;
 }
 export function isoWeek(d) {
   const utcDate = new Date(

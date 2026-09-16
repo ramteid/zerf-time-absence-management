@@ -2358,3 +2358,124 @@ async fn the_month_report_counts_the_week_being_worked() {
 
     app.cleanup().await;
 }
+
+/// A finished month's submission status is decided by that month's own days.
+///
+/// The week carrying a month's last day reaches into the next month. Judging
+/// that whole week meant a draft booked on the 1st — or an entry still waiting
+/// for approval there — made the month just closed look unfinished on the
+/// dashboard for as long as it stayed open, while the team report (which always
+/// clamped to the month) said the opposite about the very same month.
+#[tokio::test]
+async fn a_finished_month_is_settled_by_its_own_days() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "month-edge").await;
+    let lead = login_change_pw(&app, "lead-month-edge@example.com", &lead_pw).await;
+
+    let today = reference_date();
+    // The month that has just ended, and the week carrying its last day.
+    let this_month_start = NaiveDate::from_ymd_opt(today.year(), today.month(), 1)
+        .expect("first of this month");
+    let last_month_end = this_month_start - Duration::days(1);
+    let last_month = last_month_end.format("%Y-%m").to_string();
+    let last_month_start =
+        NaiveDate::from_ymd_opt(last_month_end.year(), last_month_end.month(), 1)
+            .expect("first of last month");
+    let final_week_monday = zerf::time_calc::week_monday(last_month_end);
+    // Start the employee in the last month's closing week so the earlier weeks
+    // are trivially covered and only that week has to be handed in.
+    let start_date = final_week_monday.max(last_month_start);
+
+    let (status, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "month-edge@example.com",
+                "first_name": "Mona",
+                "last_name": "Monthedge",
+                "role": "employee",
+                "weekly_hours": 39,
+                "start_date": start_date.format("%Y-%m-%d").to_string(),
+                "approver_ids": [lead_id],
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create employee: {body}");
+    let employee = login_change_pw(&app, "month-edge@example.com", &temp_pw(&body)).await;
+
+    // Hand in and approve the month's last day — that settles its week.
+    let entry_id = create_and_submit_entry(
+        &employee,
+        &last_month_end.format("%Y-%m-%d").to_string(),
+        cat_id,
+    )
+    .await;
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [entry_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the month's last day: {body}");
+
+    let (status, report) = employee
+        .get(&format!("/api/v1/reports/month?month={last_month}"))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        report["weeks_all_submitted"],
+        json!(true),
+        "the month's own days are all handed in: {report}"
+    );
+    assert_eq!(
+        report["weeks_all_approved"],
+        json!(true),
+        "and all decided: {report}"
+    );
+
+    // Now book in the new month, inside the same calendar week: a draft on the
+    // 1st and an entry submitted but not yet decided on the 2nd. Neither
+    // belongs to the month that just closed.
+    let (status, body) = employee
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": this_month_start.format("%Y-%m-%d").to_string(),
+                "start_time": "08:00", "end_time": "12:00",
+                "category_id": cat_id, "comment": "new month draft"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "book a draft in the new month: {body}");
+    create_and_submit_entry(
+        &employee,
+        &(this_month_start + Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string(),
+        cat_id,
+    )
+    .await;
+
+    let (status, report) = employee
+        .get(&format!("/api/v1/reports/month?month={last_month}"))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        report["weeks_all_submitted"],
+        json!(true),
+        "a draft in the new month cannot reopen the closed one: {report}"
+    );
+    assert_eq!(
+        report["weeks_all_approved"],
+        json!(true),
+        "nor can one still awaiting a decision there: {report}"
+    );
+    assert_eq!(
+        report["weeks_submitted"], report["weeks_total"],
+        "the Submissions tile agrees: {report}"
+    );
+
+    app.cleanup().await;
+}

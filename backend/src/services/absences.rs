@@ -4,7 +4,7 @@ use crate::i18n;
 use crate::middleware::auth::User;
 use crate::services::absence_balance::{
     validate_absence_has_workday, validate_auto_approve_end_date, validate_backdating_window,
-    validate_flextime_balance, validate_leave_account_balance, workdays,
+    validate_flextime_balance, validate_leave_account_balance,
 };
 use crate::AppState;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
@@ -1368,7 +1368,7 @@ pub async fn compute_balances(
     year: i32,
 ) -> AppResult<Vec<LeaveBalance>> {
     use crate::services::absence_balance::{
-        carryover_remaining_days, effective_leave_account_start_year,
+        carryover_remaining_days, counted_workdays_for_user, effective_leave_account_start_year,
         leave_account_tile_is_visible, leave_account_year_context, parse_expiry_date,
         total_entitlement_with_carryover, workdays_for_ranges_in_window, CarryoverRemainingInput,
     };
@@ -1424,34 +1424,44 @@ pub async fn compute_balances(
             .into_iter()
             .map(repo_absence_to_service)
             .collect();
+        // Every booking on this account is counted in one pass over the whole
+        // year, then each counted day is filed under the bucket it belongs to.
+        // Counting the buckets separately would apply the weekly cap to each of
+        // them, so a reduced-hours employee away for one calendar week that
+        // happens to straddle today was billed for it twice (see
+        // `time_calc::counted_workdays`).
+        let approved_ranges: Vec<(NaiveDate, NaiveDate)> = account_absences
+            .iter()
+            .filter(|absence| absence.status == "approved")
+            .map(|absence| (absence.start_date, absence.end_date))
+            .collect();
+        let all_ranges: Vec<(NaiveDate, NaiveDate)> = account_absences
+            .iter()
+            .map(|absence| (absence.start_date, absence.end_date))
+            .collect();
+        let counted_days = counted_workdays_for_user(
+            &app_state.pool,
+            target_user.id,
+            &all_ranges,
+            year_from,
+            year_to,
+        )
+        .await?;
         let mut taken_days = 0.0;
         let mut upcoming_days = 0.0;
         let mut requested_days = 0.0;
-        for absence in &account_absences {
-            let clamped_start = std::cmp::max(absence.start_date, year_from);
-            let clamped_end = std::cmp::min(absence.end_date, year_to);
-            if absence.status == "approved" {
-                if clamped_end <= today {
-                    taken_days +=
-                        workdays(&app_state.pool, target_user.id, clamped_start, clamped_end)
-                            .await?;
-                } else if clamped_start > today {
-                    upcoming_days +=
-                        workdays(&app_state.pool, target_user.id, clamped_start, clamped_end)
-                            .await?;
-                } else {
-                    taken_days +=
-                        workdays(&app_state.pool, target_user.id, clamped_start, today).await?;
-                    let tomorrow = today + Duration::days(1);
-                    if tomorrow <= clamped_end {
-                        upcoming_days +=
-                            workdays(&app_state.pool, target_user.id, tomorrow, clamped_end)
-                                .await?;
-                    }
-                }
-            } else if absence.status == "requested" || absence.status == "cancellation_pending" {
-                requested_days +=
-                    workdays(&app_state.pool, target_user.id, clamped_start, clamped_end).await?;
+        for day in counted_days {
+            let approved = approved_ranges
+                .iter()
+                .any(|(start, end)| day >= *start && day <= *end);
+            if !approved {
+                // Only requested / cancellation-pending cover this day: it is
+                // reserved budget, not yet spent.
+                requested_days += 1.0;
+            } else if day <= today {
+                taken_days += 1.0;
+            } else {
+                upcoming_days += 1.0;
             }
         }
 

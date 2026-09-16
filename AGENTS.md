@@ -163,7 +163,17 @@ due (every potential workday a holiday, an absence, or before the start date).
 (Mon-Fri vs. the full week) — it is no longer a quota, because counting days
 punished part-timers whose real pattern is shorter than their contract's day
 count. Target hours and leave-day maths are a different question and still cap
-per week at `workdays_per_week` (`time_calc::count_workdays`).
+per week at `workdays_per_week`. `time_calc::counted_workdays` is the single
+implementation of that calendar, and it returns the *days*, not just their
+number, because the cap has to be applied once across the whole window and the
+buckets cut out of the result afterwards. Counting two narrower windows applies
+the cap to each: "taken up to today" plus "upcoming from tomorrow", or the
+halves either side of a carryover expiry, billed one straddling week twice over.
+Everything else — `count_workdays`, `workdays_for_ranges_in_window*`, the leave
+tiles, the team report's taken/planned columns, the carryover chain and the
+leave-account budget check — goes through it. A proposed absence is priced as
+the difference between the year counted with it and without it, never on its
+own, so a week already partly booked cannot cost its quota a second time.
 `reports::weeks_in_month_to_judge` decides *which* weeks a completeness check
 sees: every week that overlaps the period and has already started, the one being
 worked included. A week belongs to a month as soon as any of its days do.
@@ -171,7 +181,10 @@ worked included. A week belongs to a month as soon as any of its days do.
 Month-scoped checks (Submissions tile, month report, timesheet export gate,
 month-end reminders) clamp to the month, so a draft booked in the new month
 never makes the old one look unfinished and handing in the month's last day
-settles it. A freely chosen date range does *not* clamp — it is a window
+settles it. That includes the month report's own `weeks_all_submitted` /
+`weeks_all_approved` pair (`submission_status_for_month`) and the
+still-awaiting-a-decision query behind it: both are bounded to the month, or the
+dashboard contradicts the Submissions tile in the very same response. A freely chosen date range does *not* clamp — it is a window
 somebody is looking through, not an accounting period, so its boundary weeks are
 judged whole (`build_range_for_page` passes `None`, `build_month` clamps).
 `reports::judged_period_end` bounds the entry-status questions the same way.
@@ -463,7 +476,17 @@ never updated or deleted, and a wrong entry is cancelled by a row carrying the
 opposite minutes on the same date (`reverses_id`). Deleting would reintroduce
 the original defect, so there is no delete endpoint. Effective dates may lie in
 the future; every balance query asks "effective on or before date X", so a
-future booking simply has not applied yet.
+future booking simply has not applied yet. `reports::flextime_effective_through`
+is the single answer to what "on or before" means — `today.max(start_date)`, so
+the carry-in booked on a contract start that is still ahead shows up the moment
+a view reaches that date. Every balance view (the ledger, the monthly overtime
+rows, the team report's balance and monthly-movement columns) bounds its
+adjustment queries with it; when one of them used plain `today` instead, that
+employee's balance read zero beside a ledger that already carried the booking.
+
+A week is judged only once it is over: `approved_weeks` never looks at the week
+containing today, because "every required day is approved" would be a verdict on
+a week that can still gain entries.
 
 ### Build
 

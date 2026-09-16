@@ -773,6 +773,9 @@ The team report has one compact taken/planned column per account.
 | Requested | Requested and cancellation-pending account days. |
 | Available | Usable budget after all reserved account days. |
 
+A week off costs at most the person's configured days per week, no matter how it
+is split between the taken and planned columns.
+
 ### Entitlement, start year, and carryover
 
 An account starts for a user in the later of the user's Zerf start year and the
@@ -1330,6 +1333,12 @@ card for every account available to you. The balance fields are:
   Budget is still reserved.
 - **Available**: total usable budget − already taken − approved upcoming −
   requested.
+
+A calendar week off never costs more than your configured days per week, however
+the days are split across these fields. If you work three days a week and take a
+Monday-to-Friday holiday, it costs three days — even when today falls in the
+middle of it, so part of the week shows under "already taken" and the rest under
+"approved upcoming".
 
 Cross-year requests are validated per year: days in year Y consume that
 account's budget for Y, while days in year Y+1 consume its budget for Y+1.
