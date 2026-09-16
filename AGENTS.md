@@ -238,11 +238,25 @@ the days that are booked, because the contract does not pin which weekdays are
 worked and a holiday the person may never have worked cannot be assumed to have
 spared them one. For the *target* a holiday still counts as a day not worked,
 like any other, since that is what a contract day is worth under this rule.
+Days before the contract's start date are not part of the week for that
+employee at all: they shrink the week's baseline rather than being subtracted
+from it, because doing both takes them off twice and read a new starter's first
+week as 141 minutes where the app asks for 843.
 **Nothing calls them yet** — they carry the rule and its worked examples so it can be
-reviewed before any running calculation moves. A five-day contract must come
-out byte-identical, which is why the week's target is `workdays_per_week ×
-contract_day_minutes` and not `weekly_hours × 60`: rounding the week instead of
-the day shifted a 33.54-hour contract by two minutes a week.
+reviewed before any running calculation moves. A week nobody was away in must
+come out byte-identical on every contract, which is why the untouched week
+keeps today's arithmetic (the potential pool times the potential day) and only
+the days actually lost are priced as contract days: pricing the whole week in
+contract days moved a 23.4-hour contract by one minute and a 31.2-hour contract
+by two minutes a week, in weeks where nothing had happened.
+
+One duty falls on whoever wires this up. `counted_leave_days` prices whole
+weeks, so it must be handed **every** absence touching the weeks at the
+window's edges, not only those overlapping the window. A year- or month-scoped
+query returns just what overlaps its own period; two bookings on one account
+either side of a boundary, inside one calendar week, then reach each window
+alone and each window charges that week by itself — four days for a three-day
+week, which is the double charge this is meant to remove. A test pins it.
 
 Auto-break tiers are compared in **whole minutes** (`exclusive_threshold_minutes`)
 everywhere they are compared at all: the settings endpoint refuses a second
