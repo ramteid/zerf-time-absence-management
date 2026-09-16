@@ -87,7 +87,10 @@ export function countedWorkdays(
   for (const range of ranges || []) {
     const rangeStart = parseIsoDate(range?.[0]);
     const rangeEnd = parseIsoDate(range?.[1]);
-    if (Number.isNaN(rangeStart.getTime()) || Number.isNaN(rangeEnd.getTime())) {
+    if (
+      Number.isNaN(rangeStart.getTime()) ||
+      Number.isNaN(rangeEnd.getTime())
+    ) {
       continue;
     }
     const from = rangeStart > start ? rangeStart : start;
@@ -109,7 +112,9 @@ export function countedWorkdays(
       !holidays.has(currentDate) &&
       (irregular || isPotentialWorkday(current, configuredDays));
     if (!isCandidate) continue;
-    if (!clamped.some(([from, to]) => currentDate >= from && currentDate <= to)) {
+    if (
+      !clamped.some(([from, to]) => currentDate >= from && currentDate <= to)
+    ) {
       continue;
     }
     if (irregular) {
@@ -148,10 +153,17 @@ export function countWorkdays(
 
 /**
  * Attach a `days` count to every absence, charging one calendar week's quota
- * once across all of them instead of once per absence.
+ * once per leave account instead of once per absence.
  *
- * Days are attributed in chronological order, so the first booking in a week
- * keeps its own cost and a later one in the same week is charged only what it
+ * The quota belongs to an **account**, not to the person. The backend counts
+ * one account's bookings at a time (`leave_account_absences_in_year`), so two
+ * absences of the same category sharing a week cost that week once between
+ * them, while two absences of *different* categories each cost their own days
+ * — a week can legitimately draw on two accounts. Grouping by person instead
+ * would take days off one account because another had already spent them.
+ *
+ * Within an account, days are attributed in chronological order: the first
+ * booking in a week keeps its own cost and a later one is charged only what it
  * adds. That is the same rule the backend prices a new request by, and it is
  * what makes these rows add up to the leave balance shown beside them —
  * counting each absence alone reported a part-timer's split week as two full
@@ -163,30 +175,42 @@ export function withAbsenceDays(
 ) {
   const rows = absences || [];
   if (rows.length === 0) return [];
-  const counted = countedWorkdays(
-    rows.map((absence) => [absence.start_date, absence.end_date]),
-    from,
-    to,
-    holidays,
-    workdaysPerWeek,
-  );
-  // Stable chronological order; the id breaks ties so two absences starting on
-  // the same day are always split the same way.
-  const order = rows
-    .map((_, index) => index)
-    .sort((a, b) => {
+  // The account an absence is billed to is not on the wire — the backend keeps
+  // `leave_account_category_id` to itself — so the displayed category stands in
+  // for it, which is what it resolves to for everything but a historical
+  // booking remapped to another account. Month-report absence runs carry only
+  // `kind`, hence the fallback.
+  const indicesByAccount = new Map();
+  rows.forEach((absence, index) => {
+    const account = absence.category_id ?? absence.kind ?? "";
+    if (!indicesByAccount.has(account)) indicesByAccount.set(account, []);
+    indicesByAccount.get(account).push(index);
+  });
+
+  const dayCounts = new Array(rows.length).fill(0);
+  for (const indices of indicesByAccount.values()) {
+    const counted = countedWorkdays(
+      indices.map((index) => [rows[index].start_date, rows[index].end_date]),
+      from,
+      to,
+      holidays,
+      workdaysPerWeek,
+    );
+    // Stable chronological order; the id breaks ties so two absences starting
+    // on the same day are always split the same way.
+    const order = [...indices].sort((a, b) => {
       const byStart = String(rows[a].start_date).localeCompare(
         String(rows[b].start_date),
       );
       if (byStart !== 0) return byStart;
       return (rows[a].id ?? 0) - (rows[b].id ?? 0);
     });
-  const dayCounts = new Array(rows.length).fill(0);
-  for (const day of counted) {
-    const owner = order.find(
-      (index) => day >= rows[index].start_date && day <= rows[index].end_date,
-    );
-    if (owner !== undefined) dayCounts[owner] += 1;
+    for (const day of counted) {
+      const owner = order.find(
+        (index) => day >= rows[index].start_date && day <= rows[index].end_date,
+      );
+      if (owner !== undefined) dayCounts[owner] += 1;
+    }
   }
   return rows.map((absence, index) => ({ ...absence, days: dayCounts[index] }));
 }

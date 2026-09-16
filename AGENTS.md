@@ -200,6 +200,24 @@ is what those pages used to do, re-applied the weekly quota per absence: for a
 part-timer with two bookings in one calendar week the page reported more leave
 than that week can ever cost, and contradicted the balance shown beside it.
 
+The quota there belongs to a **leave account**, not to the person, so
+`withAbsenceDays` unions within one account and never across two. That is what
+the backend does — `leave_account_absences_in_year` loads one account's
+bookings at a time — and a week can legitimately draw on two accounts: a
+part-timer taking two days of one category and three of another in one week
+costs the first account two days and the second three, even where that totals
+more than the week's own working days. Pooling the quota across the person
+instead silently took days off one account because another had already spent
+them. The account an absence is billed to is deliberately not on the wire
+(`leave_account_category_id` is `skip_serializing`), so the displayed category
+stands in for it — which it is, for everything but a historical booking
+remapped to another account.
+
+The payroll report's absence rows are the deliberate exception: they union per
+*person* across categories, because their question is "how many working days
+was this person absent", and a document claiming five absent days in a week
+somebody works four is wrong whatever the days were booked as.
+
 Auto-break tiers are compared in **whole minutes** (`exclusive_threshold_minutes`)
 everywhere they are compared at all: the settings endpoint refuses a second
 threshold that does not exceed the first at that resolution, and both
@@ -821,6 +839,7 @@ npm test -- --run && npm run build
 Tests use Vitest + jsdom. Test files are co-located with source under `src/` and `src/routes/`.
 
 > **Note:** Lint is not part of CI — run it locally before committing.
+> Formatting (`npm run format`) *is* checked by CI.
 
 ### End-to-end (browser)
 

@@ -329,11 +329,12 @@ describe("countedWorkdays", () => {
 });
 
 describe("withAbsenceDays", () => {
-  // Two bookings inside one calendar week on a three-day contract. Counted
-  // separately they cost 2 + 3 = 5 days; the week can never cost more than 3.
+  // Two bookings on the SAME leave account inside one calendar week on a
+  // three-day contract. Counted separately they cost 2 + 3 = 5 days; one
+  // account can never be charged more than 3 for one week.
   const week = [
-    { id: 1, start_date: "2026-05-04", end_date: "2026-05-05" },
-    { id: 2, start_date: "2026-05-06", end_date: "2026-05-08" },
+    { id: 1, category_id: 7, start_date: "2026-05-04", end_date: "2026-05-05" },
+    { id: 2, category_id: 7, start_date: "2026-05-06", end_date: "2026-05-08" },
   ];
 
   it("splits one week's quota between the absences that share it", () => {
@@ -370,9 +371,65 @@ describe("withAbsenceDays", () => {
 
   it("clamps each absence to the window", () => {
     const rows = withAbsenceDays(
-      [{ id: 1, start_date: "2026-04-27", end_date: "2026-05-08" }],
+      [
+        {
+          id: 1,
+          category_id: 7,
+          start_date: "2026-04-27",
+          end_date: "2026-05-08",
+        },
+      ],
       { from: "2026-05-04", to: "2026-05-05", workdaysPerWeek: 5 },
     );
     expect(rows[0].days).toBe(2);
+  });
+
+  it("does not let one account spend another account's week", () => {
+    // Two different leave accounts sharing a week on a four-day contract, the
+    // shape production actually holds: two days of one category, then three of
+    // another. Each account carries its own quota, so the second must still be
+    // charged all three of its days — the backend counts one account at a time
+    // and its balance tile says exactly that. Pooling the quota across the two
+    // took a day off the second account because the first had spent it.
+    const rows = withAbsenceDays(
+      [
+        {
+          id: 21,
+          category_id: 7,
+          start_date: "2026-08-24",
+          end_date: "2026-08-25",
+        },
+        {
+          id: 22,
+          category_id: 9,
+          start_date: "2026-08-26",
+          end_date: "2026-08-28",
+        },
+      ],
+      { from: "2026-08-01", to: "2026-08-31", workdaysPerWeek: 4 },
+    );
+    expect(rows.map((row) => row.days)).toEqual([2, 3]);
+  });
+
+  it("falls back to the category slug when no id is on the row", () => {
+    // Month-report absence runs carry `kind` and no `category_id`.
+    const rows = withAbsenceDays(
+      [
+        {
+          id: 1,
+          kind: "vacation",
+          start_date: "2026-05-04",
+          end_date: "2026-05-05",
+        },
+        {
+          id: 2,
+          kind: "sick",
+          start_date: "2026-05-06",
+          end_date: "2026-05-08",
+        },
+      ],
+      { from: "2026-05-01", to: "2026-05-31", workdaysPerWeek: 3 },
+    );
+    expect(rows.map((row) => row.days)).toEqual([2, 3]);
   });
 });
