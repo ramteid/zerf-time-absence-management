@@ -100,25 +100,34 @@ function exclusiveThresholdMinutes(thresholdHours) {
  */
 export function buildBreakRules(settings) {
   if (!settings?.auto_break_enabled) return [];
-  const rules = [];
   const t1 = Number(settings.auto_break_threshold_hours);
   const d1 = Number(settings.auto_break_deduction_minutes);
-  if (Number.isFinite(t1) && t1 > 0 && Number.isFinite(d1) && d1 > 0) {
-    rules.push({
+  // Tier 1 is what the feature is. Without it there is nothing to apply and a
+  // configured tier 2 is not a stand-in: `build_break_rules` returns no rules
+  // at all in that case, and a page that fell back to tier 2 would deduct a
+  // break no report ever charges.
+  if (!(Number.isFinite(t1) && t1 > 0 && Number.isFinite(d1) && d1 > 0)) {
+    return [];
+  }
+  const rules = [
+    {
       thresholdHours: t1,
       thresholdMinutes: exclusiveThresholdMinutes(t1),
       deductionMinutes: d1,
-    });
-  }
+    },
+  ];
   const t2 = Number(settings.auto_break_threshold_hours_2);
   const d2 = Number(settings.auto_break_deduction_minutes_2);
   if (Number.isFinite(t2) && t2 > 0 && Number.isFinite(d2) && d2 > 0) {
-    // Compared in whole minutes, the resolution the rule is applied at and the
-    // one the backend uses (`build_break_rules`). Comparing hours instead let
-    // 6.0 and 6.008 through as two tiers, and the backend then credited a
-    // different deduction than this page displayed.
+    // Kept only when it is genuinely the higher tier, compared in whole
+    // minutes — the resolution the rule is applied at and the one the backend
+    // compares at (`build_break_rules`). Comparing hours instead let 6.0 and
+    // 6.008 through as two tiers, and the backend then credited a different
+    // deduction than this page displayed. A tier 2 that is *lower* than tier 1
+    // is dropped for the same reason: the backend keeps only the higher one,
+    // so keeping both here would apply a tier the reports do not have.
     const thresholdMinutes = exclusiveThresholdMinutes(t2);
-    if (!rules.some((r) => r.thresholdMinutes === thresholdMinutes)) {
+    if (thresholdMinutes > rules[0].thresholdMinutes) {
       rules.push({
         thresholdHours: t2,
         thresholdMinutes,
@@ -126,12 +135,9 @@ export function buildBreakRules(settings) {
       });
     }
   }
-  rules.sort((a, b) => a.thresholdMinutes - b.thresholdMinutes);
-  // Ensure strictly increasing thresholds and positive deductions
-  return rules.filter((r, idx) => {
-    if (idx === 0) return true;
-    return r.thresholdMinutes > rules[idx - 1].thresholdMinutes;
-  });
+  // Ascending by construction, which is what lets `computeDayBreakInfo` take
+  // the last matching rule as the highest applicable one.
+  return rules;
 }
 
 /**
