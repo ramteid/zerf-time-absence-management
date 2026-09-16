@@ -1258,17 +1258,7 @@ async fn absences_repository_workflow() {
         .expect("holiday set");
     let expected_workdays = (5 - holidays.len() as i32).max(0) as f64;
     assert_eq!(
-        absences
-            .workdays(monday, friday)
-            .await
-            .expect("default workdays"),
-        expected_workdays
-    );
-    assert_eq!(
-        absences
-            .workdays_for_user(emp_id, monday, friday)
-            .await
-            .expect("user workdays in range"),
+        zerf::time_calc::count_workdays(monday, friday, &holidays, 5),
         expected_workdays
     );
 

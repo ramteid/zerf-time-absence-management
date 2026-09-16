@@ -139,20 +139,7 @@ impl AbsenceDb {
             .await
     }
 
-    /// Count effective workdays in a date range, excluding public holidays.
-    /// Thin alias for [`crate::time_calc::count_workdays`], the single
-    /// implementation shared with the reporting services.
-    fn workdays_in_window(
-        from: NaiveDate,
-        to: NaiveDate,
-        holidays: &HashSet<NaiveDate>,
-        workdays_per_week: i16,
-    ) -> f64 {
-        crate::time_calc::count_workdays(from, to, holidays, workdays_per_week)
-    }
-
     /// Fetch the user's configured workdays_per_week.
-    /// Returns 1-7; default is typically 5.
     pub async fn user_workdays_per_week(&self, user_id: i64) -> AppResult<i16> {
         Ok(
             sqlx::query_scalar("SELECT workdays_per_week FROM users WHERE id=$1")
@@ -160,43 +147,6 @@ impl AbsenceDb {
                 .fetch_one(&self.pool)
                 .await?,
         )
-    }
-
-    /// Count default effective workdays (Mon-Fri pool, hardcoded 5-day quota) between `from` and `to`
-    /// (inclusive), excluding public holidays.
-    /// NOTE: This function is for legacy compatibility. Prefer workdays_for_user() for
-    /// per-user workday calculations.
-    pub async fn workdays(&self, from: NaiveDate, to: NaiveDate) -> AppResult<f64> {
-        if to < from {
-            return Ok(0.0);
-        }
-        let holidays = self.holidays_set(from, to).await?;
-        Ok(Self::workdays_in_window(from, to, &holidays, 5))
-    }
-
-    /// Count user-specific effective workdays between `from` and `to` (inclusive),
-    /// excluding public holidays.
-    ///
-    /// For 1-5 day schedules, days are flexible within Mon-Fri and capped to
-    /// the configured weekly day quota.
-    pub async fn workdays_for_user(
-        &self,
-        user_id: i64,
-        from: NaiveDate,
-        to: NaiveDate,
-    ) -> AppResult<f64> {
-        if to < from {
-            return Ok(0.0);
-        }
-        let holidays = self.holidays_set(from, to).await?;
-        let workdays_per_week = self.user_workdays_per_week(user_id).await?;
-        // Count effective workdays using the shared flexible weekly-quota rule.
-        Ok(Self::workdays_in_window(
-            from,
-            to,
-            &holidays,
-            workdays_per_week,
-        ))
     }
 
     /// Sum of workdays for approved (and cancellation_pending) absences whose
@@ -281,64 +231,6 @@ impl AbsenceDb {
         .bind(to)
         .fetch_all(&self.pool)
         .await?;
-        let workdays_per_week = self.user_workdays_per_week(user_id).await?;
-        let holidays = self.holidays_set(from, to).await?;
-        let clamped: Vec<(NaiveDate, NaiveDate)> = ranges
-            .into_iter()
-            .map(|(s, e)| (std::cmp::max(s, from), std::cmp::min(e, to)))
-            .filter(|(s, e)| s <= e)
-            .collect();
-        Ok(
-            crate::services::absence_balance::workdays_for_ranges_in_window_with_calendar(
-                &clamped,
-                from,
-                to,
-                &holidays,
-                workdays_per_week,
-            ),
-        )
-    }
-
-    /// Sum of workdays booked against one leave account in the requested
-    /// statuses, clamped to [from, to]. The stored account id, rather than the
-    /// display category's cost type, preserves historical shared-account
-    /// bookings after categories become independent leave accounts.
-    pub async fn leave_account_workdays_total(
-        &self,
-        user_id: i64,
-        leave_account_category_id: i64,
-        from: NaiveDate,
-        to: NaiveDate,
-    ) -> AppResult<f64> {
-        self.leave_account_workdays_total_filtered(
-            user_id,
-            leave_account_category_id,
-            from,
-            to,
-            &["approved", "cancellation_pending"],
-        )
-        .await
-    }
-
-    /// Sum of workdays booked against one leave account and whose status is in
-    /// `statuses`, clamped to [from, to]. Uses union counting with weekly cap.
-    pub async fn leave_account_workdays_total_filtered(
-        &self,
-        user_id: i64,
-        leave_account_category_id: i64,
-        from: NaiveDate,
-        to: NaiveDate,
-        statuses: &[&str],
-    ) -> AppResult<f64> {
-        let ranges = self
-            .leave_account_absence_ranges_in_year(
-                user_id,
-                leave_account_category_id,
-                from,
-                to,
-                statuses,
-            )
-            .await?;
         let workdays_per_week = self.user_workdays_per_week(user_id).await?;
         let holidays = self.holidays_set(from, to).await?;
         let clamped: Vec<(NaiveDate, NaiveDate)> = ranges

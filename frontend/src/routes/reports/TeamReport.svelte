@@ -429,9 +429,13 @@
         </thead>
         <tbody>
           {#each sortedTeamReport as r (r.user_id)}
-            <!-- The monthly diff sits next to the flextime balance, so it has
-                 to describe the same movement: worked-minus-target plus any
-                 admin booking dated in this month. -->
+            <!-- Worked-minus-target for the month plus any admin booking
+                 dated in it. Deliberately the plain month comparison (every
+                 day up to today, whatever its week's approval state), which is
+                 what this table is for — unlike the balance beside it, which
+                 stops at the last fully approved week. The two therefore need
+                 not add up, and the balance carries its own date for that
+                 reason. -->
             {@const monthlyDiffMin =
               r.diff_min == null ? null : r.diff_min + (r.adjustment_min || 0)}
             <tr>
