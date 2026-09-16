@@ -70,12 +70,37 @@ export function weekStartOf(entryDate) {
   return isoDate(monday(parseDate(day)));
 }
 
+// Credited minutes of a day's entries after the automatic break the day as a
+// whole attracts. The break is a property of the day, never of a single entry,
+// which is why it can only be worked out from the full set.
+function creditedDayMinutes(dayEntries, categories, breakRules) {
+  const credited = dayEntries.reduce(
+    (sum, entry) => sum + entryMinutes(entry, categories),
+    0,
+  );
+  if (!breakRules.length) return credited;
+  return credited - computeDayBreakDeduction(dayEntries, categories, breakRules);
+}
+
 export function buildPendingWeeks(
   submittedEntries,
   userRows,
   categories = [],
   breakRules = [],
+  approvedEntries = [],
 ) {
+  // Already-approved hours on the same day, keyed by person and date. They are
+  // not part of the week being decided, but they decide how much break that day
+  // attracts — see `creditedDayMinutes`.
+  const approvedByUserDay = new Map();
+  for (const entry of approvedEntries || []) {
+    const day = dateKey(entry.entry_date);
+    if (!day) continue;
+    const key = `${entry.user_id}:${day}`;
+    if (!approvedByUserDay.has(key)) approvedByUserDay.set(key, []);
+    approvedByUserDay.get(key).push(entry);
+  }
+
   const weekGroupsByKey = new Map();
   for (const entry of submittedEntries || []) {
     const weekStart = weekStartOf(entry.entry_date);
@@ -90,35 +115,39 @@ export function buildPendingWeeks(
       total_min: 0,
     };
     existing.entries.push(entry);
-    existing.total_min += entryMinutes(entry, categories);
     weekGroupsByKey.set(key, existing);
   }
 
-  // Subtract per-day auto-break deductions from the week totals so the
-  // displayed minutes match what will actually be credited. The deduction
-  // mirrors the backend `compute_day_auto_break` logic: entries are grouped
-  // by date (normalized via dateKey to handle datetime strings).
-  if (breakRules.length > 0) {
-    for (const group of weekGroupsByKey.values()) {
-      // Group entries by normalized date key.
-      const byDate = new Map();
-      for (const entry of group.entries) {
-        const d = dateKey(entry.entry_date) || String(entry.entry_date);
-        if (!d) continue;
-        if (!byDate.has(d)) byDate.set(d, []);
-        byDate.get(d).push(entry);
-      }
-      // Sum per-day deductions.
-      let totalDeduction = 0;
-      for (const dayEntries of byDate.values()) {
-        totalDeduction += computeDayBreakDeduction(
-          dayEntries,
+  // What approving this week actually adds: for every day it touches, the
+  // credited minutes of the whole day minus what that day already credits
+  // today. Counting the submitted entries on their own instead gets the break
+  // wrong whenever the day already carries approved hours — four submitted
+  // hours added to five approved ones push the day past the six-hour tier, so
+  // they credit three and a half, not four.
+  for (const group of weekGroupsByKey.values()) {
+    const byDate = new Map();
+    for (const entry of group.entries) {
+      const day = dateKey(entry.entry_date) || String(entry.entry_date);
+      if (!day) continue;
+      if (!byDate.has(day)) byDate.set(day, []);
+      byDate.get(day).push(entry);
+    }
+    let total = 0;
+    for (const [day, dayEntries] of byDate) {
+      const alreadyApproved =
+        approvedByUserDay.get(`${group.user_id}:${day}`) || [];
+      total +=
+        creditedDayMinutes(
+          [...alreadyApproved, ...dayEntries],
           categories,
           breakRules,
-        );
-      }
-      group.total_min = Math.max(0, group.total_min - totalDeduction);
+        ) - creditedDayMinutes(alreadyApproved, categories, breakRules);
     }
+    // A submission can in principle credit less than nothing — a couple of
+    // minutes that tip the day over a break tier cost more than they add — but
+    // a negative figure on an approval card reads as an error rather than as
+    // the edge case it is.
+    group.total_min = Math.max(0, total);
   }
 
   const sortedWeekGroups = Array.from(weekGroupsByKey.values()).map(

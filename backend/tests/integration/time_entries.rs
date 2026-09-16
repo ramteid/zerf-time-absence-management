@@ -379,3 +379,101 @@ async fn time_entries_full_workflow() {
 
     app.cleanup().await;
 }
+
+/// A day can hold approved hours and a fresh submission at the same time:
+/// nothing stops booking more time into a week that was already signed off, and
+/// the automatic break is worked out over the whole day. The approval queue
+/// therefore asks for the approved hours of the days it is showing, so it can
+/// say what a week will really credit — this pins the query it relies on.
+#[tokio::test]
+async fn approved_hours_of_a_pending_day_are_readable_by_the_approver() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, lead_pw, emp_id, emp_pw, monday_iso, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "pending-day").await;
+    let lead = login_change_pw(&app, "lead-pending-day@example.com", &lead_pw).await;
+    let employee = login_change_pw(&app, "emp-pending-day@example.com", &emp_pw).await;
+
+    // A morning shift, handed in and signed off.
+    let (st, body) = employee
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": monday_iso, "start_time": "08:00", "end_time": "13:00",
+                "category_id": cat_id, "comment": "morning"
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "book the morning shift: {body}");
+    let morning_id = id(&body);
+    let (st, body) = employee
+        .post("/api/v1/time-entries/submit", &json!({"ids": [morning_id]}))
+        .await;
+    assert_eq!(st, StatusCode::OK, "submit the morning shift: {body}");
+    let (st, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [morning_id]}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "approve the morning shift: {body}");
+
+    // An afternoon shift added to that same, already approved day.
+    let (st, body) = employee
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": monday_iso, "start_time": "13:00", "end_time": "17:00",
+                "category_id": cat_id, "comment": "afternoon"
+            }),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "an approved day still accepts more time: {body}"
+    );
+    let afternoon_id = id(&body);
+    let (st, body) = employee
+        .post("/api/v1/time-entries/submit", &json!({"ids": [afternoon_id]}))
+        .await;
+    assert_eq!(st, StatusCode::OK, "submit the afternoon shift: {body}");
+
+    // The queue sees only the afternoon shift as pending ...
+    let (st, body) = lead.get("/api/v1/time-entries/all?status=submitted").await;
+    assert_eq!(st, StatusCode::OK, "pending entries: {body}");
+    let pending: Vec<i64> = body
+        .as_array()
+        .expect("array")
+        .iter()
+        .filter(|entry| entry["user_id"].as_i64() == Some(emp_id))
+        .map(id)
+        .collect();
+    assert_eq!(pending, vec![afternoon_id]);
+
+    // ... and can read the morning's approved hours for the same day, which is
+    // what tells it how much break that day already carries.
+    let (st, body) = lead
+        .get(&format!(
+            "/api/v1/time-entries/all?status=approved&from={monday_iso}&to={monday_iso}"
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK, "approved entries on that day: {body}");
+    let approved: Vec<&serde_json::Value> = body
+        .as_array()
+        .expect("array")
+        .iter()
+        .filter(|entry| entry["user_id"].as_i64() == Some(emp_id))
+        .collect();
+    assert_eq!(approved.len(), 1, "just the morning shift: {approved:?}");
+    assert_eq!(approved[0]["id"].as_i64(), Some(morning_id));
+    assert_eq!(approved[0]["start_time"].as_str(), Some("08:00"));
+    assert_eq!(approved[0]["end_time"].as_str(), Some("13:00"));
+    assert_eq!(
+        approved[0]["counts_as_work"].as_bool(),
+        Some(true),
+        "the crediting flag travels with it, or the break cannot be computed"
+    );
+
+    app.cleanup().await;
+}

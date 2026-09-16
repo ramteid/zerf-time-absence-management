@@ -1,9 +1,36 @@
 import { api } from "../../api.js";
+import { addDays, dateKey, isoDate, parseDate } from "../../format.js";
 import { tracksOwnTime } from "../../rolePolicy.js";
+import { REPORT_RANGE_MAX_DAY_DIFFERENCE } from "../domain/dates.js";
 import {
   normalizeFlextimeResponse,
   normalizeOvertimeResponse,
 } from "../domain/reports.js";
+
+// Approved entries on the days the pending submissions touch.
+//
+// A day can already carry approved hours — nothing stops someone booking more
+// time into a week that was signed off — and the automatic break is worked out
+// over the whole day, not over the entries being approved. Without these rows
+// the approval queue cannot say what a week will actually credit.
+//
+// The window is the span of the submissions themselves, so it is as narrow as
+// the queue is. It is capped at the range the endpoint accepts: a submission
+// left pending for more than a year is pathological, and covering the most
+// recent year of it beats failing the whole dashboard load.
+async function getApprovedEntriesForPendingDays(submittedEntries) {
+  const days = (submittedEntries || [])
+    .map((entry) => dateKey(entry.entry_date))
+    .filter(Boolean)
+    .sort();
+  if (days.length === 0) return [];
+  const to = days[days.length - 1];
+  const earliestAllowed = isoDate(
+    addDays(parseDate(to), -REPORT_RANGE_MAX_DAY_DIFFERENCE),
+  );
+  const from = days[0] > earliestAllowed ? days[0] : earliestAllowed;
+  return api(`/time-entries/all?status=approved&from=${from}&to=${to}`);
+}
 
 export async function getApprovalDashboard() {
   const [
@@ -17,8 +44,16 @@ export async function getApprovalDashboard() {
     api("/reopen-requests/pending"),
     api("/users"),
   ]);
+  // Depends on the submissions, so it cannot join the batch above. Failing it
+  // must not cost the approver their queue: without these rows the week totals
+  // fall back to counting the submitted entries alone, which is what they did
+  // before this existed.
+  const approvedTimeEntries = await getApprovedEntriesForPendingDays(
+    submittedTimeEntries,
+  ).catch(() => []);
   return {
     submittedTimeEntries,
+    approvedTimeEntries,
     requestedAbsences,
     pendingReopenRequests,
     // Pure-admin users (tracks_time=false) have no time/absence data of their

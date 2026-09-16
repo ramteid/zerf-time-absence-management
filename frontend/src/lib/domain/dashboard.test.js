@@ -314,3 +314,146 @@ describe("dashboard domain helpers", () => {
     expect(weeks[0].total_min).toBe(420);
   });
 });
+
+describe("pending week totals with automatic breaks", () => {
+  // Tier 1: more than six hours of work costs 30 minutes of break.
+  const breakRules = [
+    { thresholdHours: 6, thresholdMinutes: 360, deductionMinutes: 30 },
+  ];
+  const categories = [{ id: 1, counts_as_work: true }];
+  const lead = [{ id: 7, first_name: "Ada", last_name: "Lead" }];
+  const submitted = [
+    {
+      id: 2,
+      user_id: 7,
+      entry_date: "2026-01-06",
+      start_time: "13:00:00",
+      end_time: "17:00:00",
+      category_id: 1,
+      status: "submitted",
+    },
+  ];
+
+  it("counts the submitted hours in full when the day holds nothing else", () => {
+    const weeks = buildPendingWeeks(submitted, lead, categories, breakRules);
+    expect(weeks[0].total_min).toBe(240);
+  });
+
+  it("prices a submission against the break the whole day attracts", () => {
+    // Five approved hours already on that day. The four submitted ones push the
+    // day to nine, which costs 30 minutes of break — so approving this week
+    // credits 3:30, not the 4:00 the submitted entries add on their own.
+    const alreadyApproved = [
+      {
+        id: 1,
+        user_id: 7,
+        entry_date: "2026-01-06",
+        start_time: "08:00:00",
+        end_time: "13:00:00",
+        category_id: 1,
+        status: "approved",
+      },
+    ];
+    const weeks = buildPendingWeeks(
+      submitted,
+      lead,
+      categories,
+      breakRules,
+      alreadyApproved,
+    );
+    expect(weeks[0].total_min).toBe(210);
+    // The approved entry belongs to a week already decided; it must not show
+    // up among the rows the approver is being asked about.
+    expect(weeks[0].entries.map((entry) => entry.id)).toEqual([2]);
+  });
+
+  it("does not charge a break the approved hours already paid", () => {
+    // Seven approved hours have already cost the day its 30 minutes. The two
+    // submitted hours add exactly two hours on top.
+    const alreadyApproved = [
+      {
+        id: 1,
+        user_id: 7,
+        entry_date: "2026-01-06",
+        start_time: "06:00:00",
+        end_time: "13:00:00",
+        category_id: 1,
+        status: "approved",
+      },
+    ];
+    const weeks = buildPendingWeeks(
+      submitted,
+      lead,
+      categories,
+      breakRules,
+      alreadyApproved,
+    );
+    expect(weeks[0].total_min).toBe(240);
+  });
+
+  it("ignores approved hours belonging to a different person or day", () => {
+    const elsewhere = [
+      {
+        id: 1,
+        user_id: 8,
+        entry_date: "2026-01-06",
+        start_time: "08:00:00",
+        end_time: "13:00:00",
+        category_id: 1,
+        status: "approved",
+      },
+      {
+        id: 3,
+        user_id: 7,
+        entry_date: "2026-01-07",
+        start_time: "08:00:00",
+        end_time: "13:00:00",
+        category_id: 1,
+        status: "approved",
+      },
+    ];
+    const weeks = buildPendingWeeks(
+      submitted,
+      lead,
+      categories,
+      breakRules,
+      elsewhere,
+    );
+    expect(weeks[0].total_min).toBe(240);
+  });
+
+  it("never reports less than nothing", () => {
+    // Two minutes that tip a day of five hours fifty-nine over the tier cost
+    // more break than they add. The card shows nothing gained, not a negative.
+    const alreadyApproved = [
+      {
+        id: 1,
+        user_id: 7,
+        entry_date: "2026-01-06",
+        start_time: "08:00:00",
+        end_time: "13:59:00",
+        category_id: 1,
+        status: "approved",
+      },
+    ];
+    const twoMinutes = [
+      {
+        id: 2,
+        user_id: 7,
+        entry_date: "2026-01-06",
+        start_time: "14:00:00",
+        end_time: "14:02:00",
+        category_id: 1,
+        status: "submitted",
+      },
+    ];
+    const weeks = buildPendingWeeks(
+      twoMinutes,
+      lead,
+      categories,
+      breakRules,
+      alreadyApproved,
+    );
+    expect(weeks[0].total_min).toBe(0);
+  });
+});

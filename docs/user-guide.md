@@ -1399,6 +1399,10 @@ within a week are handled in the background.
   button. It takes you straight to that employee's detailed report for exactly
   that week, so you can inspect every entry — including any comments the
   employee added — before approving or rejecting.
+- The hours shown on a pending week are what approving it will actually add. If
+  a day already holds approved hours and more are handed in for it later, the
+  automatic break is worked out over the whole day, so the new hours can credit
+  less than they show on their own rows.
 
 ### Reviewing an absence
 
