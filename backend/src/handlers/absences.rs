@@ -17,6 +17,9 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 pub struct YearQuery {
     pub year: Option<i32>,
+    /// An explicit window, used instead of `year` when both ends are given.
+    pub from: Option<NaiveDate>,
+    pub to: Option<NaiveDate>,
 }
 
 #[derive(Deserialize)]
@@ -42,6 +45,12 @@ pub struct RejectBody {
 }
 
 #[derive(Deserialize)]
+pub struct WorkdayPreviewQuery {
+    pub start_date: NaiveDate,
+    pub end_date: NaiveDate,
+}
+
+#[derive(Deserialize)]
 pub struct MedicalCertificatePreviewQuery {
     pub category_id: i64,
     pub start_date: NaiveDate,
@@ -57,22 +66,48 @@ pub async fn list(
     Query(query): Query<YearQuery>,
 ) -> AppResult<Json<Vec<Absence>>> {
     require_tracks_time(&requester)?;
-    let year = match query.year {
-        Some(value) => value,
-        None => crate::services::settings::app_current_year(&app_state.pool).await,
+    // A caller may ask for a window of its own instead of a whole year. The
+    // leave days a booking costs depend on the window it is counted in, so a
+    // page showing a freely chosen range has to be able to name that range
+    // rather than take a year's answer and clip it.
+    let (year_from, year_to) = match (query.from, query.to) {
+        (Some(from), Some(to)) => {
+            if to < from {
+                return Err(crate::error::AppError::BadRequest(
+                    "from must not be after to.".into(),
+                ));
+            }
+            if (to - from).num_days() > 365 {
+                return Err(crate::error::AppError::BadRequest(
+                    "Date range must not exceed 366 days.".into(),
+                ));
+            }
+            (from, to)
+        }
+        _ => {
+            let year = match query.year {
+                Some(value) => value,
+                None => crate::services::settings::app_current_year(&app_state.pool).await,
+            };
+            (
+                chrono::NaiveDate::from_ymd_opt(year, 1, 1)
+                    .ok_or_else(|| crate::error::AppError::BadRequest("Invalid year.".into()))?,
+                chrono::NaiveDate::from_ymd_opt(year, 12, 31)
+                    .ok_or_else(|| crate::error::AppError::BadRequest("Invalid year.".into()))?,
+            )
+        }
     };
-    let year_from = chrono::NaiveDate::from_ymd_opt(year, 1, 1)
-        .ok_or_else(|| crate::error::AppError::BadRequest("Invalid year.".into()))?;
-    let year_to = chrono::NaiveDate::from_ymd_opt(year, 12, 31)
-        .ok_or_else(|| crate::error::AppError::BadRequest("Invalid year.".into()))?;
     let absences = app_state
         .db
         .absences
         .list_for_user(requester.id, year_from, year_to)
         .await?;
-    Ok(Json(
-        absences.into_iter().map(repo_absence_to_service).collect(),
-    ))
+    let mut mapped: Vec<Absence> = absences.into_iter().map(repo_absence_to_service).collect();
+    // The leave days each booking costs, answered here rather than recomputed
+    // in the browser. One rule, one place.
+    crate::services::absences::fill_counted_days(&app_state.pool, &mut mapped, year_from, year_to)
+        .await?;
+    Ok(Json(mapped))
 }
 
 pub async fn list_all(
@@ -130,6 +165,12 @@ pub async fn list_all(
         .await?;
 
     let mut mapped: Vec<Absence> = absences.into_iter().map(repo_absence_to_service).collect();
+    // Only a request that names a window can be answered in leave days: the
+    // days one booking costs depend on which of them the window holds.
+    if let (Some(from), Some(to)) = (query.from, query.to) {
+        crate::services::absences::fill_counted_days(&app_state.pool, &mut mapped, from, to)
+            .await?;
+    }
     if query.status.as_deref() == Some("pending_review") {
         let ids: Vec<i64> = mapped.iter().map(|a| a.id).collect();
         let before_data_map =
@@ -342,6 +383,43 @@ pub async fn medical_certificate_preview(
     )
     .await?;
     Ok(Json(preview))
+}
+
+/// How many working days a proposed absence range covers, for the request
+/// dialog's running count.
+///
+/// The browser used to work this out itself from the contract's day count. That
+/// answer stopped matching the one the booking is actually charged at the
+/// moment a contract's weekdays became a matter of record, so the question is
+/// asked here instead.
+pub async fn workday_preview(
+    State(app_state): State<AppState>,
+    requester: User,
+    Query(query): Query<WorkdayPreviewQuery>,
+) -> AppResult<Json<serde_json::Value>> {
+    require_tracks_time(&requester)?;
+    if query.end_date < query.start_date {
+        return Err(crate::error::AppError::BadRequest(
+            "start_date must not be after end_date.".into(),
+        ));
+    }
+    // The same bound the range report and the absence listing use, so one part
+    // of the page cannot accept a span another rejects.
+    if (query.end_date - query.start_date).num_days() > 365 {
+        return Err(crate::error::AppError::BadRequest(
+            "Date range must not exceed 366 days.".into(),
+        ));
+    }
+    let days = crate::services::absence_balance::counted_workdays_for_user(
+        &app_state.pool,
+        requester.id,
+        &[(query.start_date, query.end_date)],
+        query.start_date,
+        query.end_date,
+    )
+    .await?
+    .len();
+    Ok(Json(serde_json::json!({ "days": days })))
 }
 
 pub async fn balance(

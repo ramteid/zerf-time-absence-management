@@ -10,6 +10,10 @@ const mockState = vi.hoisted(() => ({
   holidays: [],
   reopens: [],
   categories: [],
+  // What the server says each day of the shown week asks for. The page no
+  // longer works this out: which weekdays a contract works, and what one of
+  // them is worth, are decided once, on the server.
+  rangeReport: null,
 }));
 
 vi.mock("svelte", async () => {
@@ -23,6 +27,7 @@ vi.mock("../api.js", () => ({
     if (urlPath.startsWith("/categories")) return mockState.categories;
     if (urlPath.startsWith("/absences")) return mockState.absences;
     if (urlPath.startsWith("/holidays")) return mockState.holidays;
+    if (urlPath.startsWith("/reports/range")) return mockState.rangeReport;
     throw new Error(`Unhandled API path: ${urlPath}`);
   }),
 }));
@@ -31,6 +36,21 @@ async function settle() {
   await Promise.resolve();
   await new Promise((resolve) => setTimeout(resolve, 0));
   await Promise.resolve();
+}
+
+// Five working days of eight hours each, in the shape the range report returns.
+function weekOfEightHourDays(monday) {
+  return {
+    days: Array.from({ length: 5 }, (_, index) => {
+      const date = new Date(`${monday}T12:00:00`);
+      date.setDate(date.getDate() + index);
+      return {
+        date: date.toISOString().slice(0, 10),
+        target_min: 480,
+        full_target_min: 480,
+      };
+    }),
+  };
 }
 
 // Returns a Monday date string for a past week (to avoid future-day disabling).
@@ -61,6 +81,10 @@ describe("Time", () => {
       start_date: "2020-01-01",
     });
     settings.set({ time_format: "24h" });
+    // A plain five-day, eight-hour week unless a test says otherwise. The
+    // server decides these numbers now, so a test that is not about them just
+    // needs them present.
+    mockState.rangeReport = weekOfEightHourDays(pastMonday());
     setLanguage("en");
     // Seed the absenceCategories store so absenceRemovesTarget / absenceBlocksEntry
     // (which read cost_type / auto_approve_past from the store) behave
@@ -240,11 +264,47 @@ describe("Time", () => {
     expect(mondayButton.disabled).toBe(false);
   });
 
-  it("requested absences do not reduce weekly target", async () => {
+  it("marks a day done against the target the server gave it", async () => {
+    // A day card marks itself done once the day's booked hours reach what that
+    // day asks for, and what it asks for comes from the server. The targets are
+    // released separately here so the assertion cannot pass on a card that was
+    // rendered before they existed.
     const monday = pastMonday();
     path.set(`/time?week=${monday}`);
+    mockState.entries = [
+      {
+        id: 102,
+        user_id: 1,
+        entry_date: monday,
+        start_time: "08:00",
+        end_time: "16:00",
+        category_id: 1,
+        status: "approved",
+      },
+    ];
+    let releaseTargets;
+    mockState.rangeReport = new Promise((resolve) => {
+      releaseTargets = resolve;
+    });
 
-    // Keep one approved entry so the summary strip is rendered.
+    component = mount(Time, { target });
+    await settle();
+    // Nothing to compare against yet, so nothing is marked done.
+    expect(target.querySelector(".day-total.target-met")).toBeNull();
+
+    releaseTargets(weekOfEightHourDays(monday));
+    await settle();
+
+    expect(target.querySelector(".day-total.target-met")).not.toBeNull();
+  });
+
+  it("shows the weekly target the server reported for this week", async () => {
+    // The page adds up what each day asks for and prints the total. Which
+    // weekdays a contract works, what one of them is worth, and whether an
+    // absence removes it are all decided on the server, so there is nothing
+    // left here to get wrong a second time.
+    const monday = pastMonday();
+    path.set(`/time?week=${monday}`);
     mockState.entries = [
       {
         id: 100,
@@ -256,55 +316,7 @@ describe("Time", () => {
         status: "approved",
       },
     ];
-
-    // Important regression case: requested absences must not remove target time.
-    mockState.absences = [
-      {
-        id: 13,
-        user_id: 1,
-        kind: "vacation",
-        start_date: monday,
-        end_date: monday,
-        status: "requested",
-        comment: null,
-      },
-    ];
-
-    component = mount(Time, { target });
-    await settle();
-
-    expect(target.textContent).toContain("of 40.00h target");
-  });
-
-  it("flextime reduction absences keep the weekly target", async () => {
-    const monday = pastMonday();
-    path.set(`/time?week=${monday}`);
-
-    mockState.entries = [
-      {
-        id: 101,
-        user_id: 1,
-        entry_date: monday,
-        start_time: "08:00",
-        end_time: "12:00",
-        category_id: 1,
-        status: "approved",
-      },
-    ];
-    mockState.absences = [
-      {
-        id: 14,
-        user_id: 1,
-        kind: "flextime_reduction",
-        start_date: monday,
-        end_date: monday,
-        status: "approved",
-        comment: null,
-      },
-    ];
-    mockState.categories = [
-      { id: 1, name: "Core Duties", counts_as_work: true },
-    ];
+    mockState.rangeReport = weekOfEightHourDays(monday);
 
     component = mount(Time, { target });
     await settle();

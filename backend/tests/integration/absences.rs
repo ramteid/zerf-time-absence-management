@@ -1,7 +1,7 @@
 //! End-to-end absence workflow tests running in a single container for efficiency.
 //! All test cases run sequentially within the same app instance.
 
-use chrono::Datelike;
+use chrono::{Datelike, NaiveDate};
 use std::collections::HashSet;
 
 use reqwest::StatusCode;
@@ -1730,6 +1730,181 @@ async fn a_second_booking_in_one_week_is_priced_by_what_it_adds() {
         vacation_balance["available"].as_f64().expect("available"),
         0.0,
         "three days of entitlement, one week off, nothing left: {vacation_balance}"
+    );
+
+    app.cleanup().await;
+}
+
+/// The server answers how many leave days a booking costs, so the browser does
+/// not have to work it out a second time.
+///
+/// A contract working Tuesday to Friday books its whole week off. The listing
+/// reports four days for it, and the request dialog's preview agrees. The same
+/// contract's Monday is worth nothing, and the preview says so rather than
+/// promising a day the booking would never be charged.
+#[tokio::test]
+async fn the_server_reports_what_a_booking_costs_in_leave_days() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let start = reference_date() - chrono::Duration::days(400);
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "counted@example.com",
+                "first_name": "Cora", "last_name": "Zaehl",
+                "role": "employee", "weekly_hours": 32.0,
+                "workdays_per_week": 4,
+                "start_date": start.format("%Y-%m-%d").to_string(),
+                "approver_ids": [1],
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create: {body}");
+    let user_id = id(&body);
+    let employee = login_change_pw(&app, "counted@example.com", &temp_pw(&body)).await;
+    app.state
+        .db
+        .work_schedules
+        .set_for_user(user_id, start, &[2, 3, 4, 5], Some(1))
+        .await
+        .expect("Tuesday to Friday");
+
+    // A quiet week in mid-February, well clear of any public holiday.
+    let monday = reference_date() + chrono::Duration::days(35);
+    let friday = monday + chrono::Duration::days(4);
+
+    // The dialog's preview, for the whole calendar week and for the Monday.
+    let (st, body) = employee
+        .get(&format!(
+            "/api/v1/absences/workday-preview?start_date={monday}&end_date={friday}"
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK, "preview: {body}");
+    assert_eq!(
+        body["days"].as_i64(),
+        Some(4),
+        "Monday to Friday holds four of this contract's working days"
+    );
+
+    let (st, body) = employee
+        .get(&format!(
+            "/api/v1/absences/workday-preview?start_date={monday}&end_date={monday}"
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK, "preview: {body}");
+    assert_eq!(
+        body["days"].as_i64(),
+        Some(0),
+        "this contract does not work Mondays"
+    );
+
+    // And the listing reports the same for a booking it actually holds.
+    let (st, body) = employee
+        .post(
+            "/api/v1/absences",
+            &json!({
+                "kind": "vacation",
+                "start_date": monday.to_string(),
+                "end_date": friday.to_string(),
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "book the week: {body}");
+
+    let (st, list) = employee
+        .get(&format!("/api/v1/absences?year={}", monday.year()))
+        .await;
+    assert_eq!(st, StatusCode::OK, "list: {list}");
+    let row = list
+        .as_array()
+        .expect("a list")
+        .iter()
+        .find(|row| row["start_date"].as_str() == Some(&monday.to_string()))
+        .expect("the booking just made");
+    assert_eq!(
+        row["days"].as_f64(),
+        Some(4.0),
+        "the listing agrees with the preview: {row}"
+    );
+
+    app.cleanup().await;
+}
+
+/// Two bookings in one week are each charged their own days, and together they
+/// cost the week exactly what it holds.
+///
+/// One person's bookings never overlap — the app refuses that — so the job here
+/// is that nothing is double-counted and nothing is lost when a week is split
+/// across two requests. A Tuesday-to-Friday contract's week is four days
+/// however many requests it took to book.
+#[tokio::test]
+async fn two_bookings_in_one_week_add_up_to_that_week() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let start = reference_date() - chrono::Duration::days(400);
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "split@example.com",
+                "first_name": "Sam", "last_name": "Teilt",
+                "role": "employee", "weekly_hours": 32.0,
+                "work_weekdays": [2, 3, 4, 5],
+                "start_date": start.format("%Y-%m-%d").to_string(),
+                "approver_ids": [1],
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create: {body}");
+    let employee = login_change_pw(&app, "split@example.com", &temp_pw(&body)).await;
+
+    // A quiet week in mid-February, well clear of any public holiday. The
+    // request runs from the Monday, which this contract does not work.
+    let monday = reference_date() + chrono::Duration::days(35);
+    let wednesday = monday + chrono::Duration::days(2);
+    let thursday = monday + chrono::Duration::days(3);
+    let friday = monday + chrono::Duration::days(4);
+
+    for (from, to) in [(monday, wednesday), (thursday, friday)] {
+        let (st, body) = employee
+            .post(
+                "/api/v1/absences",
+                &json!({
+                    "kind": "vacation",
+                    "start_date": from.to_string(),
+                    "end_date": to.to_string(),
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "book {from}..{to}: {body}");
+    }
+
+    let (st, list) = employee
+        .get(&format!("/api/v1/absences?year={}", monday.year()))
+        .await;
+    assert_eq!(st, StatusCode::OK, "list: {list}");
+    let days_for = |from: NaiveDate| {
+        list.as_array()
+            .expect("a list")
+            .iter()
+            .find(|row| row["start_date"].as_str() == Some(&from.to_string()))
+            .and_then(|row| row["days"].as_f64())
+            .unwrap_or_else(|| panic!("no row starting {from}: {list}"))
+    };
+
+    assert_eq!(
+        days_for(monday),
+        2.0,
+        "Monday is not worked, so that request costs its Tuesday and Wednesday"
+    );
+    assert_eq!(days_for(thursday), 2.0, "and the rest of the week costs two");
+    assert_eq!(
+        days_for(monday) + days_for(thursday),
+        4.0,
+        "which is the whole week this contract works, counted once"
     );
 
     app.cleanup().await;

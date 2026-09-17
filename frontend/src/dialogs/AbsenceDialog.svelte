@@ -3,13 +3,11 @@
   import { currentUser, settings, absenceCategories } from "../stores.js";
   import { t } from "../i18n.js";
   import { appTodayIsoDate } from "../format.js";
-  import { countWorkdays, holidayDateSet } from "../apiMappers.js";
   import Dialog from "../Dialog.svelte";
   import DatePicker from "../DatePicker.svelte";
 
   export let template;
   export let onClose;
-  export let holidays = new Set();
   let dialog;
   $: isNew = !template.id;
   // category_id is always set for existing absences (guaranteed by migration 017).
@@ -55,63 +53,34 @@
     end_date = start_date;
   }
 
-  // Holiday dates the dialog fetches itself for any year in the selected range
-  // that the parent screen did not preload (e.g. the user picks a date in a
-  // year other than the one currently shown on the Absences page, whose
-  // holidays the parent loaded). Merged with the `holidays` prop below so
-  // countWorkdays excludes those holidays too.
-  let fetchedHolidays = new Set();
-  // Years we already hold holiday data for, so we never re-fetch. Years present
-  // in the prop count as loaded, avoiding a redundant request in the common
-  // case where the request stays within the screen's currently-viewed year.
-  let fetchedYears = new Set();
+  // How many of this contract's own working days the request covers. The
+  // server answers it, because the very same question decides what the booking
+  // is charged, and an answer worked out twice is an answer that can disagree
+  // with itself. It also means the dialog no longer has to fetch holidays for
+  // years the surrounding page had not loaded.
+  let selectedDays = null;
+  let selectedDaysRequestId = 0;
 
-  async function ensureHolidaysForRange(startIso, endIso) {
-    if (!startIso || !endIso) return;
-    const startYear = Number(String(startIso).slice(0, 4));
-    const endYear = Number(String(endIso).slice(0, 4));
-    if (!Number.isFinite(startYear) || !Number.isFinite(endYear)) return;
-    // Years already provided by the parent prop are considered loaded.
-    const propYears = new Set(
-      [...holidays].map((iso) => Number(String(iso).slice(0, 4))),
-    );
-    let added = false;
-    for (let year = startYear; year <= endYear; year += 1) {
-      if (propYears.has(year) || fetchedYears.has(year)) continue;
-      // Mark before awaiting so a rapid second trigger does not double-fetch.
-      fetchedYears.add(year);
-      try {
-        const list = await api(`/holidays?year=${year}`);
-        for (const date of holidayDateSet(list)) fetchedHolidays.add(date);
-        added = true;
-      } catch {
-        // Non-fatal: this year's holidays simply won't be excluded. Un-mark the
-        // year so a later interaction can retry.
-        fetchedYears.delete(year);
-      }
+  async function refreshSelectedDays(fromIso, toIso) {
+    if (!fromIso || !toIso || toIso < fromIso) {
+      selectedDays = null;
+      return;
     }
-    // Reassign so Svelte reacts to the mutated Set and recomputes selectedDays.
-    if (added) fetchedHolidays = new Set(fetchedHolidays);
+    const requestId = ++selectedDaysRequestId;
+    try {
+      const result = await api(
+        `/absences/workday-preview?start_date=${fromIso}&end_date=${toIso}`,
+      );
+      // A slower earlier request must not overwrite a newer answer.
+      if (requestId === selectedDaysRequestId) {
+        selectedDays = result?.days ?? null;
+      }
+    } catch {
+      if (requestId === selectedDaysRequestId) selectedDays = null;
+    }
   }
 
-  $: ensureHolidaysForRange(start_date, end_date);
-
-  // Effective holiday set = parent-provided holidays plus any the dialog
-  // fetched itself for years the parent had not loaded.
-  $: effectiveHolidays =
-    fetchedHolidays.size > 0
-      ? new Set([...holidays, ...fetchedHolidays])
-      : holidays;
-
-  $: selectedDays =
-    start_date && end_date
-      ? countWorkdays(
-          start_date,
-          end_date,
-          effectiveHolidays,
-          Number($currentUser?.workdays_per_week || 5),
-        )
-      : null;
+  $: refreshSelectedDays(start_date, end_date);
   let pendingClose = null;
 
   // AU (medical certificate) preview: only categories flagged
@@ -263,8 +232,8 @@
     </div>
   </div>
   {#if selectedDays !== null}
-    <!-- selectedDays is a contract-workday count (countWorkdays already
-         excludes weekends per workdays_per_week and public holidays), so the
+    <!-- selectedDays counts only the days this contract works, with public
+         holidays already taken off by the server, so the
          label must read "workday(s)" rather than the calendar-day "days". -->
     <div class="selected-days-hint">
       {selectedDays}

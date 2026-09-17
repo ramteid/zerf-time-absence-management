@@ -19,14 +19,10 @@
     getTeamReport,
     getTeamCategoryReport,
     getAbsenceReport,
-    getUserAbsencesByYear,
-    getHolidaysByYear,
+    getUserAbsencesInRange,
   } from "../../lib/api/reportsApi.js";
   import { periodBounds } from "../../lib/domain/reportPeriod.js";
-  import {
-    yearsBetweenDates,
-    isReportRangeTooLong,
-  } from "../../lib/domain/dates.js";
+  import { isReportRangeTooLong } from "../../lib/domain/dates.js";
   import {
     categoryColumnsFromTeamReport,
     filterTeamCategoryColumns,
@@ -35,9 +31,7 @@
     teamCategoryRowTotal,
     dedupeAbsences,
   } from "../../lib/domain/reports.js";
-  import { holidayDateSet, withAbsenceDays } from "../../apiMappers.js";
   import { tracksOwnTime } from "../../rolePolicy.js";
-  import { findUserById, userWorkdaysPerWeek } from "../../lib/domain/users.js";
 
   export let users = [];
   export let periodMode = "month";
@@ -233,54 +227,16 @@
     );
   }
 
-  function absenceRowsForRoster(data, roster) {
+  function absenceRows(data) {
     if (!data) return null;
-    if (data.raw.length === 0) return [];
-
-    const matchedUsers = data.raw.map((absence) =>
-      findUserById(roster, absence.user_id),
-    );
-    // The API response and roster are loaded independently. Rendering with a
-    // five-day fallback before the roster arrives produces incorrect leave
-    // totals for part-time staff, so wait until every row has its metadata.
-    if (matchedUsers.some((user) => !user)) return null;
-
-    // Counted per person and all at once, never absence by absence: a weekly
-    // quota is charged once across every absence sharing that calendar week,
-    // so these rows add up to the leave columns beside them.
-    const byUser = new Map();
-    data.raw.forEach((absence, index) => {
-      const userId = absence.user_id;
-      if (!byUser.has(userId)) {
-        byUser.set(userId, {
-          workdaysPerWeek: userWorkdaysPerWeek(matchedUsers[index]),
-          absences: [],
-        });
-      }
-      byUser.get(userId).absences.push(absence);
-    });
-    const daysById = new Map();
-    for (const { workdaysPerWeek, absences } of byUser.values()) {
-      for (const absence of withAbsenceDays(absences, {
-        from: data.from,
-        to: data.to,
-        holidays: data.holidayDates,
-        workdaysPerWeek,
-      })) {
-        daysById.set(absence.id, absence.days);
-      }
-    }
-    return data.raw.map((absence) => ({
-      ...absence,
-      days: daysById.get(absence.id) ?? 0,
-    }));
+    // Every row arrives with the leave days it costs inside this window,
+    // counted by the server against that person's own working days. The page
+    // used to work it out here, which meant it had to wait for the roster to
+    // learn each contract and then apply a second copy of the rule.
+    return data.raw;
   }
 
-  $: teamAbsences = absenceRowsForRoster(teamAbsenceData, users);
-  $: waitingForAbsenceRoster =
-    !!teamAbsenceData &&
-    teamAbsenceData.raw.length > 0 &&
-    teamAbsences === null;
+  $: teamAbsences = absenceRows(teamAbsenceData);
 
   async function loadAbsences(key, requestId, absenceFrom, absenceTo) {
     // See PersonReport's identical guard: an unbounded custom range would
@@ -289,7 +245,6 @@
       if (isCurrentAbsenceRequest(key, requestId)) {
         teamAbsenceData = {
           raw: [],
-          holidayDates: new Set(),
           from: absenceFrom,
           to: absenceTo,
         };
@@ -299,20 +254,14 @@
       return;
     }
     try {
+      // Both halves are asked for the *same* window. Fetching the requester's
+      // own absences per calendar year instead gave those rows a day count
+      // measured over the year, which is a different number from the one the
+      // rest of this table shows for the period on screen.
       const [teamRaw, ownRaw] = await Promise.all([
         getAbsenceReport({ from: absenceFrom, to: absenceTo }),
         tracksOwnTime($currentUser)
-          ? Promise.all(
-              yearsBetweenDates(absenceFrom, absenceTo).map((year) =>
-                getUserAbsencesByYear(year),
-              ),
-            ).then((lists) =>
-              lists
-                .flat()
-                .filter(
-                  (a) => a.end_date >= absenceFrom && a.start_date <= absenceTo,
-                ),
-            )
+          ? getUserAbsencesInRange({ from: absenceFrom, to: absenceTo })
           : Promise.resolve([]),
       ]);
       let raw = dedupeAbsences([...(teamRaw || []), ...ownRaw]).filter(
@@ -322,29 +271,15 @@
         if (isCurrentAbsenceRequest(key, requestId)) {
           teamAbsenceData = {
             raw: [],
-            holidayDates: new Set(),
             from: absenceFrom,
             to: absenceTo,
           };
         }
         return;
       }
-      const years = [
-        ...new Set(
-          raw.flatMap((a) => [
-            parseInt(a.start_date.slice(0, 4), 10),
-            parseInt(a.end_date.slice(0, 4), 10),
-          ]),
-        ),
-      ];
-      const holidayLists = await Promise.all(
-        years.map((y) => getHolidaysByYear(y)),
-      );
-      const holidayDates = holidayDateSet(holidayLists.flat());
       if (isCurrentAbsenceRequest(key, requestId)) {
         teamAbsenceData = {
           raw,
-          holidayDates,
           from: absenceFrom,
           to: absenceTo,
         };
@@ -595,7 +530,7 @@
   helpOpen={activeHelp === "absence"}
   onHelpToggle={() => toggleHelp("absence")}
 >
-  {#if (absencesLoading || waitingForAbsenceRoster) && !teamAbsences}
+  {#if absencesLoading && !teamAbsences}
     <LoadingState />
   {:else if teamAbsences}
     {#if teamAbsences.length === 0}

@@ -97,6 +97,7 @@ Use this document if you are:
   - [Reading the audit log](#reading-the-audit-log)
   - [Reading the system log](#reading-the-system-log)
   - [Creating a user](#creating-a-user)
+  - [Working days](#working-days)
   - [Updating a user](#updating-a-user)
   - [Archiving a user](#archiving-a-user)
   - [Restoring an archived user](#restoring-an-archived-user)
@@ -1254,10 +1255,9 @@ Vacation, sick leave, training, special leave, unpaid leave, general absence, an
 
 - End date must be on or after start date.
 - The range must not exceed one year.
-- The range must include at least one effective workday. An effective workday
-  is a potential workday (based on your configured days per week) that is not
-  a public holiday. A request covering only non-workdays or public holidays is
-  not valid.
+- The range must include at least one of your working days that is not a
+  public holiday. A request covering only days you do not work, or only public
+  holidays, is not valid.
 - Start date must be on or after your employment start date.
 - Comment, if provided, must not exceed 2000 characters.
 
@@ -1595,7 +1595,8 @@ Required information:
 - Role (employee, assistant, team lead, or admin)
 - Email address (must be unique)
 - First and last name (the combination must be unique)
-- Weekly hours and workdays per week
+- Weekly hours and the weekdays this person works (see
+  [Working days](#working-days))
 - Leave-account entitlements and the current and next year's account overrides
   (see [Managing leave accounts](#managing-leave-accounts))
 - Employment start date
@@ -1648,6 +1649,32 @@ email delivery is configured.
 
 After creation, assign at least one active approver for non-admin users so that
 approval routing works.
+
+### Working days
+
+Every employee, team lead and time-tracking admin has a set of working days:
+the weekdays their contract places work on. Tick them in the user form. Monday
+to Friday is the default, and any combination of those five days is allowed.
+
+What the working days decide:
+
+- **Target hours.** The weekly hours are spread evenly over the working days.
+  Someone on 32 hours over four days owes eight hours on each of them.
+- **Leave.** One day off costs one leave day, and only on a working day. A
+  request that runs from Monday to Friday costs a Tuesday-to-Friday contract
+  four days, not five.
+- **Public holidays.** A holiday only gives something back when it falls on a
+  working day. A holiday on a day this person never works changes nothing.
+- **Overtime.** Hours booked on a day that is not a working day count as
+  overtime in full, because no target was expected there.
+
+Changing someone's working days does not rewrite their past. The new days
+apply from the day you save the change; every week before that keeps the days
+it was worked under. To correct a mistake rather than record a change, save
+the correct days and then ask an administrator to adjust the earlier period.
+
+Assistants have no working days and no target hours. They are paid for the
+hours they are present.
 
 ### Updating a user
 
@@ -1804,10 +1831,9 @@ entitlement and optional per-year overrides for each user:
   changes from year to year. Account values default to 0 when the assistant
   role is selected. Update the current-year and next-year overrides each
   January once the number of worked days for the previous year is known.
-  Assistants have no fixed contract workdays (they are configured with all 7
-  days as potential working days), so every calendar day in a leave-account
-  request — weekends included, public holidays excluded — counts as one leave
-  day against their entitlement.
+  Assistants have no fixed working days, so every calendar day in a
+  leave-account request — weekends included, public holidays excluded — counts
+  as one leave day against their entitlement.
 - Changes take effect immediately for balance calculations. If you reduce a
   user's account entitlement after they have already used account days, their
   available balance may go negative.

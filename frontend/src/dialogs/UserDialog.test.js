@@ -380,6 +380,117 @@ describe("UserDialog", () => {
     ]);
   });
 
+  it("sends the weekdays the admin ticked, not a count", async () => {
+    // Naming the days is the whole point: a contract that works Tuesday to
+    // Friday must be able to say so, or its Monday is charged as leave while
+    // its Friday costs nothing. Before this the form offered only "how many",
+    // and the days were guessed by counting up from Monday.
+    apiMock.mockImplementation(async (path) => {
+      if (path === "/users")
+        return [
+          {
+            id: 5,
+            first_name: "Lara",
+            last_name: "Lead",
+            role: "team_lead",
+            active: true,
+          },
+        ];
+      if (path === "/settings")
+        return { default_weekly_hours: 39, smtp_enabled: false };
+      if (path === "/leave-accounts") return leaveAccountDefinitions;
+      if (path === "/categories/all") return [];
+      if (path === "/absence-categories/all") return [];
+      return { temporary_password: "x" };
+    });
+    const onClose = vi.fn();
+    component = mount(UserDialog, {
+      target,
+      props: { template: { role: "employee" }, onClose },
+    });
+    await waitForText(target, "Add User");
+    await waitForText(target, "Education leave");
+
+    // A new contract starts out Monday to Friday.
+    const dayBoxes = [...target.querySelectorAll("input[data-weekday]")];
+    expect(dayBoxes.length).toBe(5);
+    expect(dayBoxes.every((box) => box.checked)).toBe(true);
+
+    // Turn it into a Tuesday-to-Friday contract.
+    dayBoxes[0].click();
+    const approverCheckbox = [
+      ...target.querySelectorAll('input[type="checkbox"]'),
+    ].find((cb) => cb.value === "5");
+    approverCheckbox.click();
+    await settle();
+
+    // Calls from earlier tests share this mock, so look at what this save sent.
+    apiMock.mockClear();
+    const saveBtn = [...target.querySelectorAll("button")].find((b) =>
+      b.textContent.includes("Add"),
+    );
+    saveBtn?.click();
+    await settle();
+
+    const postCall = apiMock.mock.calls.find(
+      ([path, opts]) => path === "/users" && opts?.method === "POST",
+    );
+    expect(postCall).toBeTruthy();
+    expect(postCall[1].body.work_weekdays).toEqual([2, 3, 4, 5]);
+    expect(postCall[1].body.workdays_per_week).toBeUndefined();
+  });
+
+  it("refuses a contract with no working day at all", async () => {
+    apiMock.mockImplementation(async (path) => {
+      if (path === "/users")
+        return [
+          {
+            id: 5,
+            first_name: "Lara",
+            last_name: "Lead",
+            role: "team_lead",
+            active: true,
+          },
+        ];
+      if (path === "/settings")
+        return { default_weekly_hours: 39, smtp_enabled: false };
+      if (path === "/leave-accounts") return leaveAccountDefinitions;
+      if (path === "/categories/all") return [];
+      if (path === "/absence-categories/all") return [];
+      return { temporary_password: "x" };
+    });
+    const onClose = vi.fn();
+    component = mount(UserDialog, {
+      target,
+      props: { template: { role: "employee" }, onClose },
+    });
+    await waitForText(target, "Add User");
+    await waitForText(target, "Education leave");
+
+    for (const box of target.querySelectorAll("input[data-weekday]")) {
+      box.click();
+    }
+    const approverCheckbox = [
+      ...target.querySelectorAll('input[type="checkbox"]'),
+    ].find((cb) => cb.value === "5");
+    approverCheckbox.click();
+    await settle();
+
+    apiMock.mockClear();
+    const saveBtn = [...target.querySelectorAll("button")].find((b) =>
+      b.textContent.includes("Add"),
+    );
+    saveBtn?.click();
+    await settle();
+
+    expect(target.querySelector(".error-text")?.textContent).toContain(
+      "at least one weekday",
+    );
+    expect(apiMock.mock.calls.some(([, opts]) => opts?.method === "POST")).toBe(
+      false,
+    );
+  });
+
   it("sets all leave accounts to zero for assistants and restores them after switching back", async () => {
     const onClose = vi.fn();
     component = mount(UserDialog, {

@@ -28,7 +28,7 @@ vi.mock("../../lib/api/reportsApi.js", () => ({
   getLeaveBalances: vi.fn(),
   getFlextimeReport: vi.fn(),
   getAbsenceReport: vi.fn(),
-  getUserAbsencesByYear: vi.fn(),
+  getUserAbsencesInRange: vi.fn(),
   getHolidaysByYear: vi.fn(),
 }));
 
@@ -38,7 +38,7 @@ import {
   getLeaveBalances,
   getFlextimeReport,
   getAbsenceReport,
-  getUserAbsencesByYear,
+  getUserAbsencesInRange,
   getHolidaysByYear,
 } from "../../lib/api/reportsApi.js";
 
@@ -225,7 +225,7 @@ describe("PersonReport", () => {
     getLeaveBalances.mockResolvedValue([]);
     getFlextimeReport.mockResolvedValue({ days: [], balanceAsOf: null });
     getAbsenceReport.mockResolvedValue([]);
-    getUserAbsencesByYear.mockResolvedValue([]);
+    getUserAbsencesInRange.mockResolvedValue([]);
     getHolidaysByYear.mockResolvedValue([]);
   });
 
@@ -374,7 +374,7 @@ describe("PersonReport", () => {
   it("hides absence stat cards entirely when every absence has 0 effective days", async () => {
     // A Saturday-only absence counts as 0 workdays; the summary must not show
     // a "Sick: 0" card.
-    getUserAbsencesByYear.mockResolvedValue([
+    getUserAbsencesInRange.mockResolvedValue([
       {
         id: 1,
         user_id: 1,
@@ -581,19 +581,22 @@ describe("PersonReport", () => {
     expect(target.querySelector(".text-truncate-tooltip")).toBeNull();
   });
 
-  it("fetches own absences via getUserAbsencesByYear, not the team endpoint", async () => {
+  it("fetches own absences over the report window, not the team endpoint", async () => {
     component = mount(PersonReport, {
       target,
       props: { userId: 1, users, periodMode: "month", month: "2026-06" },
     });
     await settle();
 
-    expect(getUserAbsencesByYear).toHaveBeenCalledWith(2026);
+    expect(getUserAbsencesInRange).toHaveBeenCalledWith({
+      from: "2026-06-01",
+      to: "2026-06-30",
+    });
     expect(getAbsenceReport).not.toHaveBeenCalled();
   });
 
   it("renders an absence comment collapsed with a title tooltip until clicked", async () => {
-    getUserAbsencesByYear.mockResolvedValue([
+    getUserAbsencesInRange.mockResolvedValue([
       {
         id: 5,
         user_id: 1,
@@ -630,7 +633,7 @@ describe("PersonReport", () => {
   });
 
   it("expands an absence comment on click and collapses it again on a second click", async () => {
-    getUserAbsencesByYear.mockResolvedValue([
+    getUserAbsencesInRange.mockResolvedValue([
       {
         id: 5,
         user_id: 1,
@@ -664,7 +667,7 @@ describe("PersonReport", () => {
 
   it("scrolls and focuses the linked absences section after loading it", async () => {
     history.replaceState({}, "", "/reports#report-absences");
-    getUserAbsencesByYear.mockResolvedValue([
+    getUserAbsencesInRange.mockResolvedValue([
       {
         id: 5,
         user_id: 1,
@@ -692,7 +695,7 @@ describe("PersonReport", () => {
   });
 
   it("follows a report fragment selected after the data has loaded", async () => {
-    getUserAbsencesByYear.mockResolvedValue([
+    getUserAbsencesInRange.mockResolvedValue([
       {
         id: 5,
         user_id: 1,
@@ -723,7 +726,7 @@ describe("PersonReport", () => {
   });
 
   it("does not focus a queued section after the fragment becomes invalid", async () => {
-    getUserAbsencesByYear.mockResolvedValue([
+    getUserAbsencesInRange.mockResolvedValue([
       {
         id: 6,
         user_id: 1,
@@ -756,7 +759,7 @@ describe("PersonReport", () => {
   });
 
   it("follows a fragment set through SPA navigation with unchanged path and query", async () => {
-    getUserAbsencesByYear.mockResolvedValue([
+    getUserAbsencesInRange.mockResolvedValue([
       {
         id: 5,
         user_id: 1,
@@ -829,7 +832,7 @@ describe("PersonReport", () => {
     await waitForText(target, "Vacation");
 
     expect(getAbsenceReport).toHaveBeenCalled();
-    expect(getUserAbsencesByYear).not.toHaveBeenCalled();
+    expect(getUserAbsencesInRange).not.toHaveBeenCalled();
     // Only user 1's row should have made it into the rendered table.
     const rows = target.querySelectorAll("table.zf-table tbody tr");
     const absenceRows = [...rows].filter((r) =>
@@ -1119,7 +1122,7 @@ describe("PersonReport", () => {
     expect(getRangeReport).not.toHaveBeenCalled();
     expect(getFlextimeReport).not.toHaveBeenCalled();
     // Absences still look forward even though hours/flextime don't.
-    expect(getUserAbsencesByYear).toHaveBeenCalled();
+    expect(getUserAbsencesInRange).toHaveBeenCalled();
   });
 
   it("omits the leave balance card for a custom range spanning more than one year", async () => {
@@ -1139,12 +1142,12 @@ describe("PersonReport", () => {
     expect(target.textContent).not.toContain("Entitlement");
   });
 
-  it("caps an absurdly long custom range instead of firing one absence/holiday request per year", async () => {
+  it("caps an absurdly long custom range instead of loading it", async () => {
     // Regression test: an unvalidated custom range (e.g. from a stray
-    // deep-link value) used to expand into one getUserAbsencesByYear +
-    // getHolidaysByYear call per calendar year in the range via
-    // Promise.all — a multi-century span would flood the API with
-    // thousands of requests. It must now be rejected up front.
+    // deep-link value) used to expand into one request per calendar year, so
+    // a multi-century span flooded the API with thousands of them. The
+    // per-year fan-out is gone — one window is asked for once — but the cap
+    // stays: a span that long is a mistake, and the server refuses it anyway.
     component = mount(PersonReport, {
       target,
       props: {
@@ -1157,7 +1160,7 @@ describe("PersonReport", () => {
     });
     await settle();
 
-    expect(getUserAbsencesByYear).not.toHaveBeenCalled();
+    expect(getUserAbsencesInRange).not.toHaveBeenCalled();
     expect(getHolidaysByYear).not.toHaveBeenCalled();
   });
 

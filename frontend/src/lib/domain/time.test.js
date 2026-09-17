@@ -10,7 +10,6 @@ import {
   filterWeekAbsences,
   reopenableWeekEntries,
   weekStatus,
-  weekTargetMinutes,
   workflowRelevantEntries,
 } from "./time.js";
 import { absenceCategories } from "../../stores.js";
@@ -59,6 +58,47 @@ const CATEGORIES = [
 describe("time domain helpers", () => {
   beforeEach(() => {
     absenceCategories.set(CATEGORIES);
+  });
+
+  it("builds a week of days carrying its absences and holidays", () => {
+    // What the week's days look like is still the page's own business; what
+    // each of them is worth is not, and comes from the server. This pins the
+    // former: the right seven days, in order, each marked with what it holds.
+    const { weekdays, weekendDays } = buildWeekDays(
+      new Date(2026, 0, 5),
+      [],
+      [
+        {
+          id: 1,
+          start_date: "2026-01-06",
+          end_date: "2026-01-06",
+          status: "approved",
+          kind: "vacation",
+        },
+      ],
+      [{ holiday_date: "2026-01-07", name: "Holiday" }],
+    );
+
+    expect(weekdays.map((day) => day.ds)).toEqual([
+      "2026-01-05",
+      "2026-01-06",
+      "2026-01-07",
+      "2026-01-08",
+      "2026-01-09",
+    ]);
+    expect(weekendDays.map((day) => day.ds)).toEqual([
+      "2026-01-10",
+      "2026-01-11",
+    ]);
+    expect(weekdays[0].dayName).toBe("Monday");
+    // The approved vacation lands on Tuesday and removes its target.
+    expect(weekdays[1].absentForTarget).toBe(true);
+    // Wednesday is a public holiday, and the day says so.
+    expect(weekdays[2].holiday).toBe(true);
+    expect(weekdays[2].holidayName).toBe("Holiday");
+    // Thursday holds neither.
+    expect(weekdays[3].absentForTarget).toBe(false);
+    expect(weekdays[3].holiday).toBe(false);
   });
 
   it("filters invalid week absences and deduplicates cross-year loads", () => {
@@ -126,106 +166,6 @@ describe("time domain helpers", () => {
         [{ id: 1, counts_as_work: true }],
       ),
     ).toBe(0);
-  });
-
-  it("builds target minutes from eligible contract days only", () => {
-    const { weekdays, weekendDays } = buildWeekDays(
-      new Date(2026, 0, 5),
-      [],
-      [
-        {
-          id: 1,
-          start_date: "2026-01-06",
-          end_date: "2026-01-06",
-          status: "approved",
-          kind: "vacation",
-        },
-      ],
-      [{ holiday_date: "2026-01-07", name: "Holiday" }],
-    );
-
-    expect(
-      weekTargetMinutes({
-        weekdays,
-        weekendDays,
-        currentUser: { weekly_hours: 40, workdays_per_week: 5 },
-        todayIso: "2026-01-09",
-      }),
-    ).toBe(3 * 8 * 60);
-  });
-
-  it("spreads a part-time weekly target evenly across the 5-weekday pool, not the contracted day count", () => {
-    // 24h over 3 days/week: mirrors the backend `target_minutes_per_day`
-    // (weekly_hours / potential_workdays_per_week, always 5 for 1-5 day
-    // contracts) rather than dividing by the contracted 3 days.
-    const currentUser = { weekly_hours: 24, workdays_per_week: 3 };
-    const perDayMinutes = 288; // 24h / 5 * 60
-
-    // Mid-week: only Mon-Wed are eligible (Thu/Fri are still in the future).
-    const midWeek = buildWeekDays(new Date(2026, 0, 5), [], [], []);
-    expect(
-      weekTargetMinutes({
-        weekdays: midWeek.weekdays,
-        weekendDays: midWeek.weekendDays,
-        currentUser,
-        todayIso: "2026-01-07",
-      }),
-    ).toBe(3 * perDayMinutes);
-
-    // Fully elapsed week, no holidays/absences: all 5 weekdays are eligible,
-    // and the total equals the full weekly hours (24h = 1440 min).
-    const fullWeek = buildWeekDays(new Date(2026, 0, 5), [], [], []);
-    expect(
-      weekTargetMinutes({
-        weekdays: fullWeek.weekdays,
-        weekendDays: fullWeek.weekendDays,
-        currentUser,
-        todayIso: "2026-01-31",
-      }),
-    ).toBe(5 * perDayMinutes);
-    expect(5 * perDayMinutes).toBe(24 * 60);
-
-    // A public holiday removes one weekday's target, same as any 5-day
-    // contract — not one third of the week's target.
-    const withHoliday = buildWeekDays(
-      new Date(2026, 0, 5),
-      [],
-      [],
-      [{ holiday_date: "2026-01-07", name: "Holiday" }],
-    );
-    expect(
-      weekTargetMinutes({
-        weekdays: withHoliday.weekdays,
-        weekendDays: withHoliday.weekendDays,
-        currentUser,
-        todayIso: "2026-01-31",
-      }),
-    ).toBe(4 * perDayMinutes);
-  });
-
-  it("gives no weekly target when the contract has no potential workdays", () => {
-    // workdays_per_week = 0 means "no potential workday pool" and the backend
-    // reports a zero target for it. Coercing the stored 0 to the default 5
-    // showed a target here that no report ever agreed with.
-    const week = buildWeekDays(new Date(2026, 0, 5), [], [], []);
-    expect(
-      weekTargetMinutes({
-        weekdays: week.weekdays,
-        weekendDays: week.weekendDays,
-        currentUser: { weekly_hours: 40, workdays_per_week: 0 },
-        todayIso: "2026-01-31",
-      }),
-    ).toBe(0);
-
-    // A missing field still falls back to the five-weekday default.
-    expect(
-      weekTargetMinutes({
-        weekdays: week.weekdays,
-        weekendDays: week.weekendDays,
-        currentUser: { weekly_hours: 40 },
-        todayIso: "2026-01-31",
-      }),
-    ).toBe(5 * 8 * 60);
   });
 
   it("keeps partial status for mixed draft and non-draft weeks", () => {

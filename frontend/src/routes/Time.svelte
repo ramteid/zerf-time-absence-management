@@ -38,7 +38,6 @@
     filterWeekAbsences,
     reopenableWeekEntries,
     weekStatus as calculateWeekStatus,
-    weekTargetMinutes as calculateWeekTargetMinutes,
   } from "../lib/domain/time.js";
   import TimeWeekHeader from "./time/TimeWeekHeader.svelte";
   import TimeWeekSummary from "./time/TimeWeekSummary.svelte";
@@ -54,9 +53,12 @@
   // Monotonically increasing counter: any response whose sequence number is older than the
   // latest counter value is discarded, preventing stale async results from overwriting fresh data.
   let loadRequestCounter = 0;
-  let weekdays = [];
-  let weekendDays = [];
+  // Both are filled by the reactive block below before the first render.
+  let weekdays;
+  let weekendDays;
   let holidays = [];
+  // What each day of the shown week asks for, as the server counted it.
+  let dayTargets = new Map();
 
   $: weekParam = (() => {
     const queryString = $path.includes("?") ? $path.split("?")[1] : "";
@@ -89,6 +91,7 @@
         categoryRows,
         absenceRowsByYear,
         holidayRowsByYear,
+        dayTargets: weekTargets,
       } = await getWeekData({
         from,
         to,
@@ -102,12 +105,14 @@
       myReopens = reopenRows;
       absences = filterWeekAbsences(absenceRowsByYear, from, to);
       holidays = holidayRowsByYear.flat();
+      dayTargets = weekTargets;
     } catch {
       if (requestId !== loadRequestCounter) return;
       entries = [];
       myReopens = [];
       absences = [];
       holidays = [];
+      dayTargets = new Map();
     }
   }
 
@@ -217,27 +222,39 @@
     return total;
   })();
 
-  // Weekly target is the sum of target-eligible weekdays in this week:
-  // excludes holidays, absences, future days, and days before contract start.
-  $: weekTargetMinutes = (() => {
-    return calculateWeekTargetMinutes({
-      weekdays,
-      weekendDays,
-      currentUser: $currentUser,
-      todayIso: today,
-    });
-  })();
+  // The week's target is the sum of what the server says each of its days asks
+  // for. It already leaves out holidays, absences, days still ahead and days
+  // before the contract began, and it counts only the weekdays this contract
+  // actually works — so the page does not repeat any of that reasoning.
+  $: weekTargetMinutes = [...dayTargets.values()].reduce(
+    (total, day) => total + (day.targetMin || 0),
+    0,
+  );
 
   $: weekLoggedHours = formatHours(weekLoggedMinutes / 60);
   $: weekTargetHours = formatHours(weekTargetMinutes / 60);
   $: weekHasTarget = !isAssistantCurrentUser && weekTargetMinutes > 0;
 
+  // A day carries what it asks for, so a day card never has to work it out
+  // from the contract's day count. The targets are passed in rather than read
+  // from the enclosing scope, so the block below states what it depends on
+  // instead of leaving a reader to trace it through here.
+  function withDayTarget(day, targets) {
+    return {
+      ...day,
+      fullTargetMin: targets.get(day.ds)?.fullTargetMin ?? 0,
+    };
+  }
+
   $: {
     const builtWeek = weekFrom
       ? buildWeekDays(weekFrom, entries, absences, holidays)
       : { weekdays: [], weekendDays: [] };
-    weekdays = builtWeek.weekdays;
-    weekendDays = builtWeek.weekendDays;
+    const targets = dayTargets;
+    weekdays = builtWeek.weekdays.map((day) => withDayTarget(day, targets));
+    weekendDays = builtWeek.weekendDays.map((day) =>
+      withDayTarget(day, targets),
+    );
   }
 
   // Insert or replace a single entry in the local list and re-sort.

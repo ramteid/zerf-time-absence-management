@@ -264,6 +264,8 @@ describe("Absences", () => {
         end_date: "2026-08-02",
         comment: "",
         status: "approved",
+        // Saturday and Sunday: no working day, so the server counts none.
+        days: 0,
         reviewed_by: null,
         reviewed_at: null,
         rejection_reason: null,

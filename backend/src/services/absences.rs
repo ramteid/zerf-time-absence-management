@@ -118,6 +118,7 @@ pub fn repo_absence_to_service(a: crate::repository::Absence) -> Absence {
         reviewed_at: a.reviewed_at,
         rejection_reason: a.rejection_reason,
         created_at: a.created_at,
+        days: None,
         review_type: None,
         previous_kind: None,
         previous_category_name: None,
@@ -205,6 +206,19 @@ pub struct Absence {
     pub reviewed_at: Option<DateTime<Utc>>,
     pub rejection_reason: Option<String>,
     pub created_at: DateTime<Utc>,
+    /// Leave days this absence costs inside the window it was asked for.
+    ///
+    /// Filled by the listing endpoints, which know that window; absent where no
+    /// window applies. Absences sharing a leave account are counted **together**
+    /// and their days attributed in chronological order, so a day two bookings
+    /// both cover is charged to that account once. Grouping per person instead
+    /// would take days off one account because another had already spent them,
+    /// and a calendar week may legitimately draw on two.
+    ///
+    /// It is the server that answers this, so no second copy of the rule has to
+    /// be kept in step in the browser.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub days: Option<f64>,
     pub review_type: Option<String>,
     pub previous_kind: Option<String>,
     /// Stored display name for `previous_kind`. Pulled from the audit-log
@@ -1534,6 +1548,95 @@ pub async fn compute_balances(
     Ok(balances)
 }
 
+/// Fill [`Absence::days`] for absences that were read over one window.
+///
+/// This is the answer the browser used to compute for itself. Keeping a second
+/// copy of the rule there meant the displayed day count and the leave balance
+/// beside it could drift apart, which is exactly what they did for anybody
+/// whose contract does not work five days.
+///
+/// Absences are grouped by the **account** their days are charged to, never by
+/// person. A calendar week may legitimately draw on two accounts: somebody
+/// taking two days of one category and three of another in one week costs the
+/// first account two days and the second three. Within one account the days are
+/// attributed in chronological order, with the id breaking ties, so the first
+/// booking in a week keeps its own days and a later one overlapping it is
+/// charged only what it adds.
+pub async fn fill_counted_days(
+    pool: &crate::db::DatabasePool,
+    absences: &mut [Absence],
+    window_start: NaiveDate,
+    window_end: NaiveDate,
+) -> AppResult<()> {
+    if absences.is_empty() || window_end < window_start {
+        return Ok(());
+    }
+    let holidays = crate::repository::HolidayDb::new(pool.clone())
+        .get_dates_in_range(window_start, window_end)
+        .await?;
+
+    // Grouped by the account a booking is charged to. Two bookings of one
+    // person never overlap — the app refuses that — so for a contract whose
+    // weekdays are recorded the grouping changes no total. It matters for a
+    // contract with no recorded pattern, which still carries a weekly quota
+    // (see `WorkSchedule::weekly_leave_cap`): there, two bookings in one
+    // calendar week have to share that week's quota instead of each claiming
+    // it in full.
+    //
+    // A request that was turned down or withdrawn gets a group of its own. It
+    // still shows how long it was, but under that quota it would otherwise eat
+    // days a live booking is charged for, and the row beside it would read
+    // short.
+    let mut groups: std::collections::BTreeMap<(i64, i64, Option<i64>), Vec<usize>> =
+        std::collections::BTreeMap::new();
+    for (index, absence) in absences.iter().enumerate() {
+        let account = absence
+            .leave_account_category_id
+            .unwrap_or(absence.category_id);
+        let alone = matches!(absence.status.as_str(), "rejected" | "cancelled")
+            .then_some(absence.id);
+        groups
+            .entry((absence.user_id, account, alone))
+            .or_default()
+            .push(index);
+    }
+
+    // One timeline per person, loaded once however many of their absences the
+    // list holds.
+    let mut user_ids: Vec<i64> = absences.iter().map(|absence| absence.user_id).collect();
+    user_ids.sort_unstable();
+    user_ids.dedup();
+    let mut schedules: std::collections::HashMap<
+        i64,
+        crate::services::work_schedules::ContractSchedule,
+    > = std::collections::HashMap::new();
+    for user_id in user_ids {
+        let schedule = crate::services::work_schedules::contract_schedule(pool, user_id).await?;
+        schedules.insert(user_id, schedule);
+    }
+
+    for ((user_id, _account, _alone), mut indices) in groups {
+        let schedule = schedules.get(&user_id).expect("every person was loaded");
+        indices.sort_by_key(|index| (absences[*index].start_date, absences[*index].id));
+        let ranges: Vec<(NaiveDate, NaiveDate)> = indices
+            .iter()
+            .map(|index| (absences[*index].start_date, absences[*index].end_date))
+            .collect();
+        let counted = crate::time_calc::scheduled_days_per_range(
+            &schedule.history,
+            &ranges,
+            schedule.start_date,
+            window_start,
+            window_end,
+            &holidays,
+        );
+        for (index, days) in indices.iter().zip(counted) {
+            absences[*index].days = Some(days);
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1592,6 +1695,7 @@ mod tests {
             reviewed_at: None,
             rejection_reason: None,
             created_at: Utc::now(),
+            days: None,
             review_type: None,
             previous_kind: None,
             previous_category_name: None,

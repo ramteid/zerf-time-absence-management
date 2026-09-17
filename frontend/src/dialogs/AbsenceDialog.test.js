@@ -311,28 +311,39 @@ describe("AbsenceDialog", () => {
     );
   });
 
-  it("counts only effective workdays, excluding non-workdays and holidays", async () => {
-    // The duration hint must reflect effective workdays, not calendar days:
-    // weekends (per workdays_per_week) and public holidays are excluded.
+  it("shows the working days the server counted for the request", async () => {
+    // The dialog no longer works the number out itself. The very same question
+    // decides what the booking is charged, so it is asked once, of the server.
+    apiMock.mockImplementation((path) =>
+      path.startsWith("/absences/workday-preview")
+        ? Promise.resolve({ days: 4 })
+        : Promise.resolve([]),
+    );
     const onClose = vi.fn();
     component = mount(AbsenceDialog, {
       target,
       props: {
-        // 2026-06-01 (Mon) .. 2026-06-07 (Sun), with a holiday on Wed 06-03.
         template: { start_date: "2026-06-01", end_date: "2026-06-07" },
         onClose,
-        holidays: new Set(["2026-06-03"]),
       },
     });
     await settle();
+    await settle();
 
+    expect(apiMock).toHaveBeenCalledWith(
+      "/absences/workday-preview?start_date=2026-06-01&end_date=2026-06-07",
+    );
     const hint = target.querySelector(".selected-days-hint");
     expect(hint).not.toBeNull();
-    // Mon, Tue, Thu, Fri = 4 (Wed is a holiday; Sat/Sun are non-contract days).
     expect(hint.textContent.replace(/\s+/g, " ").trim()).toBe("4 workdays");
   });
 
   it("uses the singular label for a single workday", async () => {
+    apiMock.mockImplementation((path) =>
+      path.startsWith("/absences/workday-preview")
+        ? Promise.resolve({ days: 1 })
+        : Promise.resolve([]),
+    );
     const onClose = vi.fn();
     component = mount(AbsenceDialog, {
       target,
@@ -342,38 +353,29 @@ describe("AbsenceDialog", () => {
       },
     });
     await settle();
+    await settle();
 
     const hint = target.querySelector(".selected-days-hint");
     expect(hint.textContent.replace(/\s+/g, " ").trim()).toBe("1 workday");
   });
 
-  it("fetches holidays for the selected year when the parent did not preload them", async () => {
-    // The parent only preloads holidays for the year it currently shows. If the
-    // user picks a date in another year, the dialog must fetch that year's
-    // holidays itself so the workday count still excludes them.
+  it("says nothing rather than a wrong number when the count cannot be read", async () => {
     apiMock.mockImplementation((path) =>
-      path === "/holidays?year=2026"
-        ? Promise.resolve([
-            { holiday_date: "2026-06-03", name: "Test Holiday" },
-          ])
+      path.startsWith("/absences/workday-preview")
+        ? Promise.reject(new Error("offline"))
         : Promise.resolve([]),
     );
     const onClose = vi.fn();
     component = mount(AbsenceDialog, {
       target,
       props: {
-        // Mon–Fri with an empty holidays prop → dialog loads 2026 on its own.
-        template: { start_date: "2026-06-01", end_date: "2026-06-05" },
+        template: { start_date: "2026-06-01", end_date: "2026-06-07" },
         onClose,
-        holidays: new Set(),
       },
     });
     await settle();
     await settle();
 
-    expect(apiMock).toHaveBeenCalledWith("/holidays?year=2026");
-    const hint = target.querySelector(".selected-days-hint");
-    // Wed 06-03 is a holiday → Mon, Tue, Thu, Fri = 4 workdays.
-    expect(hint.textContent.replace(/\s+/g, " ").trim()).toBe("4 workdays");
+    expect(target.querySelector(".selected-days-hint")).toBeNull();
   });
 });

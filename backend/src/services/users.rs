@@ -91,6 +91,9 @@ pub struct NewUser {
     pub role: String,
     pub weekly_hours: f64,
     pub workdays_per_week: Option<i16>,
+    /// The weekdays the contract works, ISO 1 to 5. When given, these are the
+    /// pattern; `workdays_per_week` is derived from how many there are.
+    pub work_weekdays: Option<Vec<i16>>,
     pub leave_accounts: Option<Vec<LeaveAccountInput>>,
     pub start_date: chrono::NaiveDate,
     pub hire_date: Option<chrono::NaiveDate>,
@@ -814,12 +817,17 @@ pub async fn create(
                 "Assistants cannot have a flextime opening balance.".into(),
             ));
         }
-        if body.workdays_per_week.is_some() {
+        if body.workdays_per_week.is_some() || body.work_weekdays.is_some() {
             return Err(AppError::BadRequest(
-                "Assistants cannot have fixed working days per week.".into(),
+                "Assistants cannot have fixed working days.".into(),
             ));
         }
         7
+    } else if let Some(weekdays) = &body.work_weekdays {
+        // Naming the days is the authoritative statement. The count follows
+        // from it, so the two can never contradict each other.
+        let normalised = crate::repository::WorkScheduleDb::normalised_weekdays(weekdays)?;
+        i16::try_from(normalised.len()).unwrap_or(5)
     } else {
         let wdpw = body.workdays_per_week.unwrap_or(5);
         if !(1..=5).contains(&wdpw) {
@@ -899,11 +907,17 @@ pub async fn create(
     // no work target and no flextime account, so there is nothing for a weekday
     // pattern to decide. Pure-admin users likewise.
     if crate::roles::has_work_target(&body.role, body.tracks_time) {
+        // The days named on the form, or the Monday-first guess when the form
+        // only gave a count.
+        let weekdays = match &body.work_weekdays {
+            Some(days) => crate::repository::WorkScheduleDb::normalised_weekdays(days)?,
+            None => crate::repository::WorkScheduleDb::default_weekdays(effective_workdays),
+        };
         crate::repository::WorkScheduleDb::set_for_user_tx(
             &mut transaction,
             new_user_id,
             body.start_date,
-            &crate::repository::WorkScheduleDb::default_weekdays(effective_workdays),
+            &weekdays,
             Some(requester.id),
         )
         .await?;

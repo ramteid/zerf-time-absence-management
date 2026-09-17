@@ -11,9 +11,7 @@
     categoryById,
     computeDayBreakInfo,
     creditedEntryMinutes,
-    dailyTargetMinutes,
     entryCountsAsWork,
-    potentialWorkdaysPerWeek,
   } from "../../lib/domain/time.js";
   import { settings } from "../../stores.js";
 
@@ -30,12 +28,11 @@
 
   const dispatch = createEventDispatcher();
 
-  $: configuredWorkdays = Number(currentUser?.workdays_per_week || 5);
-  $: potentialWorkdays = potentialWorkdaysPerWeek(configuredWorkdays);
-  $: isPotentialDay = dayIndex < potentialWorkdays;
-  $: dailyTargetHours = isPotentialDay
-    ? dailyTargetMinutes(currentUser?.weekly_hours, configuredWorkdays) / 60
-    : 0;
+  // What this day asks for, as the server counted it against the weekdays this
+  // contract actually works. A day it does not work asks for nothing, and
+  // neither does a holiday or a day off — so the "target met" highlight below
+  // is withheld on those rather than lighting up an empty day as finished.
+  $: dailyTargetHours = (day?.fullTargetMin ?? 0) / 60;
   $: breakRules = buildBreakRules($settings);
   // Break requirement/coverage for this day (day-total based, ArbZG §4 "insgesamt";
   // see computeDayBreakInfo). Empty breakdown when the feature is off.
@@ -130,6 +127,7 @@
       <div
         class="day-total tab-num"
         class:target-met={!isAssistant &&
+          dailyTargetHours > 0 &&
           dailyTotalMinutes / 60 >= dailyTargetHours}
       >
         {formatHours(dailyTotalHours)}

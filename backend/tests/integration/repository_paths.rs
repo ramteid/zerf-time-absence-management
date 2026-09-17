@@ -3185,3 +3185,94 @@ async fn a_contract_without_a_work_target_is_never_judged_by_fixed_days() {
 
     app.cleanup().await;
 }
+
+/// An administrator can state which weekdays a contract works, and the day
+/// count follows from that statement instead of contradicting it.
+///
+/// Before this there was no way to say it at all: the working days came from a
+/// blanket guess counting up from Monday, and correcting it meant editing the
+/// database by hand. A contract that really runs Tuesday to Friday would have
+/// been charged a leave day for a Monday it never works, while its Friday cost
+/// nothing.
+#[tokio::test]
+async fn an_admin_can_state_which_weekdays_a_contract_works() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let schedules = &app.state.db.work_schedules;
+    let start = reference_date() - Duration::days(400);
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "stated@example.com",
+                "first_name": "Silke", "last_name": "Sagt",
+                "role": "employee", "weekly_hours": 32.0,
+                "work_weekdays": [5, 2, 4, 3, 3],
+                "start_date": start.format("%Y-%m-%d").to_string(),
+                "approver_ids": [1],
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create with named days: {body}");
+    let user_id = id(&body);
+
+    let rows = schedules.list_for_user(user_id).await.expect("list");
+    assert_eq!(rows.len(), 1, "one starting pattern: {rows:?}");
+    assert_eq!(
+        rows[0].weekdays,
+        vec![2, 3, 4, 5],
+        "sorted, and the repeated Wednesday counted once"
+    );
+    assert_eq!(rows[0].valid_from, start, "in force from the contract start");
+
+    let (st, detail) = admin.get(&format!("/api/v1/users/{user_id}")).await;
+    assert_eq!(st, StatusCode::OK, "read back: {detail}");
+    assert_eq!(
+        detail["work_weekdays"],
+        json!([2, 3, 4, 5]),
+        "the form is shown what is stored"
+    );
+    assert_eq!(
+        detail["workdays_per_week"].as_i64(),
+        Some(4),
+        "the count follows from the four days named"
+    );
+
+    // Changing the days is recorded as a change, not applied backwards.
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{user_id}"),
+            &json!({"work_weekdays": [1, 3, 5]}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "restate the days: {body}");
+
+    let rows = schedules.list_for_user(user_id).await.expect("list");
+    assert_eq!(rows.len(), 2, "the change is dated, not retroactive: {rows:?}");
+    assert_eq!(rows[0].weekdays, vec![2, 3, 4, 5], "the weeks already worked keep theirs");
+    assert_eq!(rows[1].weekdays, vec![1, 3, 5], "and the new days apply from the change");
+    assert!(rows[1].valid_from > start, "dated from today, not from the contract start");
+
+    let (st, detail) = admin.get(&format!("/api/v1/users/{user_id}")).await;
+    assert_eq!(st, StatusCode::OK, "read back: {detail}");
+    assert_eq!(detail["workdays_per_week"].as_i64(), Some(3), "three days now");
+
+    // A day outside Monday to Friday is refused outright.
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{user_id}"),
+            &json!({"work_weekdays": [1, 6]}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "Saturday is not a weekday: {body}");
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{user_id}"),
+            &json!({"work_weekdays": []}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "a contract works some day: {body}");
+
+    app.cleanup().await;
+}
