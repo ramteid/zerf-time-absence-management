@@ -234,10 +234,13 @@
   // query nonsense bounds.
   function reportUserKey(id, user) {
     if (id == null || Number(user?.id) !== Number(id)) return "";
-    // The report derives workday counts, assistant status and flextime access
-    // locally, while the backend derives targets and balances from the same
-    // metadata. Keep the complete report-relevant snapshot in the key so an
-    // updated roster cannot leave a report backed by old assumptions.
+    // The numbers all come from the server now; what is kept here is a
+    // snapshot of the contract facts that change them, so a roster refresh
+    // mid-session cannot leave a loaded report standing on old ones.
+    //
+    // The recorded working days are not among them: the roster does not carry
+    // them. Changing which weekdays somebody works, without changing how many,
+    // therefore leaves an already-loaded report until the page is reopened.
     return [
       id,
       user.role || "",

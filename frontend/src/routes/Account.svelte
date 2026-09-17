@@ -7,6 +7,22 @@
   import { isAssistantUser } from "../rolePolicy.js";
   import { userAvatarClass, userInitials } from "../lib/domain/users.js";
 
+  const WEEKDAY_NAMES_BY_ISO = {
+    1: "Monday",
+    2: "Tuesday",
+    3: "Wednesday",
+    4: "Thursday",
+    5: "Friday",
+  };
+  // The weekdays this contract works, named rather than counted. Which days
+  // they are is what decides the day's target hours, whether a day off costs a
+  // leave day, and whether time booked on it counts as overtime — none of
+  // which a bare number answers.
+  $: workingDayNames = ($currentUser?.work_weekdays || [])
+    .map((iso) => $t(WEEKDAY_NAMES_BY_ISO[iso]))
+    .filter(Boolean)
+    .join(", ");
+
   let cur = "",
     nw = "",
     nw2 = "",
@@ -121,13 +137,13 @@
           />
         </div>
         <div>
-          <label class="zf-label" for="account-workdays-per-week"
-            >{$t("Workdays per week")}</label
+          <label class="zf-label" for="account-working-days"
+            >{$t("Working days")}</label
           >
           <input
-            id="account-workdays-per-week"
+            id="account-working-days"
             class="zf-input text-secondary"
-            value={$currentUser.workdays_per_week}
+            value={workingDayNames}
             readonly
           />
         </div>

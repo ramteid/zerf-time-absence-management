@@ -291,11 +291,26 @@ pub async fn me(
             serde_json::json!({"id": id, "first_name": first_name, "last_name": last_name})
         })
         .collect();
+    // The weekdays this contract works, so the account page can name them
+    // rather than showing a bare count the person cannot act on. Empty for
+    // anybody with no work target.
+    let today = crate::services::settings::app_today(&app_state.pool).await;
+    let work_weekdays: Vec<i16> = app_state
+        .db
+        .work_schedules
+        .list_for_user(user.id)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .rfind(|row| row.valid_from <= today)
+        .map(|row| row.weekdays)
+        .unwrap_or_default();
     Ok(Json(serde_json::json!({
         "id": user.id, "email": user.email,
         "first_name": user.first_name, "last_name": user.last_name,
         "role": user.role, "weekly_hours": user.weekly_hours,
         "workdays_per_week": user.workdays_per_week,
+        "work_weekdays": work_weekdays,
         "start_date": user.start_date,
         "hire_date": user.hire_date,
         "active": user.active, "must_change_password": user.must_change_password,

@@ -4,7 +4,7 @@ use reqwest::StatusCode;
 use serde_json::json;
 
 use crate::common::TestApp;
-use crate::helpers::{admin_login, temp_pw, today};
+use crate::helpers::{admin_login, login_change_pw, reference_date, temp_pw, today};
 use zerf::middleware::auth::hash_token;
 use zerf::services::auth::hash_password;
 
@@ -776,4 +776,50 @@ async fn insert_reset_token(app: &TestApp, user_id: i64, token: &str, interval: 
     .execute(&app.state.pool)
     .await
     .expect("insert reset token");
+}
+
+/// Somebody signing in is told which weekdays their contract works, so their
+/// account page can name them instead of showing a bare count.
+///
+/// A number alone does not say which days carry target hours, which ones cost
+/// a leave day when taken off, or which ones turn booked time into overtime.
+#[tokio::test]
+async fn auth_me_names_the_weekdays_the_contract_works() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let start = reference_date() - chrono::Duration::days(200);
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "named-days@example.com",
+                "first_name": "Nora", "last_name": "Namen",
+                "role": "employee", "weekly_hours": 32.0,
+                "work_weekdays": [2, 3, 4, 5],
+                "start_date": start.format("%Y-%m-%d").to_string(),
+                "approver_ids": [1],
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create: {body}");
+    let employee = login_change_pw(&app, "named-days@example.com", &temp_pw(&body)).await;
+
+    let (st, me) = employee.get("/api/v1/auth/me").await;
+    assert_eq!(st, StatusCode::OK, "me: {me}");
+    assert_eq!(
+        me["work_weekdays"],
+        json!([2, 3, 4, 5]),
+        "the days on record reach the person they belong to: {me}"
+    );
+
+    // An account with no work target has none, and says so plainly.
+    let (st, me) = admin.get("/api/v1/auth/me").await;
+    assert_eq!(st, StatusCode::OK, "me: {me}");
+    assert!(
+        me["work_weekdays"].as_array().is_some(),
+        "the field is always present: {me}"
+    );
+
+    app.cleanup().await;
 }
