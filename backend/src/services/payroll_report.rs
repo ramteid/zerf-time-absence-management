@@ -1067,7 +1067,6 @@ async fn status_for_member(
         to,
         user.start_date,
         submission_exempt,
-        user.workdays_per_week,
     )
     .await?;
     Ok(if weeks_in {

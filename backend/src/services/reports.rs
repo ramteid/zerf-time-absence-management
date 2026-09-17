@@ -920,6 +920,7 @@ pub async fn load_week_check_data(
     std::collections::HashSet<NaiveDate>,
     std::collections::HashSet<NaiveDate>,
     std::collections::HashSet<NaiveDate>,
+    crate::time_calc::WorkScheduleHistory,
 )> {
     let check_from = complete_week_mondays[0];
     let check_to = *complete_week_mondays.last().unwrap() + Duration::days(6);
@@ -942,7 +943,17 @@ pub async fn load_week_check_data(
     let incomplete_dates = reports_db
         .incomplete_dates_in_range(user_id, check_from, check_to)
         .await?;
-    Ok((holiday_set, absent_days, submitted_dates, incomplete_dates))
+    // Which weekdays this contract works, so a week is judged by its own
+    // working days rather than by the whole Monday-to-Friday pool. Somebody on
+    // Tuesday to Friday must not be asked to account for a Monday.
+    let schedule = crate::services::work_schedules::contract_schedule(pool, user_id).await?;
+    Ok((
+        holiday_set,
+        absent_days,
+        submitted_dates,
+        incomplete_dates,
+        schedule.history,
+    ))
 }
 
 async fn load_export_week_check_data(
@@ -956,6 +967,7 @@ async fn load_export_week_check_data(
     std::collections::HashSet<NaiveDate>,
     std::collections::HashSet<NaiveDate>,
     std::collections::HashSet<NaiveDate>,
+    crate::time_calc::WorkScheduleHistory,
 )> {
     let check_from = complete_week_mondays[0];
     let check_to = *complete_week_mondays.last().unwrap() + Duration::days(6);
@@ -978,7 +990,17 @@ async fn load_export_week_check_data(
     let incomplete_dates = reports_db
         .incomplete_dates_in_range(user_id, check_from, check_to)
         .await?;
-    Ok((holiday_set, absent_days, submitted_dates, incomplete_dates))
+    // Which weekdays this contract works, so a week is judged by its own
+    // working days rather than by the whole Monday-to-Friday pool. Somebody on
+    // Tuesday to Friday must not be asked to account for a Monday.
+    let schedule = crate::services::work_schedules::contract_schedule(pool, user_id).await?;
+    Ok((
+        holiday_set,
+        absent_days,
+        submitted_dates,
+        incomplete_dates,
+        schedule.history,
+    ))
 }
 
 /// The slice of a week a completeness check is allowed to look at.
@@ -1027,7 +1049,7 @@ fn week_is_accounted_for(
     absent_days: &std::collections::HashSet<NaiveDate>,
     status_check_dates: &std::collections::HashSet<NaiveDate>,
     user_start_date: NaiveDate,
-    workdays_per_week: i16,
+    history: &crate::time_calc::WorkScheduleHistory,
     judged: JudgedDays,
 ) -> bool {
     let week_days = || {
@@ -1045,7 +1067,7 @@ fn week_is_accounted_for(
     // iterator passes, which is the right answer for a week whose judged part
     // holds no days at all.
     week_days().all(|day| {
-        !crate::time_calc::is_potential_workday(day, workdays_per_week)
+        !history.on(day).covers(day)
             || day < user_start_date
             || holiday_set.contains(&day)
             || absent_days.contains(&day)
@@ -1114,6 +1136,9 @@ pub async fn approved_weeks(
         return Ok(no_history);
     }
 
+    let schedule_history = crate::services::work_schedules::contract_schedule(pool, user_id)
+        .await?
+        .history;
     let today = crate::services::settings::app_today(pool).await;
     // Only weeks that are over are judged: the week being worked can still
     // gain entries, so "every required day is approved" would be a verdict on
@@ -1165,7 +1190,7 @@ pub async fn approved_weeks(
                 &absent_days,
                 &approved_dates,
                 user_start_date,
-                workdays_per_week,
+                &schedule_history,
                 None,
             )
         {
@@ -1205,7 +1230,7 @@ pub fn check_weeks_all_submitted(
     submitted_dates: &std::collections::HashSet<NaiveDate>,
     incomplete_dates: &std::collections::HashSet<NaiveDate>,
     user_start_date: NaiveDate,
-    workdays_per_week: i16,
+    history: &crate::time_calc::WorkScheduleHistory,
     judged: JudgedDays,
 ) -> bool {
     for &week_monday in complete_week_mondays {
@@ -1226,7 +1251,7 @@ pub fn check_weeks_all_submitted(
             absent_days,
             submitted_dates,
             user_start_date,
-            workdays_per_week,
+            history,
             judged,
         ) {
             return false;
@@ -1243,7 +1268,6 @@ pub async fn submission_status_for_month(
     month_end: NaiveDate,
     user_start_date: NaiveDate,
     submission_exempt: bool,
-    workdays_per_week: i16,
 ) -> AppResult<(bool, bool)> {
     // Assistants and zero-weekly-hours users are exempt: they have no fixed
     // target schedule / no booking obligation, and the monthly submission
@@ -1262,7 +1286,7 @@ pub async fn submission_status_for_month(
     // Include requested absences: the employee cannot log entries on pending
     // absence days, so those days must be excused to prevent an unsatisfiable
     // completeness requirement in the user-facing Submissions tile.
-    let (holiday_set, absent_days, submitted_dates, incomplete_dates) =
+    let (holiday_set, absent_days, submitted_dates, incomplete_dates, schedule_history) =
         load_week_check_data(pool, user_id, &complete_week_mondays, true).await?;
     // A month is a closed period, so only its own days are judged — the same
     // clamp `all_weeks_submitted_for_month` uses, so the dashboard and the team
@@ -1276,7 +1300,7 @@ pub async fn submission_status_for_month(
         &submitted_dates,
         &incomplete_dates,
         user_start_date,
-        workdays_per_week,
+        &schedule_history,
         Some((month_start, month_end)),
     ) {
         return Ok((false, false));
@@ -1370,7 +1394,6 @@ pub async fn build_month(
         to,
         user.start_date,
         submission_exempt,
-        user.workdays_per_week,
     )
     .await?;
     report.weeks_all_submitted = Some(all_submitted);
@@ -1992,7 +2015,6 @@ pub async fn all_weeks_submitted_for_month(
     month_end: NaiveDate,
     user_start_date: NaiveDate,
     submission_exempt: bool,
-    workdays_per_week: i16,
 ) -> AppResult<bool> {
     let today = crate::services::settings::app_today(pool).await;
     let complete_week_mondays = weeks_in_month_to_judge(month_start, month_end, today);
@@ -2005,7 +2027,7 @@ pub async fn all_weeks_submitted_for_month(
     if submission_exempt {
         return Ok(true);
     }
-    let (holiday_set, absent_days, submitted_dates, incomplete_dates) =
+    let (holiday_set, absent_days, submitted_dates, incomplete_dates, schedule_history) =
         load_week_check_data(pool, user_id, &complete_week_mondays, true).await?;
     Ok(check_weeks_all_submitted(
         &complete_week_mondays,
@@ -2014,7 +2036,7 @@ pub async fn all_weeks_submitted_for_month(
         &submitted_dates,
         &incomplete_dates,
         user_start_date,
-        workdays_per_week,
+        &schedule_history,
         Some((month_start, month_end)),
     ))
 }
@@ -2037,7 +2059,6 @@ pub async fn weeks_submission_counts(
     from: NaiveDate,
     to: NaiveDate,
     user_start_date: NaiveDate,
-    workdays_per_week: i16,
     judged: JudgedDays,
 ) -> AppResult<(i64, i64)> {
     let today = crate::services::settings::app_today(pool).await;
@@ -2053,7 +2074,7 @@ pub async fn weeks_submission_counts(
     }
     // Requested absences are excused here, like everywhere the employee's own
     // completeness is shown: they cannot book on a day a pending request covers.
-    let (holiday_set, absent_days, submitted_dates, incomplete_dates) =
+    let (holiday_set, absent_days, submitted_dates, incomplete_dates, schedule_history) =
         load_week_check_data(pool, user_id, &week_mondays, true).await?;
     let submitted = week_mondays
         .iter()
@@ -2065,7 +2086,7 @@ pub async fn weeks_submission_counts(
                 &submitted_dates,
                 &incomplete_dates,
                 user_start_date,
-                workdays_per_week,
+                &schedule_history,
                 judged,
             )
         })
@@ -2089,7 +2110,6 @@ pub async fn unsubmitted_weeks_in_month(
     month_start: NaiveDate,
     month_end: NaiveDate,
     user_start_date: NaiveDate,
-    workdays_per_week: i16,
     today: NaiveDate,
 ) -> AppResult<Vec<NaiveDate>> {
     let mut week_mondays = weeks_in_month_to_judge(month_start, month_end, today);
@@ -2100,7 +2120,7 @@ pub async fn unsubmitted_weeks_in_month(
     if week_mondays.is_empty() {
         return Ok(Vec::new());
     }
-    let (holiday_set, absent_days, submitted_dates, incomplete_dates) =
+    let (holiday_set, absent_days, submitted_dates, incomplete_dates, schedule_history) =
         load_week_check_data(pool, user_id, &week_mondays, true).await?;
     Ok(week_mondays
         .into_iter()
@@ -2112,7 +2132,7 @@ pub async fn unsubmitted_weeks_in_month(
                 &submitted_dates,
                 &incomplete_dates,
                 user_start_date,
-                workdays_per_week,
+                &schedule_history,
                 Some((month_start, month_end)),
             )
         })
@@ -2139,7 +2159,6 @@ async fn attach_week_submission_counts(
         from,
         to,
         user.start_date,
-        user.workdays_per_week,
         judged,
     )
     .await?;
@@ -2159,7 +2178,6 @@ pub async fn all_weeks_ready_for_timesheet_export(
     month_end: NaiveDate,
     user_start_date: NaiveDate,
     submission_exempt: bool,
-    workdays_per_week: i16,
 ) -> AppResult<bool> {
     let today = crate::services::settings::app_today(pool).await;
     let complete_week_mondays = weeks_in_month_to_judge(month_start, month_end, today);
@@ -2181,7 +2199,7 @@ pub async fn all_weeks_ready_for_timesheet_export(
         return Ok(false);
     }
 
-    let (holiday_set, absent_days, submitted_dates, incomplete_dates) =
+    let (holiday_set, absent_days, submitted_dates, incomplete_dates, schedule_history) =
         load_export_week_check_data(
             pool,
             user_id,
@@ -2197,7 +2215,7 @@ pub async fn all_weeks_ready_for_timesheet_export(
         &submitted_dates,
         &incomplete_dates,
         user_start_date,
-        workdays_per_week,
+        &schedule_history,
         // Only this month's own days: the week carrying the month's last day
         // reaches into the next one, and a draft booked there belongs to the
         // next month's document, not this one's.
@@ -2376,7 +2394,6 @@ pub async fn month_export_readiness(
             to,
             user.start_date,
             submission_exempt,
-            user.workdays_per_week,
         )
         .await?;
         if !submitted {
@@ -2786,6 +2803,69 @@ mod tests {
         );
     }
 
+    /// A contract with no recorded pattern, judged by its day count alone —
+    /// the fallback every one of these tests used before working weekdays
+    /// existed, and still the answer for anybody who has none.
+    fn day_count(workdays_per_week: i16) -> crate::time_calc::WorkScheduleHistory {
+        crate::time_calc::WorkScheduleHistory::without_history(
+            crate::time_calc::WorkSchedule::without_fixed_days(workdays_per_week),
+        )
+    }
+
+    /// A contract that works exactly these weekdays, from long before any date
+    /// these tests use.
+    fn works(weekdays: &[u8]) -> crate::time_calc::WorkScheduleHistory {
+        crate::time_calc::WorkScheduleHistory::new(
+            vec![(
+                NaiveDate::from_ymd_opt(2000, 1, 1).unwrap(),
+                crate::time_calc::WorkSchedule::fixed(weekdays).expect("a valid pattern"),
+            )],
+            crate::time_calc::WorkSchedule::without_fixed_days(5),
+        )
+    }
+
+    /// A week with nothing booked is only fine if nothing was due, and what was
+    /// due is decided by the contract's own working days.
+    ///
+    /// Somebody on Tuesday to Friday who takes their whole week off books an
+    /// absence for those four days. Their Monday is left bare, because there
+    /// was never anything on it. Judged against the whole Monday-to-Friday
+    /// pool, that bare Monday made the week look unfinished and the employee
+    /// was chased for it.
+    #[test]
+    fn a_week_is_judged_by_the_days_the_contract_actually_works() {
+        let monday = NaiveDate::from_ymd_opt(2026, 5, 4).unwrap();
+        let long_ago = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
+        // Tuesday to Friday covered by an absence; Monday untouched.
+        let away: HashSet<NaiveDate> = (1..5).map(|offset| monday + Duration::days(offset)).collect();
+
+        assert!(
+            week_is_accounted_for(
+                monday,
+                &HashSet::new(),
+                &away,
+                &HashSet::new(),
+                long_ago,
+                &works(&[2, 3, 4, 5]),
+                None,
+            ),
+            "every day this contract works is accounted for"
+        );
+        // The same week, judged by a contract that does work Mondays, is not.
+        assert!(
+            !week_is_accounted_for(
+                monday,
+                &HashSet::new(),
+                &away,
+                &HashSet::new(),
+                long_ago,
+                &works(&[1, 2, 3, 4, 5]),
+                None,
+            ),
+            "a contract that works Mondays still has that Monday open"
+        );
+    }
+
     /// The flextime cutoff scan reuses `week_is_accounted_for` with the set of
     /// *approved* days. A week is judged as a whole: one approved day carries
     /// it, whatever the rest of the week looks like.
@@ -2802,7 +2882,7 @@ mod tests {
             &HashSet::new(),
             &full_week,
             long_ago,
-            5,
+            &day_count(5),
             None,
         ));
 
@@ -2815,7 +2895,7 @@ mod tests {
             &HashSet::new(),
             &monday_only,
             long_ago,
-            5,
+            &day_count(5),
             None,
         ));
     }
@@ -2833,7 +2913,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             long_ago,
-            5,
+            &day_count(5),
             None,
         ));
 
@@ -2846,7 +2926,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             long_ago,
-            5,
+            &day_count(5),
             None,
         ));
         // ... the same via an absence.
@@ -2856,7 +2936,7 @@ mod tests {
             &workweek,
             &HashSet::new(),
             long_ago,
-            5,
+            &day_count(5),
             None,
         ));
         // One unexcused workday left over is enough to fail again.
@@ -2868,7 +2948,7 @@ mod tests {
             &without_friday,
             &HashSet::new(),
             long_ago,
-            5,
+            &day_count(5),
             None,
         ));
     }
@@ -2884,7 +2964,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
-            5,
+            &day_count(5),
             None,
         ));
     }
@@ -2905,7 +2985,7 @@ mod tests {
                 &HashSet::new(),
                 &two_days,
                 long_ago,
-                workdays_per_week,
+                &day_count(workdays_per_week),
                 None,
             ));
         }
@@ -2927,7 +3007,7 @@ mod tests {
             &submitted_dates,
             &HashSet::new(),
             NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
-            5,
+            &day_count(5),
             None,
         ));
 
@@ -2941,7 +3021,7 @@ mod tests {
             &submitted_dates,
             &HashSet::new(),
             NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
-            5,
+            &day_count(5),
             None,
         ));
 
@@ -2953,7 +3033,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
-            5,
+            &day_count(5),
             None,
         ));
 
@@ -2966,7 +3046,7 @@ mod tests {
             &HashSet::new(),
             &incomplete,
             NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
-            5,
+            &day_count(5),
             None,
         ));
     }
@@ -3169,7 +3249,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             user_start,
-            5,
+            &day_count(5),
             None,
         ));
     }
@@ -3188,7 +3268,7 @@ mod tests {
             &HashSet::new(), // no submitted dates
             &HashSet::new(), // no incomplete dates
             user_start,
-            5,
+            &day_count(5),
             None,
         ));
     }

@@ -368,7 +368,6 @@ pub async fn team(
                     month_end,
                     team_member.start_date,
                     team_member_submission_exempt,
-                    team_member.workdays_per_week,
                 )
                 .await?;
 

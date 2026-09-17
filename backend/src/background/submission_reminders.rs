@@ -104,7 +104,6 @@ async fn find_unsubmitted_weeks(
     pool: &DatabasePool,
     user_id: i64,
     user_start: NaiveDate,
-    workdays_per_week: i16,
 ) -> Vec<NaiveDate> {
     let today = app_today(pool).await;
 
@@ -169,6 +168,14 @@ async fn find_unsubmitted_weeks(
         &category_flags,
     );
 
+    // Which weekdays this contract works. Without it the reminder would chase
+    // somebody for a Monday they never work, in a week they took off entirely.
+    let Ok(schedule) = crate::services::work_schedules::contract_schedule(pool, user_id).await
+    else {
+        return vec![];
+    };
+    let schedule_history = schedule.history;
+
     // Evaluate each fully elapsed week with the canonical helper so the
     // reminder uses byte-for-byte the same rule as the Submissions tile,
     // the team report, and the monthly PDF upload.
@@ -182,7 +189,7 @@ async fn find_unsubmitted_weeks(
             &submitted_dates,
             &incomplete_dates,
             user_start,
-            workdays_per_week,
+            &schedule_history,
             None,
         );
         if !week_is_complete {
@@ -237,12 +244,11 @@ pub async fn run_check(state: &crate::AppState) {
     for crate::repository::ActiveUserRow {
         id: user_id,
         start_date: user_start,
-        workdays_per_week,
         ..
     } in rows
     {
         let missing_weeks =
-            find_unsubmitted_weeks(pool, user_id, user_start, workdays_per_week).await;
+            find_unsubmitted_weeks(pool, user_id, user_start).await;
 
         if missing_weeks.is_empty() {
             continue;
@@ -495,7 +501,6 @@ pub async fn run_month_weeks_reminder(
     for crate::repository::ActiveUserRow {
         id: user_id,
         start_date: user_start,
-        workdays_per_week,
         ..
     } in rows
     {
@@ -505,7 +510,6 @@ pub async fn run_month_weeks_reminder(
             from,
             to,
             user_start,
-            workdays_per_week,
             today,
         )
         .await
