@@ -6937,13 +6937,13 @@ async fn payroll_absence_days_never_exceed_the_week_they_share() {
             user_id,
             unpaid.id,
             false,
+            monday + Duration::days(2),
             monday + Duration::days(3),
-            monday + Duration::days(4),
             None,
             "approved",
         )
         .await
-        .expect("create the Thursday-Friday unpaid leave");
+        .expect("create the Wednesday-Thursday unpaid leave");
 
     let members = app
         .state
@@ -6978,25 +6978,22 @@ async fn payroll_absence_days_never_exceed_the_week_they_share() {
         .collect();
     let printed_days: f64 = printed.iter().map(|(_, _, _, days)| days).sum();
 
-    let holidays = app
-        .state
-        .db
-        .reports
-        .holiday_set(from, to)
-        .await
-        .expect("holidays");
-    // The week counted as one, which is what the leave tiles and every other
-    // day count in the app agree on.
-    let week_total = zerf::time_calc::counted_workdays(
+    // The week counted as one, through the single leave calendar every other
+    // day count in the app goes through. Comparing against that, rather than
+    // against a number written into the test, is what makes this a check that
+    // the document agrees with the rest of Zerf.
+    let week_total = zerf::services::absence_balance::counted_workdays_for_user(
+        &app.state.pool,
+        user_id,
         &[
             (monday, monday + Duration::days(1)),
-            (monday + Duration::days(3), monday + Duration::days(4)),
+            (monday + Duration::days(2), monday + Duration::days(3)),
         ],
         monday,
         monday + Duration::days(6),
-        &holidays,
-        3,
     )
+    .await
+    .expect("the week's leave days")
     .len() as f64;
     assert_eq!(
         printed_days, week_total,

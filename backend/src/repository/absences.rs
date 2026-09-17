@@ -190,7 +190,7 @@ impl AbsenceDb {
         .bind(to)
         .fetch_all(&self.pool)
         .await?;
-        let workdays_per_week = self.user_workdays_per_week(user_id).await?;
+        let schedule = crate::services::work_schedules::contract_schedule(&self.pool, user_id).await?;
         let holidays = self.holidays_set(from, to).await?;
         // Union counting with weekly cap to avoid double count when separate ranges fall in same week.
         let clamped: Vec<(NaiveDate, NaiveDate)> = ranges
@@ -205,7 +205,7 @@ impl AbsenceDb {
                 from,
                 to,
                 &holidays,
-                workdays_per_week,
+                &schedule,
             ),
         )
     }
@@ -231,7 +231,7 @@ impl AbsenceDb {
         .bind(to)
         .fetch_all(&self.pool)
         .await?;
-        let workdays_per_week = self.user_workdays_per_week(user_id).await?;
+        let schedule = crate::services::work_schedules::contract_schedule(&self.pool, user_id).await?;
         let holidays = self.holidays_set(from, to).await?;
         let clamped: Vec<(NaiveDate, NaiveDate)> = ranges
             .into_iter()
@@ -244,7 +244,7 @@ impl AbsenceDb {
                 from,
                 to,
                 &holidays,
-                workdays_per_week,
+                &schedule,
             ),
         )
     }

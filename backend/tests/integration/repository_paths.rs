@@ -3092,3 +3092,96 @@ async fn a_corrected_count_leaves_hand_picked_days_alone() {
 
     app.cleanup().await;
 }
+
+/// A contract with no work target must never be judged by fixed working days,
+/// even when it carries a pattern from an earlier role.
+///
+/// Somebody can move from employee to assistant. Their pattern rows stay on the
+/// record, because the months they worked that way really did happen and a
+/// report over them has to be able to read them. What must stop is any
+/// calculation applying those rows while the contract has no target: an
+/// assistant is paid for the hours they are present, so no weekday of theirs
+/// carries a target, and every calendar day of an absence is charged to them.
+/// Reading a leftover Monday-to-Thursday pattern would give them a target on
+/// four days and none on Friday, and would make a leave day cost differently
+/// depending on which weekday it lands on.
+#[tokio::test]
+async fn a_contract_without_a_work_target_is_never_judged_by_fixed_days() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let schedules = &app.state.db.work_schedules;
+    let start = reference_date() - Duration::days(300);
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "becomes-assistant@example.com",
+                "first_name": "Wanda", "last_name": "Wechsel",
+                "role": "employee", "weekly_hours": 23.4,
+                "workdays_per_week": 4,
+                "start_date": start.format("%Y-%m-%d").to_string(),
+                "approver_ids": [1],
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create: {body}");
+    let user_id = id(&body);
+
+    // While they are an employee the recorded pattern is what judges them.
+    let history = zerf::services::work_schedules::history_for(
+        &app.state.pool,
+        user_id,
+        "employee",
+        true,
+        4,
+    )
+    .await
+    .expect("history for an employee");
+    assert!(
+        history.on(reference_date()).has_fixed_days(),
+        "an employee is judged by the weekdays on record"
+    );
+
+    // Now they become an assistant.
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{user_id}"),
+            &json!({"role": "assistant", "weekly_hours": 0}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "become an assistant: {body}");
+
+    // The rows survive — the months already worked are still readable.
+    let rows = schedules.list_for_user(user_id).await.expect("list");
+    assert!(
+        !rows.is_empty(),
+        "the pattern stays on the record: {rows:?}"
+    );
+
+    // But nothing judges them by it any more. Assistants carry the sentinel
+    // day count of 7, which is what their contract now stores.
+    let history =
+        zerf::services::work_schedules::history_for(&app.state.pool, user_id, "assistant", true, 7)
+            .await
+            .expect("history for an assistant");
+    let schedule = history.on(reference_date());
+    assert!(
+        !schedule.has_fixed_days(),
+        "an assistant has no fixed working days"
+    );
+    // Every calendar day can carry an absence for them, Saturday included.
+    let saturday = {
+        let mut d = reference_date();
+        while d.weekday() != chrono::Weekday::Sat {
+            d += Duration::days(1);
+        }
+        d
+    };
+    assert!(
+        schedule.covers(saturday),
+        "an assistant's absence is charged on any calendar day"
+    );
+
+    app.cleanup().await;
+}

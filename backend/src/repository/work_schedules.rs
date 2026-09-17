@@ -30,6 +30,20 @@ pub struct WorkScheduleDb {
     pool: DatabasePool,
 }
 
+/// The contract facts a working-day timeline is built from.
+///
+/// Loaded in one query because every caller needs all four together: the role
+/// and the time-tracking flag decide whether the recorded weekdays apply at
+/// all, the day count answers for dates no pattern reaches, and the start date
+/// bounds every calculation.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct ContractShape {
+    pub role: String,
+    pub tracks_time: bool,
+    pub workdays_per_week: i16,
+    pub start_date: NaiveDate,
+}
+
 impl WorkScheduleDb {
     pub fn new(pool: DatabasePool) -> Self {
         Self { pool }
@@ -320,5 +334,16 @@ impl WorkScheduleDb {
         .execute(&self.pool)
         .await?
         .rows_affected())
+    }
+
+    /// The contract facts behind one person's working-day timeline.
+    pub async fn contract_for_user(&self, user_id: i64) -> AppResult<ContractShape> {
+        Ok(sqlx::query_as::<_, ContractShape>(
+            "SELECT role, tracks_time, workdays_per_week, start_date \
+             FROM users WHERE id = $1",
+        )
+        .bind(user_id)
+        .fetch_one(&self.pool)
+        .await?)
     }
 }

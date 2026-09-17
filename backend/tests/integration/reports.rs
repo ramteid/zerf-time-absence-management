@@ -2479,3 +2479,197 @@ async fn a_finished_month_is_settled_by_its_own_days() {
 
     app.cleanup().await;
 }
+
+/// A contract's target follows the weekdays it actually works.
+///
+/// This is the rule fixed working days exist for. Somebody on Tuesday to Friday
+/// has four working days, each worth a quarter of their week. Their Monday
+/// carries nothing: a public holiday on it takes nothing away, because there
+/// was nothing there to take.
+///
+/// The numbers: the contract is 32 hours over four days. 32 times 60 is 1920
+/// minutes a week, and 1920 divided by 4 is 480 minutes a working day.
+#[tokio::test]
+async fn the_target_follows_the_weekdays_the_contract_works() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let start = reference_date() - Duration::days(400);
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "tue-fri@example.com",
+                "first_name": "Tilo", "last_name": "Dienstag",
+                "role": "employee", "weekly_hours": 32.0,
+                "workdays_per_week": 4,
+                "start_date": start.format("%Y-%m-%d").to_string(),
+                "approver_ids": [1],
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create: {body}");
+    let user_id = id(&body);
+
+    // The admin records the days actually worked: Tuesday to Friday.
+    app.state
+        .db
+        .work_schedules
+        .set_for_user(user_id, start, &[2, 3, 4, 5], Some(1))
+        .await
+        .expect("record the real days");
+
+    // Three quiet weeks in mid-February, well clear of any public holiday.
+    // reference_date() is a Monday, so adding whole weeks keeps that.
+    let week_a = reference_date() + Duration::days(35);
+    let week_b = week_a + Duration::days(7);
+    let week_c = week_b + Duration::days(7);
+
+    let week_target = |monday: NaiveDate| {
+        let admin = &admin;
+        async move {
+            let (st, body) = admin
+                .get(&format!(
+                    "/api/v1/reports/range?user_id={user_id}&from={}&to={}",
+                    monday,
+                    monday + Duration::days(6)
+                ))
+                .await;
+            assert_eq!(st, StatusCode::OK, "range report: {body}");
+            body["full_month_target_min"].as_i64().expect("target")
+        }
+    };
+
+    assert_eq!(
+        week_target(week_a).await,
+        1920,
+        "four working days of 480 minutes is the whole 32-hour week"
+    );
+
+    // A public holiday on a Monday this contract never works.
+    let (st, body) = admin
+        .post(
+            "/api/v1/holidays",
+            &json!({"holiday_date": week_b.to_string(), "name": "Quiet Monday"}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "holiday on Monday: {body}");
+    assert_eq!(
+        week_target(week_b).await,
+        1920,
+        "a holiday on a day the contract does not work takes nothing away"
+    );
+
+    // A public holiday on a Tuesday, which this contract does work.
+    let tuesday_c = week_c + Duration::days(1);
+    let (st, body) = admin
+        .post(
+            "/api/v1/holidays",
+            &json!({"holiday_date": tuesday_c.to_string(), "name": "Busy Tuesday"}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "holiday on Tuesday: {body}");
+    assert_eq!(
+        week_target(week_c).await,
+        1440,
+        "a holiday on a working day removes exactly that day: 1920 minus 480"
+    );
+
+    app.cleanup().await;
+}
+
+/// A leave day costs one of the contract's own working days, and a day it does
+/// not work costs nothing at all.
+///
+/// The same Tuesday-to-Friday contract as above. Booking their whole week off
+/// costs four leave days however the request is written: Tuesday to Friday, or
+/// Monday to Friday, because the Monday was never going to be worked. Asking
+/// for that Monday on its own is refused, since there is nothing on it to take
+/// off.
+#[tokio::test]
+async fn a_leave_day_costs_one_of_the_contracts_own_working_days() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let start = reference_date() - Duration::days(400);
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "tue-fri-leave@example.com",
+                "first_name": "Tina", "last_name": "Dienstag",
+                "role": "employee", "weekly_hours": 32.0,
+                "workdays_per_week": 4,
+                "start_date": start.format("%Y-%m-%d").to_string(),
+                "approver_ids": [1],
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create: {body}");
+    let user_id = id(&body);
+    app.state
+        .db
+        .work_schedules
+        .set_for_user(user_id, start, &[2, 3, 4, 5], Some(1))
+        .await
+        .expect("record the real days");
+
+    // A quiet week in mid-February, well clear of any public holiday.
+    let monday = reference_date() + Duration::days(35);
+    let tuesday = monday + Duration::days(1);
+    let friday = monday + Duration::days(4);
+    let sunday = monday + Duration::days(6);
+
+    let charged = |ranges: Vec<(NaiveDate, NaiveDate)>| {
+        let pool = app.state.pool.clone();
+        async move {
+            zerf::services::absence_balance::counted_workdays_for_user(
+                &pool, user_id, &ranges, monday, sunday,
+            )
+            .await
+            .expect("count")
+        }
+    };
+
+    assert_eq!(
+        charged(vec![(tuesday, friday)]).await.len(),
+        4,
+        "Tuesday to Friday is this contract's whole week"
+    );
+    assert_eq!(
+        charged(vec![(monday, friday)]).await.len(),
+        4,
+        "writing the request from Monday adds nothing: that day is not worked"
+    );
+    assert!(
+        charged(vec![(monday, monday)]).await.is_empty(),
+        "a Monday on its own costs no leave day"
+    );
+
+    // And the request itself is refused, rather than being accepted at a cost
+    // of nothing.
+    assert!(
+        zerf::services::absence_balance::validate_absence_has_workday(
+            &app.state.pool,
+            user_id,
+            monday,
+            monday,
+        )
+        .await
+        .is_err(),
+        "there is nothing on that Monday to take off"
+    );
+    assert!(
+        zerf::services::absence_balance::validate_absence_has_workday(
+            &app.state.pool,
+            user_id,
+            tuesday,
+            tuesday,
+        )
+        .await
+        .is_ok(),
+        "the Tuesday after it is a working day"
+    );
+
+    app.cleanup().await;
+}

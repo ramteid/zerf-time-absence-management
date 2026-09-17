@@ -399,7 +399,7 @@ pub async fn create_absence(
     }
     validate_absence_has_workday(
         &app_state.pool,
-        requester.workdays_per_week,
+        requester.id,
         body.start_date,
         body.end_date,
     )
@@ -522,7 +522,7 @@ pub async fn update_absence(
     }
     validate_absence_has_workday(
         &app_state.pool,
-        requester.workdays_per_week,
+        requester.id,
         body.start_date,
         body.end_date,
     )

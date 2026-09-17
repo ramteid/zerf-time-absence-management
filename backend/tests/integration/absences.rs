@@ -1620,10 +1620,14 @@ async fn a_week_off_straddling_today_costs_one_weekly_quota() {
 /// not by what it would cost alone.
 ///
 /// The leave-account budget check counted the proposed range on its own and
-/// added it to the existing bookings, so both got the full weekly quota: a
-/// 3-day/week employee with 3 days left, two of them already booked in a week,
-/// was told they had no budget for one more day in that same week — even though
-/// the week can only ever cost the three days they had.
+/// added it to the existing bookings, so both got counted in full: a three-day
+/// employee with three days left, two of them already booked in a week, was
+/// told they had no budget for one more day in that same week — even though the
+/// week can only ever cost the three days they had.
+///
+/// This contract works Monday to Wednesday, so the second booking below runs
+/// Wednesday to Thursday and adds exactly one day: the Thursday is not one of
+/// its working days and costs nothing.
 #[tokio::test]
 async fn a_second_booking_in_one_week_is_priced_by_what_it_adds() {
     let app = TestApp::spawn().await;
@@ -1697,22 +1701,23 @@ async fn a_second_booking_in_one_week_is_priced_by_what_it_adds() {
         .await;
     assert_eq!(status, StatusCode::OK, "approve the first booking: {body}");
 
-    // Two more days in the same week. The week is already at two of its three,
-    // so this adds one day, not two — and one day still fits.
+    // Two more calendar days in the same week, of which only the Wednesday is
+    // worked. The week is already at two of its three, so this adds one day,
+    // not two — and one day still fits.
     let (status, body) = employee
         .post(
             "/api/v1/absences",
             &json!({
                 "kind": "vacation",
-                "start_date": (monday + chrono::Duration::days(3)).to_string(),
-                "end_date": (monday + chrono::Duration::days(4)).to_string(),
+                "start_date": (monday + chrono::Duration::days(2)).to_string(),
+                "end_date": (monday + chrono::Duration::days(3)).to_string(),
             }),
         )
         .await;
     assert_eq!(
         status,
         StatusCode::OK,
-        "Thursday and Friday of the same week must still fit in the budget: {body}"
+        "the last working day of the same week must still fit in the budget: {body}"
     );
 
     // And the balance agrees: the whole week cost three days, not four.

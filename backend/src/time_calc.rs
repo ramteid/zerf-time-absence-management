@@ -507,6 +507,50 @@ pub fn scheduled_leave_days(
     charged
 }
 
+/// How many of the charged leave days each range carries.
+///
+/// Returns one count per input range, in input order. Days are attributed in
+/// chronological order of range start, with input order breaking ties, so the
+/// first booking in a week keeps its own days and a later one overlapping it is
+/// charged only what is left.
+///
+/// This is the per-range counterpart of [`scheduled_leave_days`], for callers
+/// that print or bill each range separately and still need those numbers to add
+/// up to what the days actually cost. The payroll report is one: two sick notes
+/// inside one calendar week must not claim more days of continued pay than that
+/// week holds for the contract.
+pub fn scheduled_days_per_range(
+    history: &WorkScheduleHistory,
+    ranges: &[(NaiveDate, NaiveDate)],
+    contract_start: NaiveDate,
+    window_start: NaiveDate,
+    window_end: NaiveDate,
+    holidays: &std::collections::HashSet<NaiveDate>,
+) -> Vec<f64> {
+    let mut counts = vec![0.0; ranges.len()];
+    if ranges.is_empty() {
+        return counts;
+    }
+    let mut order: Vec<usize> = (0..ranges.len()).collect();
+    order.sort_by_key(|index| (ranges[*index].0, *index));
+    for day in scheduled_leave_days(
+        history,
+        ranges,
+        contract_start,
+        window_start,
+        window_end,
+        holidays,
+    ) {
+        if let Some(owner) = order
+            .iter()
+            .find(|index| day >= ranges[**index].0 && day <= ranges[**index].1)
+        {
+            counts[*owner] += 1.0;
+        }
+    }
+    counts
+}
+
 /// Minutes of work `[from, to]` asks for.
 ///
 /// Every working day carries one day's minutes unless something takes it away:
