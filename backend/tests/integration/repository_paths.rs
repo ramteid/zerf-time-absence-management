@@ -2587,7 +2587,9 @@ async fn work_schedule_history_repository_workflow() {
     let user_id = id(&body);
     let schedules = &app.state.db.work_schedules;
 
-    // Migration 048 backfills a starting pattern for everyone with a target.
+    // Creating somebody with a work target records their starting pattern in
+    // the same transaction as the user row (migration 048 does the same for the
+    // roster that already existed when it ran).
     let rows = schedules.list_for_user(user_id).await.expect("list");
     assert_eq!(rows.len(), 1, "one starting pattern: {rows:?}");
     assert_eq!(rows[0].valid_from, chrono::NaiveDate::from_ymd_opt(2026, 7, 1).unwrap());
@@ -2644,10 +2646,11 @@ async fn work_schedule_history_repository_workflow() {
 
     // What the database refuses.
     for (label, days) in [
-        ("leer", vec![]),
-        ("Samstag", vec![6i16]),
-        ("Sonntag", vec![7i16]),
-        ("Null", vec![0i16]),
+        ("an empty pattern", vec![]),
+        ("Saturday", vec![6i16]),
+        ("Sunday", vec![7i16]),
+        ("weekday zero", vec![0i16]),
+        ("a real day beside a refused one", vec![1i16, 6]),
     ] {
         let result = schedules
             .set_for_user(
@@ -2657,16 +2660,43 @@ async fn work_schedule_history_repository_workflow() {
                 None,
             )
             .await;
-        assert!(result.is_err(), "{label} muss abgelehnt werden");
+        assert!(result.is_err(), "{label} must be refused");
     }
 
-    // Deleting removes one dated entry and leaves the rest.
+    // Withdrawing a later change removes that row and leaves the rest.
     let removed = schedules
-        .delete(user_id, chrono::NaiveDate::from_ymd_opt(2027, 3, 1).unwrap())
+        .delete_change(user_id, chrono::NaiveDate::from_ymd_opt(2027, 3, 1).unwrap())
         .await
-        .expect("delete");
+        .expect("withdraw the change");
     assert_eq!(removed, 1);
     assert_eq!(schedules.list_for_user(user_id).await.expect("list").len(), 1);
+
+    // The starting pattern cannot be withdrawn, whatever a caller asks. Leaving
+    // somebody with no working days recorded would send every calculation for
+    // them back to the old spread over Monday to Friday, so the statement
+    // itself refuses rather than relying on anyone to check first.
+    let removed = schedules
+        .delete_change(user_id, chrono::NaiveDate::from_ymd_opt(2026, 7, 1).unwrap())
+        .await
+        .expect("no error, simply nothing removed");
+    assert_eq!(removed, 0, "the starting pattern stays");
+    let rows = schedules.list_for_user(user_id).await.expect("list");
+    assert_eq!(rows.len(), 1, "the contract is still covered: {rows:?}");
+    assert_eq!(rows[0].weekdays, vec![2, 3, 4, 5], "and unchanged");
+
+    // A wrong starting pattern is corrected by writing its date again.
+    schedules
+        .set_for_user(
+            user_id,
+            chrono::NaiveDate::from_ymd_opt(2026, 7, 1).unwrap(),
+            &[1, 2, 3, 4],
+            Some(1),
+        )
+        .await
+        .expect("correct the starting pattern");
+    let rows = schedules.list_for_user(user_id).await.expect("list");
+    assert_eq!(rows.len(), 1, "correcting is not adding");
+    assert_eq!(rows[0].weekdays, vec![1, 2, 3, 4]);
 
     app.cleanup().await;
 }
@@ -2821,6 +2851,244 @@ async fn restoring_a_contract_keeps_its_working_days_covered() {
         "the pattern reaches back to the new start"
     );
     assert_eq!(rows[0].weekdays, vec![2, 3, 4, 5], "and still says Tuesday to Friday");
+
+    app.cleanup().await;
+}
+
+/// A contract can never be left with no working days recorded, however many
+/// callers try to withdraw patterns at once.
+///
+/// The guarantee is structural rather than checked: each statement refuses the
+/// row that is currently the oldest, and since that row exists by definition,
+/// at least one always survives. This hammers it concurrently rather than
+/// trusting the argument.
+#[tokio::test]
+async fn the_starting_pattern_survives_concurrent_withdrawals() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "concurrent@example.com",
+                "first_name": "Cora", "last_name": "Concurrent",
+                "role": "employee", "weekly_hours": 23.4,
+                "workdays_per_week": 4,
+                "start_date": "2026-07-01",
+                "approver_ids": [1],
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create: {body}");
+    let user_id = id(&body);
+    let schedules = app.state.db.work_schedules.clone();
+
+    // Four more dated changes on top of the starting pattern.
+    let dates: Vec<chrono::NaiveDate> = vec![
+        chrono::NaiveDate::from_ymd_opt(2026, 7, 1).unwrap(),
+        chrono::NaiveDate::from_ymd_opt(2027, 1, 4).unwrap(),
+        chrono::NaiveDate::from_ymd_opt(2027, 6, 7).unwrap(),
+        chrono::NaiveDate::from_ymd_opt(2028, 2, 7).unwrap(),
+        chrono::NaiveDate::from_ymd_opt(2028, 9, 4).unwrap(),
+    ];
+    for date in dates.iter().skip(1) {
+        schedules
+            .set_for_user(user_id, *date, &[2, 3, 4, 5], Some(1))
+            .await
+            .expect("record a change");
+    }
+    assert_eq!(schedules.list_for_user(user_id).await.expect("list").len(), 5);
+
+    // Every date withdrawn at once, including the starting pattern's own.
+    let mut handles = Vec::new();
+    for date in dates.clone() {
+        let repo = schedules.clone();
+        handles.push(tokio::spawn(async move {
+            repo.delete_change(user_id, date).await
+        }));
+    }
+    for handle in handles {
+        handle.await.expect("task").expect("withdraw");
+    }
+
+    let rows = schedules.list_for_user(user_id).await.expect("list");
+    assert_eq!(rows.len(), 1, "exactly the starting pattern is left: {rows:?}");
+    assert_eq!(
+        rows[0].valid_from,
+        chrono::NaiveDate::from_ymd_opt(2026, 7, 1).unwrap()
+    );
+
+    app.cleanup().await;
+}
+
+/// The contract's *count* of working days and the recorded *pattern* are two
+/// statements of the same fact. Changing the count has to reach the pattern, or
+/// somebody moved from five days a week to three keeps a Monday-to-Friday
+/// pattern for good — and with it a five-day target and five days of leave a
+/// week. Correcting a count must not overwrite days an admin picked by hand.
+#[tokio::test]
+async fn a_changed_contract_day_count_reaches_the_pattern() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let schedules = &app.state.db.work_schedules;
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "shrinking@example.com",
+                "first_name": "Sina", "last_name": "Schrumpf",
+                "role": "employee", "weekly_hours": 39.0,
+                "workdays_per_week": 5,
+                "start_date": "2026-01-05",
+                "approver_ids": [1],
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create: {body}");
+    let user_id = id(&body);
+    let start = chrono::NaiveDate::from_ymd_opt(2026, 1, 5).unwrap();
+
+    // Down to three days a week.
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{user_id}"),
+            &json!({"weekly_hours": 23.4, "workdays_per_week": 3}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "shrink the contract: {body}");
+
+    let rows = schedules.list_for_user(user_id).await.expect("list");
+    assert_eq!(rows.len(), 2, "the change is recorded, not applied backwards: {rows:?}");
+    assert_eq!(rows[0].valid_from, start, "the first pattern keeps its date");
+    assert_eq!(rows[0].weekdays, vec![1, 2, 3, 4, 5], "and the days it was worked under");
+    assert_eq!(rows[1].weekdays, vec![1, 2, 3], "the new pattern works three days");
+    assert!(rows[1].valid_from > start, "dated from the change, not the contract start");
+    let changed_on = rows[1].valid_from;
+
+    // The timeline agrees: the old weeks keep five days, the new ones have three.
+    let history = schedules.history_for_user(user_id, 3).await.expect("history");
+    assert_eq!(history.on(start).days_per_week(), 5, "a week already worked");
+    assert_eq!(history.on(changed_on).days_per_week(), 3, "and one after the change");
+
+    // An admin picks the days that contract really works.
+    schedules
+        .set_for_user(user_id, changed_on, &[3, 4, 5], Some(1))
+        .await
+        .expect("record the real days");
+
+    // Saving the user again without touching the count must leave them alone.
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{user_id}"),
+            &json!({"first_name": "Sina-Maria"}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "unrelated edit: {body}");
+    let rows = schedules.list_for_user(user_id).await.expect("list");
+    assert_eq!(rows.len(), 2, "no pattern was added: {rows:?}");
+    assert_eq!(
+        rows[1].weekdays,
+        vec![3, 4, 5],
+        "Wednesday to Friday survives an unrelated edit"
+    );
+
+    // And so must re-sending the same count the pattern already works.
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{user_id}"),
+            &json!({"workdays_per_week": 3}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "re-save the same count: {body}");
+    let rows = schedules.list_for_user(user_id).await.expect("list");
+    assert_eq!(
+        rows.last().expect("a pattern").weekdays,
+        vec![3, 4, 5],
+        "a count that already matches overwrites nothing"
+    );
+
+    app.cleanup().await;
+}
+
+/// Correcting a stale *count* must not throw away the days an admin picked.
+///
+/// This is the live case, not a hypothetical: somebody works Tuesday to Friday
+/// while their contract still records five days a week. An admin fixing that
+/// count to four is confirming the pattern, not replacing it. Writing the
+/// Monday-first guess over it would move their working days to Monday-Thursday
+/// and quietly give every Monday a target they do not work.
+///
+/// The count and the pattern land on the same number here, which is what tells
+/// the two apart: the alignment step runs — the count really did change — and
+/// has to decide to leave the pattern alone.
+#[tokio::test]
+async fn a_corrected_count_leaves_hand_picked_days_alone() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let schedules = &app.state.db.work_schedules;
+
+    let start = reference_date() - Duration::days(400);
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "tuefri@example.com",
+                "first_name": "Orla", "last_name": "Dienstag",
+                "role": "employee", "weekly_hours": 30.0,
+                "workdays_per_week": 5,
+                "start_date": start.format("%Y-%m-%d").to_string(),
+                "approver_ids": [1],
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create: {body}");
+    let user_id = id(&body);
+
+    // The admin records the days actually worked: Tuesday to Friday.
+    let picked_on = reference_date() - Duration::days(200);
+    schedules
+        .set_for_user(user_id, picked_on, &[2, 3, 4, 5], Some(1))
+        .await
+        .expect("record the real days");
+
+    // Only now is the stale count corrected to match.
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{user_id}"),
+            &json!({"workdays_per_week": 4}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "correct the count: {body}");
+
+    let rows = schedules.list_for_user(user_id).await.expect("list");
+    assert_eq!(
+        rows.len(),
+        2,
+        "the correction adds no pattern of its own: {rows:?}"
+    );
+    assert_eq!(
+        rows[1].weekdays,
+        vec![2, 3, 4, 5],
+        "Tuesday to Friday survives the correction"
+    );
+    assert_eq!(rows[1].valid_from, picked_on, "and keeps its date");
+
+    // A count that genuinely disagrees still reaches the pattern.
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{user_id}"),
+            &json!({"workdays_per_week": 2}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "shrink to two days: {body}");
+    let rows = schedules.list_for_user(user_id).await.expect("list");
+    assert_eq!(rows.len(), 3, "a real change is recorded: {rows:?}");
+    assert_eq!(rows[2].weekdays, vec![1, 2], "two days, Monday first");
+    assert!(
+        rows[2].valid_from > picked_on,
+        "dated from the change, leaving the weeks already worked alone"
+    );
 
     app.cleanup().await;
 }

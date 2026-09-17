@@ -233,6 +233,23 @@ pub async fn create_initial_admin(
     // transaction guarantees a first administrator can never exist without
     // the leave-account rows that were already configured for the instance.
     UserDb::seed_leave_accounts_for_user_tx(&mut transaction, new_user_id, "admin").await?;
+    // Which weekdays they work, for the same reason. This account is created
+    // before any other and outside `services::users::create`, and migration
+    // 048's backfill ran against an empty roster, so nothing else would ever
+    // give it a pattern: on every new installation the one account that runs
+    // the place would be the one account whose working days are a guess.
+    // `create_initial_admin` stores a five-day contract, which is Monday to
+    // Friday.
+    if tracks_time {
+        crate::repository::WorkScheduleDb::set_for_user_tx(
+            &mut transaction,
+            new_user_id,
+            today,
+            &crate::repository::WorkScheduleDb::default_weekdays(5),
+            Some(new_user_id),
+        )
+        .await?;
+    }
     transaction.commit().await?;
     Ok(())
 }

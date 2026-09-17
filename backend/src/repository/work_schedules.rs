@@ -6,7 +6,7 @@
 //! working days would silently re-judge every week already worked.
 
 use crate::db::DatabasePool;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::time_calc::{WorkSchedule, WorkScheduleHistory};
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
@@ -49,27 +49,31 @@ impl WorkScheduleDb {
     /// The timeline one person's calculations run against.
     ///
     /// `fallback_days_per_week` answers for dates no recorded pattern reaches,
-    /// and for people who have none at all — the assistants, who have no work
-    /// target to place. It is the old stored count, so those users keep exactly
-    /// the behaviour they have today.
+    /// and for people who have none at all — the assistants and the irregular
+    /// contracts, which have no work target to place. It is the old stored
+    /// count, and a count is a quota rather than a set of days, so those users
+    /// keep exactly the behaviour they have today: see
+    /// [`WorkSchedule::weekly_leave_cap`], which is what makes that true rather
+    /// than merely intended.
     pub async fn history_for_user(
         &self,
         user_id: i64,
         fallback_days_per_week: i16,
     ) -> AppResult<WorkScheduleHistory> {
         let rows = self.list_for_user(user_id).await?;
-        Ok(Self::history_from_rows(
-            &rows,
-            fallback_days_per_week,
-        ))
+        Ok(Self::history_from_rows(&rows, fallback_days_per_week))
     }
 
     /// Build a timeline from already-loaded rows, so a caller that fetched many
     /// people's patterns at once does not go back to the database per person.
     ///
-    /// A row whose stored weekdays are all outside Monday to Friday cannot form
-    /// a schedule and is skipped; the database refuses to store one, so this is
-    /// only reachable through a direct edit.
+    /// A row carrying anything that is not a weekday cannot form a schedule and
+    /// is skipped whole — one bad value refuses the row rather than being
+    /// dropped out of it, for the same reason [`WorkSchedule::fixed`] refuses
+    /// one: reading `[-1, 1]` as "Mondays only" would quietly hand somebody a
+    /// one-day contract. Skipping falls back to their recorded day count, which
+    /// at least still says how many days they work. The database refuses such a
+    /// row, so this is only reachable through a direct edit.
     pub fn history_from_rows(
         rows: &[WorkWeekdays],
         fallback_days_per_week: i16,
@@ -77,18 +81,40 @@ impl WorkScheduleDb {
         let entries = rows
             .iter()
             .filter_map(|row| {
-                let days: Vec<u8> = row
-                    .weekdays
-                    .iter()
-                    .filter_map(|day| u8::try_from(*day).ok())
-                    .collect();
-                WorkSchedule::fixed(&days).map(|schedule| (row.valid_from, schedule))
+                let days: Option<Vec<u8>> =
+                    row.weekdays.iter().map(|day| u8::try_from(*day).ok()).collect();
+                days.as_deref()
+                    .and_then(WorkSchedule::fixed)
+                    .map(|schedule| (row.valid_from, schedule))
             })
             .collect();
         WorkScheduleHistory::new(
             entries,
             WorkSchedule::without_fixed_days(fallback_days_per_week),
         )
+    }
+
+    /// Sort, de-duplicate and check a pattern before it is stored.
+    ///
+    /// The table's CHECK constraint says the same thing, but reaching it turns
+    /// a plain mistake into a 500, and it cannot reject duplicates at all
+    /// because a CHECK may not contain a subquery. Every write goes through
+    /// here, so a stored pattern is always a sorted set of Monday to Friday.
+    fn normalised_weekdays(weekdays: &[i16]) -> AppResult<Vec<i16>> {
+        let mut normalised: Vec<i16> = weekdays.to_vec();
+        normalised.sort_unstable();
+        normalised.dedup();
+        if normalised.is_empty() {
+            return Err(AppError::BadRequest(
+                "Working days must name at least one weekday.".into(),
+            ));
+        }
+        if normalised.iter().any(|day| !(1..=5).contains(day)) {
+            return Err(AppError::BadRequest(
+                "Working days must be weekdays, Monday (1) to Friday (5).".into(),
+            ));
+        }
+        Ok(normalised)
     }
 
     /// Record the weekdays a person works from `valid_from` on.
@@ -98,9 +124,7 @@ impl WorkScheduleDb {
     /// real change means passing the date it takes effect, which leaves every
     /// earlier pattern — and so every week already worked — untouched.
     ///
-    /// Weekdays are sorted and de-duplicated here: the stored value is read as
-    /// a set, and a CHECK constraint cannot reject duplicates because it may
-    /// not contain a subquery.
+    /// Weekdays are normalised by [`Self::normalised_weekdays`] on the way in.
     pub async fn set_for_user(
         &self,
         user_id: i64,
@@ -108,9 +132,7 @@ impl WorkScheduleDb {
         weekdays: &[i16],
         created_by: Option<i64>,
     ) -> AppResult<WorkWeekdays> {
-        let mut normalised: Vec<i16> = weekdays.to_vec();
-        normalised.sort_unstable();
-        normalised.dedup();
+        let normalised = Self::normalised_weekdays(weekdays)?;
         Ok(sqlx::query_as::<_, WorkWeekdays>(
             "INSERT INTO user_work_weekdays (user_id, valid_from, weekdays, created_by) \
              VALUES ($1, $2, $3, $4) \
@@ -138,9 +160,7 @@ impl WorkScheduleDb {
         weekdays: &[i16],
         created_by: Option<i64>,
     ) -> AppResult<()> {
-        let mut normalised: Vec<i16> = weekdays.to_vec();
-        normalised.sort_unstable();
-        normalised.dedup();
+        let normalised = Self::normalised_weekdays(weekdays)?;
         sqlx::query(
             "INSERT INTO user_work_weekdays (user_id, valid_from, weekdays, created_by) \
              VALUES ($1, $2, $3, $4) \
@@ -170,9 +190,7 @@ impl WorkScheduleDb {
         weekdays: &[i16],
         created_by: Option<i64>,
     ) -> AppResult<bool> {
-        let mut normalised: Vec<i16> = weekdays.to_vec();
-        normalised.sort_unstable();
-        normalised.dedup();
+        let normalised = Self::normalised_weekdays(weekdays)?;
         let rows = sqlx::query(
             "INSERT INTO user_work_weekdays (user_id, valid_from, weekdays, created_by) \
              SELECT $1, $2, $3, $4 \
@@ -223,20 +241,84 @@ impl WorkScheduleDb {
     /// roster, and it is wrong for anybody whose week does not start on Monday.
     /// An admin corrects it; until they do, the person is charged and credited
     /// on Monday-first days.
+    ///
+    /// Only 1 to 5 ever reaches here: that is the range the user endpoints
+    /// accept, and the one contract that carries 7 — an assistant's sentinel —
+    /// never gets a pattern at all. The clamp is a floor and a ceiling for a
+    /// value that should not arrive, not support for a six- or seven-day week:
+    /// no such pattern can be stored, so a six-day contract cannot be expressed
+    /// here and must keep its recorded day count instead.
     pub fn default_weekdays(workdays_per_week: i16) -> Vec<i16> {
         (1..=workdays_per_week.clamp(1, 5)).collect()
     }
 
-    /// Remove one dated pattern. Used to undo a mistaken entry; a genuine
-    /// change of working days adds a row instead.
-    pub async fn delete(&self, user_id: i64, valid_from: NaiveDate) -> AppResult<u64> {
-        Ok(
-            sqlx::query("DELETE FROM user_work_weekdays WHERE user_id = $1 AND valid_from = $2")
-                .bind(user_id)
-                .bind(valid_from)
-                .execute(&self.pool)
-                .await?
-                .rows_affected(),
+    /// Bring the recorded pattern in line with a changed *number* of working
+    /// days, from `effective_from` on. Returns true when a row was written.
+    ///
+    /// The admin screen sets a count, not a set of days, and that count and the
+    /// pattern are two statements of the same fact. Left alone they drift: an
+    /// employee moved from five days a week to three kept a Monday-to-Friday
+    /// pattern, so every calculation went on giving them a five-day target and
+    /// charging them five days of leave a week.
+    ///
+    /// Dated from the day the change is made, never backwards: the weeks
+    /// already worked keep the pattern they were worked under, which is the
+    /// whole reason this is a history.
+    ///
+    /// A pattern that already works that many days is left exactly as it is. An
+    /// admin re-saving a contract, or correcting a stale count, must not
+    /// overwrite weekdays somebody picked by hand with the Monday-first guess.
+    pub async fn align_day_count_tx(
+        tx: &mut sqlx::PgConnection,
+        user_id: i64,
+        effective_from: NaiveDate,
+        workdays_per_week: i16,
+        created_by: Option<i64>,
+    ) -> AppResult<bool> {
+        let in_force: Option<Vec<i16>> = sqlx::query_scalar(
+            "SELECT weekdays FROM user_work_weekdays \
+             WHERE user_id = $1 AND valid_from <= $2 \
+             ORDER BY valid_from DESC, id DESC LIMIT 1",
         )
+        .bind(user_id)
+        .bind(effective_from)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let wanted = Self::default_weekdays(workdays_per_week);
+        if in_force.is_some_and(|days| days.len() == wanted.len()) {
+            return Ok(false);
+        }
+        Self::set_for_user_tx(tx, user_id, effective_from, &wanted, created_by).await?;
+        Ok(true)
+    }
+
+    /// Withdraw a later change of working days.
+    ///
+    /// The oldest row is the contract's starting pattern and this can never
+    /// remove it. That is a property of the statement itself rather than a
+    /// check a caller has to remember: leaving somebody with no working days
+    /// recorded would send every calculation for them back to the old spread
+    /// over Monday to Friday, silently and for that person alone, and no
+    /// caller — present or future — can reach that state through here.
+    ///
+    /// A wrong starting pattern is corrected by writing the same date again,
+    /// which replaces it. That is the operation an admin fixing a typo wants,
+    /// and it keeps the contract covered throughout.
+    ///
+    /// Returns how many rows went, so a caller can tell a withdrawn change from
+    /// an attempt on the starting pattern.
+    pub async fn delete_change(&self, user_id: i64, valid_from: NaiveDate) -> AppResult<u64> {
+        Ok(sqlx::query(
+            "DELETE FROM user_work_weekdays \
+             WHERE user_id = $1 AND valid_from = $2 \
+               AND valid_from > ( \
+                   SELECT MIN(valid_from) FROM user_work_weekdays WHERE user_id = $1 \
+               )",
+        )
+        .bind(user_id)
+        .bind(valid_from)
+        .execute(&self.pool)
+        .await?
+        .rows_affected())
     }
 }

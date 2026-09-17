@@ -536,6 +536,91 @@ async fn setup_success_creates_admin_on_empty_database() {
     app.cleanup().await;
 }
 
+/// The first administrator is created before any other user and outside the
+/// regular user path, and migration 048's backfill ran against an empty roster.
+/// Without a pattern written here, the one account that runs a new installation
+/// would be the one account whose working days are a guess.
+#[tokio::test]
+async fn the_first_administrator_gets_a_pattern_of_working_days() {
+    let (app, _) = TestApp::spawn_unseeded().await;
+    let anon = app.client();
+
+    let (st, body) = anon
+        .post(
+            "/api/v1/auth/setup",
+            &json!({
+                "email": "boss@example.com",
+                "password": "SecureAdmin!234",
+                "first_name": "Berta",
+                "last_name": "Boss",
+                "tracks_time": true
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "setup: {body}");
+
+    let admin_id: i64 = sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
+        .bind("boss@example.com")
+        .fetch_one(&app.state.pool)
+        .await
+        .expect("the new admin");
+    let rows = app
+        .state
+        .db
+        .work_schedules
+        .list_for_user(admin_id)
+        .await
+        .expect("list");
+    assert_eq!(rows.len(), 1, "the first admin has a pattern: {rows:?}");
+    assert_eq!(
+        rows[0].weekdays,
+        vec![1, 2, 3, 4, 5],
+        "a five-day contract is Monday to Friday"
+    );
+
+    app.cleanup().await;
+}
+
+/// An administrator who does not track time has no work target, so there is
+/// nothing for a pattern of working days to decide.
+#[tokio::test]
+async fn a_first_administrator_without_time_tracking_gets_none() {
+    let (app, _) = TestApp::spawn_unseeded().await;
+    let anon = app.client();
+
+    let (st, body) = anon
+        .post(
+            "/api/v1/auth/setup",
+            &json!({
+                "email": "pure@example.com",
+                "password": "SecureAdmin!234",
+                "first_name": "Paula",
+                "last_name": "Pur",
+                "tracks_time": false
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "setup: {body}");
+
+    let admin_id: i64 = sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
+        .bind("pure@example.com")
+        .fetch_one(&app.state.pool)
+        .await
+        .expect("the new admin");
+    assert!(
+        app.state
+            .db
+            .work_schedules
+            .list_for_user(admin_id)
+            .await
+            .expect("list")
+            .is_empty(),
+        "no time tracking, no pattern"
+    );
+
+    app.cleanup().await;
+}
+
 /// Exercises the input-validation branches of `services::auth::create_initial_admin`.
 ///
 /// The validation runs BEFORE the DB is consulted for all but the last case, so
