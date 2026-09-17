@@ -83,7 +83,7 @@ Additional modules:
 
 **Sub-repositories** (fields on `repository::Db`):
 
-`sessions`, `users`, `time_entries`, `flextime_adjustments`, `absences`, `reopen_requests`, `categories`, `holidays`, `notifications`, `audit`, `settings`, `reports`, `export_queue`, `payroll_queue`, `error_queue`, `email_queue`
+`sessions`, `users`, `time_entries`, `flextime_adjustments`, `absences`, `reopen_requests`, `categories`, `holidays`, `notifications`, `audit`, `settings`, `reports`, `export_queue`, `payroll_queue`, `error_queue`, `email_queue`, `work_schedules`
 
 **Access patterns in services:**
 
@@ -225,38 +225,86 @@ while the leave account is charged per calendar workday capped at
 contract the same three leave days buy a whole week off when booked Monday to
 Friday and 60% of a week when booked Monday to Wednesday. Booking the days
 somebody actually works costs them the leave days *and* leaves them nearly ten
-hours short for the week. The year boundary is where this first became
-visible, but it is not the cause.
+hours short for the week. The root cause is that `workdays_per_week` only ever
+said *how many* days somebody works, never *which*, so every calculation had to
+guess and the guesses disagreed with each other.
 
-`time_calc::week_leave_accounting`, `counted_leave_days` and
-`contract_day_minutes` implement the replacement rule: a leave day is worth
-`weekly_hours / workdays_per_week` and removes exactly that much target, a week
-is accounted for whole (so a week split by a year or month boundary is charged
-once, not once per side), and a public holiday saves a leave day only where a
-booked day falls on it. A holiday elsewhere in the week grants no discount on
-the days that are booked, because the contract does not pin which weekdays are
-worked and a holiday the person may never have worked cannot be assumed to have
-spared them one. For the *target* a holiday still counts as a day not worked,
-like any other, since that is what a contract day is worth under this rule.
-Days before the contract's start date are not part of the week for that
-employee at all: they shrink the week's baseline rather than being subtracted
-from it, because doing both takes them off twice and read a new starter's first
-week as 141 minutes where the app asks for 843.
-**Nothing calls them yet** — they carry the rule and its worked examples so it can be
-reviewed before any running calculation moves. A week nobody was away in must
-come out byte-identical on every contract, which is why the untouched week
-keeps today's arithmetic (the potential pool times the potential day) and only
-the days actually lost are priced as contract days: pricing the whole week in
-contract days moved a 23.4-hour contract by one minute and a 31.2-hour contract
-by two minutes a week, in weeks where nothing had happened.
+**Fixed working weekdays are the replacement rule.** `user_work_weekdays`
+(migration 048) records which weekdays a contract places work on, and
+`time_calc::WorkSchedule`, `WorkScheduleHistory`, `scheduled_leave_days`,
+`scheduled_target_min` and `scheduled_week_target_min` implement the rule: a
+working day carries `weekly_hours / <days actually worked>` and one covered by
+an absence costs one leave day; a day that is not a working day carries nothing,
+costs nothing, and makes hours booked on it pure overtime; a public holiday
+costs the day's target and no leave. **Nothing calls them yet** — they carry the
+rule and its worked examples so it can be reviewed before any running
+calculation moves.
 
-One duty falls on whoever wires this up. `counted_leave_days` prices whole
-weeks, so it must be handed **every** absence touching the weeks at the
-window's edges, not only those overlapping the window. A year- or month-scoped
-query returns just what overlaps its own period; two bookings on one account
-either side of a boundary, inside one calendar week, then reach each window
-alone and each window charges that week by itself — four days for a three-day
-week, which is the double charge this is meant to remove. A test pins it.
+With the days known there is no weekly quota and no whole-week arithmetic left:
+a week cannot hold more of a contract's working days than the contract has, so
+a week split by a month or year boundary is charged correctly with no special
+handling — each day simply belongs to the period it falls in. That is why
+`scheduled_target_min` takes a **range**, not a week. Summing whole weeks to
+build a month puts the week straddling the month's end into both months, which
+is the double count the per-day rule exists to remove;
+`scheduled_week_target_min` is seven days of the same function and is for
+week-level questions only.
+
+The pattern is a **dated history**, not one stored value. Zerf recomputes every
+flextime and leave figure on each query, so a single pattern would be applied to
+the whole past as well and the day somebody's working days change, every week
+they ever worked would be silently re-judged. Each row says "from this date on,
+these are the working days"; a change adds a row and never edits one, and every
+day asks the timeline for the pattern in force on *that day* — not once per
+window, or a window spanning a change would judge part of it under a schedule
+that was not in force. A pattern beginning mid-week therefore splits that week
+honestly, and such a week can come to more or less than `weekly_hours`, which is
+the truthful answer when the number of working days changed partway through it.
+
+**Every contract with a work target must have a pattern**, or it falls back to
+the old count silently and for that person alone. Five paths write one:
+migration 048's backfill (the roster that existed when it ran),
+`services::users::create`, `services::auth::setup` (the bootstrap admin, created
+before any other user and outside the regular path), `services::users::restore`
+and `handlers::users::update` — the last two through `ensure_for_user_tx` plus
+`extend_earliest_to_tx`, which pulls the oldest pattern back when a contract
+start moves earlier so no employed day is left uncovered. `update` additionally
+calls `align_day_count_tx` when `workdays_per_week` itself changes: the count
+and the pattern are two statements of the same fact, and without it somebody
+moved from five days a week to three kept a Monday-to-Friday pattern for good.
+That alignment is dated from the day the change is made, never from the contract
+start, and it leaves a pattern that already works that many days untouched so an
+admin's hand-picked weekdays survive an unrelated save.
+
+Assistants and irregular contracts get no pattern, and their fallback has to
+keep reading exactly as the app reads today. `WorkSchedule::weekly_leave_cap` is
+what makes that true rather than merely intended: a recorded pattern needs no
+cap, but a bare day *count* is a quota, so it stays a quota — without it a
+three-day contract with no pattern was charged five days for one week away. An
+irregular contract (`workdays_per_week` of zero) has no weekday pool at all: it
+carries no target, yet every calendar day of an absence is charged to it, so
+`covers` answers true for all seven days while `days_per_week` answers zero. The
+two questions genuinely have different answers there, and reading the empty pool
+literally made all of that person's leave free.
+
+That quota carries `counted_workdays`' caller rule with it, so the rule has not
+gone away for everybody. A quota is counted per week *within one call*, so
+splitting a span into two calls — "taken up to today" plus "upcoming from
+tomorrow", or the halves either side of a carryover expiry — gives the week
+straddling the split a fresh quota in each and bills it twice. Ask for the whole
+span at once and cut the returned days into buckets afterwards. A contract whose
+weekdays are recorded has no quota and is immune to it.
+
+`WorkScheduleDb::delete_change` withdraws a later change and can never remove
+the oldest row, as a property of the statement rather than a check a caller has
+to remember: a contract left with no pattern at all would silently fall back for
+that person alone. A wrong starting pattern is corrected by writing the same
+date again, which replaces it and keeps the contract covered throughout.
+
+A weekday outside Monday to Friday refuses the **whole** pattern rather than
+being dropped from it (`WorkSchedule::fixed`, `WorkScheduleDb` normalisation):
+reading `[1, 6]` as "Mondays only" would quietly hand somebody a one-day
+contract and charge them four days of leave a week they never owed.
 
 Auto-break tiers are compared in **whole minutes** (`exclusive_threshold_minutes`)
 everywhere they are compared at all: the settings endpoint refuses a second
@@ -573,6 +621,7 @@ sends a real message and must not be blocked by unrelated breaker state.
 | `password_reset_tokens` | One-time hashed tokens (1h expiry) |
 | `user_leave_accounts` | Per-user base entitlement for each leave-account absence category |
 | `user_leave_account_year_overrides` | Per-user leave-account entitlement overrides by year |
+| `user_work_weekdays` | Dated history of which weekdays a contract places work on |
 
 Notable constraints: non-admin users must have an approver; users cannot approve themselves; vacation range <= 1 year; time entry end_time >= start_time; at most one `opening_balance` row and at most one reversal per row in `flextime_adjustments`.
 
