@@ -34,6 +34,7 @@ const baseUser = {
   role: "employee",
   weekly_hours: 40,
   workdays_per_week: 5,
+  work_weekdays: [1, 2, 3, 4, 5],
   start_date: "2022-01-01",
   must_change_password: false,
   dark_mode: false,
@@ -219,5 +220,26 @@ describe("Account", () => {
     component = mount(Account, { target });
     await settle();
     expect(target.textContent).toContain("Dark mode");
+  });
+
+  it("names the weekdays this contract works, rather than counting them", async () => {
+    // A bare "4" does not tell somebody which four days carry target hours,
+    // cost a leave day when taken off, or turn booked time into overtime.
+    currentUser.set({ ...baseUser, work_weekdays: [2, 3, 4, 5] });
+    component = mount(Account, { target });
+    await settle();
+
+    const field = target.querySelector("#account-working-days");
+    expect(field).not.toBeNull();
+    expect(field.value).toBe("Tuesday, Wednesday, Thursday, Friday");
+  });
+
+  it("shows nothing where no working days are recorded", async () => {
+    // Assistants and accounts that do not track time have none.
+    currentUser.set({ ...baseUser, work_weekdays: [] });
+    component = mount(Account, { target });
+    await settle();
+
+    expect(target.querySelector("#account-working-days")?.value).toBe("");
   });
 });

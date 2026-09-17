@@ -11,7 +11,6 @@ import {
   userFullName,
   userInitials,
   userNameFromRows,
-  userWorkdaysPerWeek,
 } from "./users.js";
 
 describe("users domain helpers", () => {
@@ -178,16 +177,5 @@ describe("users domain helpers", () => {
     sortUsersByRoleThenName(original);
     expect(original).toEqual(copy);
     expect(sortUsersByRoleThenName(null)).toEqual([]);
-  });
-
-  it("userWorkdaysPerWeek returns the user's configured value", () => {
-    expect(userWorkdaysPerWeek({ workdays_per_week: 4 })).toBe(4);
-  });
-
-  it("userWorkdaysPerWeek returns the fallback for invalid values", () => {
-    // Guards against corrupted or missing workdays data in legacy records.
-    expect(userWorkdaysPerWeek({ workdays_per_week: 0 })).toBe(5);
-    expect(userWorkdaysPerWeek({ workdays_per_week: 8 })).toBe(5);
-    expect(userWorkdaysPerWeek(null)).toBe(5);
   });
 });

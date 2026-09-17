@@ -113,8 +113,3 @@ export function compareTeamUserRows(a, b) {
   const manageDiff = (a?.can_manage ? 1 : 0) - (b?.can_manage ? 1 : 0);
   return manageDiff || compareUsersByName(a, b);
 }
-
-export function userWorkdaysPerWeek(user, fallback = 5) {
-  const value = Number(user?.workdays_per_week);
-  return Number.isFinite(value) && value >= 1 && value <= 7 ? value : fallback;
-}
