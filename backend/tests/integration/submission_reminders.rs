@@ -870,7 +870,6 @@ async fn the_straddling_week_is_only_asked_for_from_its_friday() {
                 december.0,
                 december.1,
                 start_date,
-                5,
                 today,
             )
             .await

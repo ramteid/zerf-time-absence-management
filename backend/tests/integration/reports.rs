@@ -695,7 +695,6 @@ async fn report_export_gate_waits_for_pending_absence_decision() {
         day,
         user_start_date,
         false,
-        1,
     )
     .await
     .expect("check user-facing completeness while absence pending");
@@ -727,7 +726,6 @@ async fn report_export_gate_waits_for_pending_absence_decision() {
         day,
         user_start_date,
         false,
-        1,
     )
     .await
     .expect("check export gate while absence pending");
@@ -750,7 +748,6 @@ async fn report_export_gate_waits_for_pending_absence_decision() {
         day,
         user_start_date,
         false,
-        1,
     )
     .await
     .expect("check export gate after absence rejection");
@@ -814,7 +811,6 @@ async fn report_export_gate_ignores_pending_absence_outside_export_month() {
         month_end,
         user_start_date,
         false,
-        5,
     )
     .await
     .expect("check export gate with adjacent pending absence");
