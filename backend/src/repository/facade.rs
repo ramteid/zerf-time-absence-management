@@ -1,3 +1,4 @@
+use super::work_schedules::WorkScheduleDb;
 use super::{
     AbsenceCategoryDb, AbsenceDb, AppLogDb, AuditDb, CategoryDb, EmailQueueDb,
     ErrorNotificationQueueDb, FlextimeAdjustmentDb, HolidayDb, NotificationBroadcaster,
@@ -13,6 +14,7 @@ use crate::db::DatabasePool;
 pub struct Db {
     pub sessions: SessionDb,
     pub users: UserDb,
+    pub work_schedules: WorkScheduleDb,
     pub time_entries: TimeEntryDb,
     pub absences: AbsenceDb,
     pub absence_categories: AbsenceCategoryDb,
@@ -36,6 +38,7 @@ impl Db {
         Db {
             sessions: SessionDb::new(pool.clone()),
             users: UserDb::new(pool.clone()),
+            work_schedules: WorkScheduleDb::new(pool.clone()),
             time_entries: TimeEntryDb::new(pool.clone()),
             absences: AbsenceDb::new(pool.clone()),
             absence_categories: AbsenceCategoryDb::new(pool.clone()),

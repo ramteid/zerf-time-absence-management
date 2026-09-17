@@ -2562,3 +2562,111 @@ async fn categories_repository_workflow() {
 
     app.cleanup().await;
 }
+
+/// The dated working-weekday history: what the database keeps, what it refuses,
+/// and the property the whole design exists for — recording a later change must
+/// leave every earlier week reading exactly as it did.
+#[tokio::test]
+async fn work_schedule_history_repository_workflow() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "schedule@example.com",
+                "first_name": "Wanda", "last_name": "Woche",
+                "role": "employee", "weekly_hours": 23.4,
+                "workdays_per_week": 4,
+                "start_date": "2026-07-01",
+                "approver_ids": [1],
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create user: {body}");
+    let user_id = id(&body);
+    let schedules = &app.state.db.work_schedules;
+
+    // Migration 048 backfills a starting pattern for everyone with a target.
+    let rows = schedules.list_for_user(user_id).await.expect("list");
+    assert_eq!(rows.len(), 1, "one starting pattern: {rows:?}");
+    assert_eq!(rows[0].valid_from, chrono::NaiveDate::from_ymd_opt(2026, 7, 1).unwrap());
+    assert_eq!(rows[0].weekdays, vec![1, 2, 3, 4], "the first four weekdays");
+
+    // Correcting a guessed pattern replaces that date's row rather than adding
+    // a second one, because nothing about the person's schedule changed.
+    schedules
+        .set_for_user(
+            user_id,
+            chrono::NaiveDate::from_ymd_opt(2026, 7, 1).unwrap(),
+            &[5, 3, 2, 4, 4],
+            Some(1),
+        )
+        .await
+        .expect("correct the pattern");
+    let rows = schedules.list_for_user(user_id).await.expect("list");
+    assert_eq!(rows.len(), 1, "a correction does not add a row");
+    assert_eq!(
+        rows[0].weekdays,
+        vec![2, 3, 4, 5],
+        "sorted and de-duplicated on write"
+    );
+
+    // A real change carries the date it takes effect.
+    schedules
+        .set_for_user(
+            user_id,
+            chrono::NaiveDate::from_ymd_opt(2027, 3, 1).unwrap(),
+            &[1, 2, 3, 4],
+            Some(1),
+        )
+        .await
+        .expect("record a change");
+    let rows = schedules.list_for_user(user_id).await.expect("list");
+    assert_eq!(rows.len(), 2, "the earlier pattern stays on the record");
+
+    // And the timeline answers each week with the pattern it was worked under.
+    let history = schedules
+        .history_for_user(user_id, 4)
+        .await
+        .expect("history");
+    let before = history.on(chrono::NaiveDate::from_ymd_opt(2027, 1, 4).unwrap());
+    let after = history.on(chrono::NaiveDate::from_ymd_opt(2027, 3, 1).unwrap());
+    assert!(!before.covers(chrono::NaiveDate::from_ymd_opt(2027, 1, 4).unwrap()), "Monday was not worked before the change");
+    assert!(after.covers(chrono::NaiveDate::from_ymd_opt(2027, 3, 1).unwrap()), "Monday is worked after it");
+
+    // A person with no recorded pattern falls back to the old count.
+    let assistant_history = schedules.history_for_user(9_999_999, 7).await.expect("history");
+    assert!(assistant_history.is_empty());
+    assert!(!assistant_history
+        .on(chrono::NaiveDate::from_ymd_opt(2026, 7, 1).unwrap())
+        .has_fixed_days());
+
+    // What the database refuses.
+    for (label, days) in [
+        ("leer", vec![]),
+        ("Samstag", vec![6i16]),
+        ("Sonntag", vec![7i16]),
+        ("Null", vec![0i16]),
+    ] {
+        let result = schedules
+            .set_for_user(
+                user_id,
+                chrono::NaiveDate::from_ymd_opt(2028, 1, 3).unwrap(),
+                &days,
+                None,
+            )
+            .await;
+        assert!(result.is_err(), "{label} muss abgelehnt werden");
+    }
+
+    // Deleting removes one dated entry and leaves the rest.
+    let removed = schedules
+        .delete(user_id, chrono::NaiveDate::from_ymd_opt(2027, 3, 1).unwrap())
+        .await
+        .expect("delete");
+    assert_eq!(removed, 1);
+    assert_eq!(schedules.list_for_user(user_id).await.expect("list").len(), 1);
+
+    app.cleanup().await;
+}

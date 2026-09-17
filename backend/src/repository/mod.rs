@@ -18,6 +18,7 @@ pub mod system_metadata;
 pub mod time_entries;
 pub mod timesheet_export_queue;
 pub mod users;
+pub mod work_schedules;
 
 pub use absence_categories::{AbsenceCategory, AbsenceCategoryDb};
 pub use absences::{
@@ -48,6 +49,7 @@ pub use time_entries::{
     NewEntryData, PayrollCarryScope, PayrollEntrySnapshot, TimeEntry, TimeEntryDb,
 };
 pub use timesheet_export_queue::{ExportQueueEntry, TimesheetExportQueueDb};
+pub use work_schedules::{WorkScheduleDb, WorkWeekdays};
 pub use users::{
     ActiveUserRow, LeaveAccountDefinition, User, UserDb, UserLeaveAccountDetails,
     UserLeaveAccountInput,
