@@ -609,6 +609,36 @@ pub async fn update(
         user_unique_conflict(&e)
             .unwrap_or_else(|| AppError::Conflict("Could not update user.".into()))
     })?;
+
+    // Keep the record of which weekdays this person works in step with the
+    // change just made. Two paths reach here with a work target and no pattern:
+    // time tracking switched on for an admin account, and an assistant promoted
+    // to a role that has one. Without a pattern every calculation for that
+    // person falls back to the old spread over Monday to Friday, silently and
+    // for them alone.
+    let now_has_work_target = effective_tracks_time.unwrap_or(previous_user.tracks_time)
+        && !crate::roles::is_assistant_role(&effective_role);
+    let start_date_now = effective_start_date.unwrap_or(previous_user.start_date);
+    if now_has_work_target {
+        crate::repository::WorkScheduleDb::ensure_for_user_tx(
+            &mut transaction,
+            user_id,
+            start_date_now,
+            &crate::repository::WorkScheduleDb::default_weekdays(
+                effective_workdays_update.unwrap_or(previous_user.workdays_per_week),
+            ),
+            Some(requester.id),
+        )
+        .await?;
+        // A contract start moved earlier would otherwise leave the days between
+        // the new start and the oldest pattern with no pattern at all.
+        crate::repository::WorkScheduleDb::extend_earliest_to_tx(
+            &mut transaction,
+            user_id,
+            start_date_now,
+        )
+        .await?;
+    }
     crate::services::users::seed_leave_accounts_for_user_tx(
         &mut transaction,
         user_id,

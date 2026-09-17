@@ -156,6 +156,65 @@ impl WorkScheduleDb {
         Ok(())
     }
 
+    /// Give a person a starting pattern if they have none at all.
+    ///
+    /// Returns true when one was written. Somebody can gain a work target after
+    /// they were created — time tracking switched on for an admin account, an
+    /// assistant promoted to employee — and both arrive here with no pattern.
+    /// Without one every calculation falls back to the old spread over Monday
+    /// to Friday, silently and for that person alone.
+    pub async fn ensure_for_user_tx(
+        tx: &mut sqlx::PgConnection,
+        user_id: i64,
+        valid_from: NaiveDate,
+        weekdays: &[i16],
+        created_by: Option<i64>,
+    ) -> AppResult<bool> {
+        let mut normalised: Vec<i16> = weekdays.to_vec();
+        normalised.sort_unstable();
+        normalised.dedup();
+        let rows = sqlx::query(
+            "INSERT INTO user_work_weekdays (user_id, valid_from, weekdays, created_by) \
+             SELECT $1, $2, $3, $4 \
+             WHERE NOT EXISTS (SELECT 1 FROM user_work_weekdays WHERE user_id = $1)",
+        )
+        .bind(user_id)
+        .bind(valid_from)
+        .bind(&normalised)
+        .bind(created_by)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        Ok(rows > 0)
+    }
+
+    /// Pull the oldest pattern back to `new_start` when a contract start moves
+    /// earlier, so no employed day is left without one.
+    ///
+    /// This extends the first pattern backwards rather than recording a change:
+    /// the days it now covers were never worked under anything else, so nothing
+    /// about the past is being rewritten. A start date moving *later* needs
+    /// nothing — the pattern simply covers more than it has to, and days before
+    /// the contract began carry no target anyway.
+    pub async fn extend_earliest_to_tx(
+        tx: &mut sqlx::PgConnection,
+        user_id: i64,
+        new_start: NaiveDate,
+    ) -> AppResult<u64> {
+        Ok(sqlx::query(
+            "UPDATE user_work_weekdays SET valid_from = $2 \
+             WHERE id = ( \
+                 SELECT id FROM user_work_weekdays \
+                 WHERE user_id = $1 ORDER BY valid_from, id LIMIT 1 \
+             ) AND valid_from > $2",
+        )
+        .bind(user_id)
+        .bind(new_start)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected())
+    }
+
     /// The weekdays a contract of `workdays_per_week` days defaults to: Monday
     /// onwards, capped at Friday.
     ///
