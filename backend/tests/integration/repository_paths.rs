@@ -1245,21 +1245,25 @@ async fn absences_repository_workflow() {
     let sick_cat = absence_cat(&app.state.pool, "sick").await;
     let special_cat = absence_cat(&app.state.pool, "special_leave").await;
 
-    assert_eq!(
-        absences
-            .user_workdays_per_week(emp_id)
-            .await
-            .expect("user workdays"),
-        5
-    );
     let holidays = absences
         .holidays_set(monday, friday)
         .await
         .expect("holiday set");
-    let expected_workdays = (5 - holidays.len() as i32).max(0) as f64;
+    // Through the app's own leave calendar, not a second count written here:
+    // this contract works Monday to Friday, so the week costs five days less
+    // whatever public holidays fall in it.
     assert_eq!(
-        zerf::time_calc::count_workdays(monday, friday, &holidays, 5),
-        expected_workdays
+        zerf::services::absence_balance::counted_workdays_for_user(
+            &app.state.pool,
+            emp_id,
+            &[(monday, friday)],
+            monday,
+            friday,
+        )
+        .await
+        .expect("the leave days of that week")
+        .len() as i32,
+        (5 - holidays.len() as i32).max(0)
     );
 
     let requested = absences

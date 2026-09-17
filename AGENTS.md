@@ -164,29 +164,32 @@ to Friday who takes their whole week off is not chased for the bare Monday
 they never work. Judging against the whole Monday-to-Friday pool is exactly
 what used to chase them.
 
-The old count-based calendar below still answers for contracts with no
-recorded pattern. `time_calc::counted_workdays` is the single
-implementation of that calendar, and it returns the *days*, not just their
-number, because the cap has to be applied once across the whole window and the
-buckets cut out of the result afterwards. Counting two narrower windows applies
-the cap to each: "taken up to today" plus "upcoming from tomorrow", or the
-halves either side of a carryover expiry, billed one straddling week twice over.
-Everything else — `count_workdays`, `workdays_for_ranges_in_window*`, the leave
-tiles, the team report's taken/planned columns, the carryover chain and the
-leave-account budget check — goes through it. A proposed absence is priced as
-the difference between the year counted with it and without it, never on its
-own, so a week already partly booked cannot cost its quota a second time —
-pricing it alone rejected requests that in fact fit.
+`time_calc::scheduled_leave_days` is the single implementation of that
+calendar, and it returns the *days*, not just their number, because a quota —
+which a contract with no recorded pattern still has — must be applied once
+across the whole window and the buckets cut out of the result afterwards.
+Counting two narrower windows applies it to each: "taken up to today" plus
+"upcoming from tomorrow", or the halves either side of a carryover expiry,
+billed one straddling week twice over. Everything goes through it:
+`workdays_for_ranges_in_window*`, the leave tiles, the team report's
+taken/planned columns, the carryover chain and the leave-account budget check.
+A proposed absence is priced as the difference between the year counted with it
+and without it, never on its own, so a week already partly booked cannot cost
+its quota a second time — pricing it alone rejected requests that in fact fit.
 
-`time_calc::counted_days_per_range` is the per-range counterpart, for callers
+The count-based calendar this replaced survives only inside `time_calc`'s test
+module, as the reference an equivalence test measures against: a contract with
+no recorded pattern is charged exactly what it always was, swept over hundreds
+of ranges and every day count.
+
+`time_calc::scheduled_days_per_range` is the per-range counterpart, for callers
 that print or bill each range separately and still need those numbers to add up
-to what the week costs: it returns one count per range, attributing the counted
-days in chronological order. The payroll report's absence rows — the ordinary
-table and the catch-up one alike — go through it, per person and across every
-row the document prints for them. Counting each absence with `count_workdays`
-re-applied the quota to each of them, so two sick notes inside one calendar week
-claimed more days of continued pay from a part-time contract than that week can
-ever hold. A row left with no days of its own is still marked as reported: the
+to what the days cost: it returns one count per range, attributing them in
+chronological order. The payroll report's absence rows — the ordinary table and
+the catch-up one alike — go through it, per person and across every row the
+document prints for them. Counting each absence alone re-applied the quota to
+each of them, so two sick notes inside one calendar week claimed more days of
+continued pay from a part-time contract than that week can ever hold. A row left with no days of its own is still marked as reported: the
 document did account for it, an earlier row simply held every day the week has,
 and leaving it unmarked would hand it to a later report's catch-up section —
 which, counting it alone, gives it exactly the days this document withheld.
@@ -233,8 +236,8 @@ had to guess and the guesses disagreed with each other.
 
 **Fixed working weekdays are the replacement rule.** `user_work_weekdays`
 (migration 048) records which weekdays a contract places work on, and
-`time_calc::WorkSchedule`, `WorkScheduleHistory`, `scheduled_leave_days`,
-`scheduled_target_min` and `scheduled_week_target_min` implement the rule: a
+`time_calc::WorkSchedule`, `WorkScheduleHistory`, `scheduled_leave_days` and
+`scheduled_day_minutes` implement the rule: a
 working day carries `weekly_hours / <days actually worked>` and one covered by
 an absence costs one leave day; a day that is not a working day carries nothing,
 costs nothing, and makes hours booked on it pure overtime; a public holiday
@@ -269,12 +272,16 @@ longer contain it.
 With the days known there is no weekly quota and no whole-week arithmetic left:
 a week cannot hold more of a contract's working days than the contract has, so
 a week split by a month or year boundary is charged correctly with no special
-handling — each day simply belongs to the period it falls in. That is why
-`scheduled_target_min` takes a **range**, not a week. Summing whole weeks to
-build a month puts the week straddling the month's end into both months, which
-is the double count the per-day rule exists to remove;
-`scheduled_week_target_min` is seven days of the same function and is for
-week-level questions only.
+handling — each day simply belongs to the period it falls in. That is also why
+every target is summed **day by day over a range**, never week by week: summing
+whole weeks to build a month puts the week straddling the month's end into both
+months, which is the double count the per-day rule exists to remove.
+
+`scheduled_day_minutes` is where that rule lives, and both report loops call
+it. Its `excused` argument is the caller's own reason for a day to ask nothing
+— a public holiday, an absence that removes the target, or, for the flextime
+ledger, a week not yet approved. Those differ between callers; everything that
+does not differ is in the one function, so the loops cannot drift apart.
 
 The pattern is a **dated history**, not one stored value. Zerf recomputes every
 flextime and leave figure on each query, so a single pattern would be applied to
@@ -313,7 +320,7 @@ carries no target, yet every calendar day of an absence is charged to it, so
 two questions genuinely have different answers there, and reading the empty pool
 literally made all of that person's leave free.
 
-That quota carries `counted_workdays`' caller rule with it, so the rule has not
+That quota carries the old calendar's caller rule with it, so the rule has not
 gone away for everybody. A quota is counted per week *within one call*, so
 splitting a span into two calls — "taken up to today" plus "upcoming from
 tomorrow", or the halves either side of a carryover expiry — gives the week

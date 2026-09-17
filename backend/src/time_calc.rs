@@ -116,7 +116,7 @@ pub fn potential_workdays_per_week(workdays_per_week: i16) -> u32 {
 ///
 /// This intentionally does not pin a user to fixed weekdays for 1-5 day
 /// schedules: those users can distribute their workdays across Mon-Fri.
-pub fn is_potential_workday(date: NaiveDate, workdays_per_week: i16) -> bool {
+fn is_potential_workday(date: NaiveDate, workdays_per_week: i16) -> bool {
     let weekday = date.weekday().num_days_from_monday();
     match workdays_per_week {
         i16::MIN..=0 => false,
@@ -124,104 +124,6 @@ pub fn is_potential_workday(date: NaiveDate, workdays_per_week: i16) -> bool {
         6 => weekday < 6,
         _ => true,
     }
-}
-
-/// The individual days a set of date ranges costs, in calendar order, with the
-/// weekly cap applied **once** across the whole window.
-///
-/// This is the single implementation of Zerf's leave-day calendar. Callers that
-/// only need the total take `.len()`; callers that have to split the same window
-/// into buckets (already taken vs. still upcoming, before vs. after a carryover
-/// expiry) walk the returned dates instead of counting two narrower windows.
-/// Counting narrower windows applies the weekly cap to each of them, so one
-/// calendar week off could be billed twice over — a 3-day/week employee away
-/// Mon-Fri was charged 3 days for Mon-Wed plus 2 for Thu-Fri instead of the 3
-/// the week can ever cost.
-///
-/// Ranges are treated as a union, never summed: two bookings inside one week
-/// together still cost only what that week is worth.
-///
-/// Within a week the earliest covered days are the ones that count, so the
-/// result is deterministic and a day's bucket never depends on how the caller
-/// happens to slice the window.
-pub fn counted_workdays(
-    ranges: &[(NaiveDate, NaiveDate)],
-    window_start: NaiveDate,
-    window_end: NaiveDate,
-    holidays: &std::collections::HashSet<NaiveDate>,
-    workdays_per_week: i16,
-) -> Vec<NaiveDate> {
-    let clamped: Vec<(NaiveDate, NaiveDate)> = ranges
-        .iter()
-        .map(|(start, end)| ((*start).max(window_start), (*end).min(window_end)))
-        .filter(|(start, end)| start <= end)
-        .collect();
-    if clamped.is_empty() {
-        return Vec::new();
-    }
-
-    // An irregular schedule has no weekly quota to cap against, so every
-    // covered non-holiday calendar day counts.
-    let irregular = potential_workdays_per_week(workdays_per_week) == 0;
-
-    let mut counted = Vec::new();
-    let mut used_in_week: std::collections::HashMap<NaiveDate, i16> =
-        std::collections::HashMap::new();
-    let mut date = window_start;
-    while date <= window_end {
-        let is_candidate = !holidays.contains(&date)
-            && (irregular || is_potential_workday(date, workdays_per_week));
-        if is_candidate && clamped.iter().any(|(start, end)| date >= *start && date <= *end) {
-            if irregular {
-                counted.push(date);
-            } else {
-                let used = used_in_week.entry(week_monday(date)).or_insert(0);
-                if *used < workdays_per_week {
-                    *used += 1;
-                    counted.push(date);
-                }
-            }
-        }
-        date += Duration::days(1);
-    }
-    counted
-}
-
-/// How many of the counted days each range is charged, when the weekly cap is
-/// applied once across all of them.
-///
-/// Returns one count per input range, in input order. Days are attributed in
-/// chronological order of range start (input order breaks ties), so the first
-/// booking in a week keeps its own days and a later one in the same week is
-/// charged only what the week has left.
-///
-/// This is the per-range counterpart of [`counted_workdays`], for callers that
-/// print or bill each range separately and must still have those numbers add up
-/// to what the week actually costs. Counting each range on its own re-applies
-/// the cap to every one of them, so two absences inside a single calendar week
-/// bill a part-time contract for more days than that week can ever hold.
-pub fn counted_days_per_range(
-    ranges: &[(NaiveDate, NaiveDate)],
-    window_start: NaiveDate,
-    window_end: NaiveDate,
-    holidays: &std::collections::HashSet<NaiveDate>,
-    workdays_per_week: i16,
-) -> Vec<f64> {
-    let mut counts = vec![0.0; ranges.len()];
-    if ranges.is_empty() {
-        return counts;
-    }
-    let mut order: Vec<usize> = (0..ranges.len()).collect();
-    order.sort_by_key(|index| (ranges[*index].0, *index));
-    for day in counted_workdays(ranges, window_start, window_end, holidays, workdays_per_week) {
-        if let Some(owner) = order
-            .iter()
-            .find(|index| day >= ranges[**index].0 && day <= ranges[**index].1)
-        {
-            counts[*owner] += 1.0;
-        }
-    }
-    counts
 }
 
 //
@@ -551,84 +453,40 @@ pub fn scheduled_days_per_range(
     counts
 }
 
-/// Minutes of work `[from, to]` asks for.
+/// Minutes one single day asks for.
 ///
-/// Every working day carries one day's minutes unless something takes it away:
-/// a public holiday, an absence that removes the target, or the day lying
-/// before the contract began. A day that is not a working day carries nothing,
-/// which is what makes hours booked on it count as pure overtime and a leave
-/// day booked on it cost nothing.
+/// This is the whole rule in one place, and every target in the app is built
+/// from it. A day carries `weekly_hours / <days the contract works>` when the
+/// contract works that weekday, and nothing at all otherwise — so hours booked
+/// on a day it does not work are overtime in full.
 ///
-/// Any span may be asked for, and a month or a year is the usual one. Summing
-/// whole weeks instead would put the week straddling a month boundary into both
-/// months — the very double count the per-day rule exists to remove — so a
-/// period-scoped caller passes the period's own first and last day.
-pub fn scheduled_target_min(
+/// `excused` is the caller's own reason for the day to ask nothing: a public
+/// holiday, an absence that removes the target, or, for the flextime ledger, a
+/// week that is not yet approved. Those differ between callers, which is why
+/// the day itself cannot decide them; everything that does not differ lives
+/// here rather than being written out again at each call site.
+///
+/// A day before the contract began asks nothing either, the same way every
+/// view in the app hides content stored before a start date.
+pub fn scheduled_day_minutes(
     history: &WorkScheduleHistory,
-    from: NaiveDate,
-    to: NaiveDate,
+    date: NaiveDate,
     contract_start: NaiveDate,
-    holidays: &std::collections::HashSet<NaiveDate>,
-    absence_days: &std::collections::HashSet<NaiveDate>,
+    excused: bool,
     weekly_hours: f64,
 ) -> i64 {
-    // Each day is worth what the contract said on that day, so the pattern is
-    // asked for per day rather than once for the span. A pattern beginning
-    // mid-week therefore splits the week honestly: the days before it are worth
-    // the old contract's day and the days after it the new one. Such a week can
-    // add up to more or less than `weekly_hours`, which is the truthful answer
-    // when the number of working days changed partway through it — and it keeps
-    // the target in step with the leave charge, which is also decided per day.
-    let mut total = 0i64;
-    let mut date = from.max(contract_start);
-    while date <= to {
-        let schedule = history.on(date);
-        if schedule.covers(date) && !holidays.contains(&date) && !absence_days.contains(&date) {
-            total += schedule.day_minutes(weekly_hours);
-        }
-        date += Duration::days(1);
+    if date < contract_start || excused {
+        return 0;
     }
-    total
+    let schedule = history.on(date);
+    if schedule.covers(date) {
+        schedule.day_minutes(weekly_hours)
+    } else {
+        0
+    }
 }
 
-/// Minutes of work the week beginning on `week_monday` asks for.
-///
-/// A whole ISO week of [`scheduled_target_min`]. Use it for a week-level
-/// question — a flextime week, an approval card — never to build up a month.
-pub fn scheduled_week_target_min(
-    history: &WorkScheduleHistory,
-    week_monday: NaiveDate,
-    contract_start: NaiveDate,
-    holidays: &std::collections::HashSet<NaiveDate>,
-    absence_days: &std::collections::HashSet<NaiveDate>,
-    weekly_hours: f64,
-) -> i64 {
-    scheduled_target_min(
-        history,
-        week_monday,
-        week_monday + Duration::days(6),
-        contract_start,
-        holidays,
-        absence_days,
-        weekly_hours,
-    )
-}
-
-/// Count effective workdays in `[from, to]`, excluding public holidays.
-///
-/// Thin wrapper around [`counted_workdays`] over the whole range: the weekly
-/// cap, the potential-day pool and the irregular-schedule rule all live there,
-/// so a range count and a per-day leave count can never drift apart.
-pub fn count_workdays(
-    from: NaiveDate,
-    to: NaiveDate,
-    holidays: &std::collections::HashSet<NaiveDate>,
-    workdays_per_week: i16,
-) -> f64 {
-    counted_workdays(&[(from, to)], from, to, holidays, workdays_per_week).len() as f64
-}
-
-pub fn parse_hhmm_or_hhmmss(value: &str) -> Option<NaiveTime> {
+fn parse_hhmm_or_hhmmss(value: &str) -> Option<NaiveTime> {
     NaiveTime::parse_from_str(value, "%H:%M")
         .or_else(|_| NaiveTime::parse_from_str(value, "%H:%M:%S"))
         .ok()
@@ -649,6 +507,55 @@ mod tests {
     use super::*;
     use chrono::NaiveDate;
     use std::collections::HashSet;
+
+    /// The calendar this app used before a contract could name the
+    /// weekdays it works. Nothing ships it any more: it is kept here as the
+    /// reference the equivalence test below measures against, so a contract
+    /// with no recorded pattern can be shown to be charged exactly what it
+    /// always was.
+    fn counted_workdays(
+        ranges: &[(NaiveDate, NaiveDate)],
+        window_start: NaiveDate,
+        window_end: NaiveDate,
+        holidays: &std::collections::HashSet<NaiveDate>,
+        workdays_per_week: i16,
+    ) -> Vec<NaiveDate> {
+        let clamped: Vec<(NaiveDate, NaiveDate)> = ranges
+            .iter()
+            .map(|(start, end)| ((*start).max(window_start), (*end).min(window_end)))
+            .filter(|(start, end)| start <= end)
+            .collect();
+        if clamped.is_empty() {
+            return Vec::new();
+        }
+
+        // An irregular schedule has no weekly quota to cap against, so every
+        // covered non-holiday calendar day counts.
+        let irregular = potential_workdays_per_week(workdays_per_week) == 0;
+
+        let mut counted = Vec::new();
+        let mut used_in_week: std::collections::HashMap<NaiveDate, i16> =
+            std::collections::HashMap::new();
+        let mut date = window_start;
+        while date <= window_end {
+            let is_candidate = !holidays.contains(&date)
+                && (irregular || is_potential_workday(date, workdays_per_week));
+            if is_candidate && clamped.iter().any(|(start, end)| date >= *start && date <= *end) {
+                if irregular {
+                    counted.push(date);
+                } else {
+                    let used = used_in_week.entry(week_monday(date)).or_insert(0);
+                    if *used < workdays_per_week {
+                        *used += 1;
+                        counted.push(date);
+                    }
+                }
+            }
+            date += Duration::days(1);
+        }
+        counted
+    }
+
 
     #[test]
     fn week_monday_returns_monday_for_any_weekday() {
@@ -1079,100 +986,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn counted_days_per_range_splits_a_shared_week_between_the_ranges() {
-        // Mon-Tue and Thu-Fri of one week on a three-day contract. Counted
-        // separately that is 2 + 2 = 4 days; the week only ever holds 3.
-        let monday = day(2026, 5, 4);
-        let ranges = [
-            (monday, monday + Duration::days(1)),
-            (monday + Duration::days(3), monday + Duration::days(4)),
-        ];
-        let counted = counted_days_per_range(
-            &ranges,
-            monday,
-            monday + Duration::days(6),
-            &HashSet::new(),
-            3,
-        );
-        assert_eq!(counted, vec![2.0, 1.0]);
-        assert_eq!(counted.iter().sum::<f64>(), 3.0);
-    }
-
-    #[test]
-    fn counted_days_per_range_is_independent_of_the_input_order() {
-        let monday = day(2026, 5, 4);
-        let later_first = [
-            (monday + Duration::days(3), monday + Duration::days(4)),
-            (monday, monday + Duration::days(1)),
-        ];
-        let counted = counted_days_per_range(
-            &later_first,
-            monday,
-            monday + Duration::days(6),
-            &HashSet::new(),
-            3,
-        );
-        // The earlier range keeps its own days wherever it sits in the input.
-        assert_eq!(counted, vec![1.0, 2.0]);
-    }
-
-    #[test]
-    fn counted_days_per_range_leaves_a_week_within_quota_alone() {
-        let monday = day(2026, 5, 4);
-        let ranges = [
-            (monday, monday + Duration::days(1)),
-            (monday + Duration::days(2), monday + Duration::days(4)),
-        ];
-        let counted = counted_days_per_range(
-            &ranges,
-            monday,
-            monday + Duration::days(6),
-            &HashSet::new(),
-            5,
-        );
-        assert_eq!(counted, vec![2.0, 3.0]);
-    }
-
-    #[test]
-    fn counted_days_per_range_totals_what_counted_workdays_counts() {
-        let monday = day(2026, 5, 4);
-        let window_end = monday + Duration::days(20);
-        let holidays = HashSet::from([monday + Duration::days(9)]);
-        for quota in 1i16..=5 {
-            for offset in 0..10i64 {
-                let ranges = [
-                    (monday, monday + Duration::days(2)),
-                    (
-                        monday + Duration::days(offset),
-                        monday + Duration::days(offset + 3),
-                    ),
-                ];
-                let per_range =
-                    counted_days_per_range(&ranges, monday, window_end, &holidays, quota);
-                let union = counted_workdays(&ranges, monday, window_end, &holidays, quota).len();
-                assert_eq!(
-                    per_range.iter().sum::<f64>(),
-                    union as f64,
-                    "quota {quota}, offset {offset}: the rows must add up to the union"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn counted_days_per_range_handles_no_ranges() {
-        let monday = day(2026, 5, 4);
-        assert!(counted_days_per_range(
-            &[],
-            monday,
-            monday + Duration::days(6),
-            &HashSet::new(),
-            5
-        )
-        .is_empty());
-    }
-
     // ─────────────────────────────────────────────────────────────────────────
     // Fixed working weekdays.
     //
@@ -1192,6 +1005,261 @@ mod tests {
     // refused; no contract is recorded on them.
     const SAT: u8 = 6;
     const SUN: u8 = 7;
+
+    // ──────────────────────────────────────────────────────────────────────
+    // scheduled_days_per_range — the per-row counterpart the payroll report
+    // prints. Its rows have to add up to what the days actually cost.
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// A day two bookings both cover is charged once, to the earlier of them.
+    /// Bookings of one person cannot overlap in the app, but the function must
+    /// not invent a day if one ever does.
+    #[test]
+    fn scheduled_days_per_range_charges_a_shared_day_to_the_earlier_row() {
+        let monday = day(2026, 5, 4);
+        let ranges = [
+            (monday, monday + Duration::days(1)),
+            (monday + Duration::days(1), monday + Duration::days(2)),
+        ];
+        let counted = scheduled_days_per_range(
+            &always(sabine()),
+            &ranges,
+            hired_long_ago(),
+            monday,
+            monday + Duration::days(6),
+            &HashSet::new(),
+        );
+        assert_eq!(counted, vec![2.0, 1.0], "Monday and Tuesday, then Wednesday");
+        assert_eq!(counted.iter().sum::<f64>(), 3.0, "three days, not four");
+    }
+
+    #[test]
+    fn scheduled_days_per_range_is_independent_of_the_input_order() {
+        let monday = day(2026, 5, 4);
+        let later_first = [
+            (monday + Duration::days(1), monday + Duration::days(2)),
+            (monday, monday + Duration::days(1)),
+        ];
+        let counted = scheduled_days_per_range(
+            &always(sabine()),
+            &later_first,
+            hired_long_ago(),
+            monday,
+            monday + Duration::days(6),
+            &HashSet::new(),
+        );
+        // The earlier range keeps its own days wherever it sits in the input.
+        assert_eq!(counted, vec![1.0, 2.0]);
+    }
+
+    /// A contract whose weekdays were never recorded still carries a weekly
+    /// quota, and two bookings in one week share it instead of each claiming
+    /// it in full. Counted separately these two are 2 + 2; the week only ever
+    /// holds three days for a three-day contract.
+    #[test]
+    fn scheduled_days_per_range_shares_one_weeks_quota_without_a_pattern() {
+        let monday = day(2026, 5, 4);
+        let ranges = [
+            (monday, monday + Duration::days(1)),
+            (monday + Duration::days(3), monday + Duration::days(4)),
+        ];
+        let counted = scheduled_days_per_range(
+            &WorkScheduleHistory::without_history(WorkSchedule::without_fixed_days(3)),
+            &ranges,
+            hired_long_ago(),
+            monday,
+            monday + Duration::days(6),
+            &HashSet::new(),
+        );
+        assert_eq!(counted, vec![2.0, 1.0]);
+        assert_eq!(counted.iter().sum::<f64>(), 3.0);
+    }
+
+    /// Whatever the rows come to individually, together they are exactly the
+    /// days the bookings cost. A document that prints the rows therefore
+    /// claims neither more nor less than the leave figures beside it.
+    #[test]
+    fn scheduled_days_per_range_rows_total_the_days_actually_charged() {
+        let monday = day(2026, 5, 4);
+        let window_end = monday + Duration::days(20);
+        let holidays = HashSet::from([monday + Duration::days(9)]);
+        for history in [
+            always(sabine()),
+            always(orell()),
+            always(full_time()),
+            WorkScheduleHistory::without_history(WorkSchedule::without_fixed_days(3)),
+        ] {
+            for offset in 0..10i64 {
+                let ranges = [
+                    (monday, monday + Duration::days(2)),
+                    (
+                        monday + Duration::days(offset),
+                        monday + Duration::days(offset + 3),
+                    ),
+                ];
+                let per_range = scheduled_days_per_range(
+                    &history,
+                    &ranges,
+                    hired_long_ago(),
+                    monday,
+                    window_end,
+                    &holidays,
+                );
+                let union = scheduled_leave_days(
+                    &history,
+                    &ranges,
+                    hired_long_ago(),
+                    monday,
+                    window_end,
+                    &holidays,
+                )
+                .len();
+                assert_eq!(
+                    per_range.iter().sum::<f64>(),
+                    union as f64,
+                    "offset {offset}: the rows must add up to the days charged"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn scheduled_days_per_range_handles_no_ranges() {
+        let monday = day(2026, 5, 4);
+        assert!(scheduled_days_per_range(
+            &always(sabine()),
+            &[],
+            hired_long_ago(),
+            monday,
+            monday + Duration::days(6),
+            &HashSet::new(),
+        )
+        .is_empty());
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // scheduled_day_minutes — the one rule every target in the app is built
+    // from. Each of its four ways of answering nothing is pinned here.
+    // ──────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn a_working_day_asks_for_its_share_of_the_week() {
+        // Sabine works Monday to Thursday on 23.4 hours: 1404 minutes over
+        // four days is 351 a day.
+        let monday = day(2026, 5, 4);
+        assert_eq!(
+            scheduled_day_minutes(&always(sabine()), monday, hired_long_ago(), false, 23.4),
+            351
+        );
+    }
+
+    #[test]
+    fn a_day_the_contract_does_not_work_asks_for_nothing() {
+        // The Friday of the same week. Hours booked on it are overtime in full.
+        let friday = day(2026, 5, 8);
+        assert_eq!(
+            scheduled_day_minutes(&always(sabine()), friday, hired_long_ago(), false, 23.4),
+            0
+        );
+    }
+
+    #[test]
+    fn an_excused_day_asks_for_nothing_however_the_caller_excused_it() {
+        // The caller's reason — a public holiday, an absence that removes the
+        // target, a week not yet approved — is not the day's business.
+        let monday = day(2026, 5, 4);
+        assert_eq!(
+            scheduled_day_minutes(&always(sabine()), monday, hired_long_ago(), true, 23.4),
+            0
+        );
+    }
+
+    #[test]
+    fn a_day_before_the_contract_began_asks_for_nothing() {
+        let monday = day(2026, 5, 4);
+        let started_later = day(2026, 5, 5);
+        assert_eq!(
+            scheduled_day_minutes(&always(sabine()), monday, started_later, false, 23.4),
+            0
+        );
+        // And the very first day of the contract does ask.
+        assert_eq!(
+            scheduled_day_minutes(
+                &always(sabine()),
+                started_later,
+                started_later,
+                false,
+                23.4
+            ),
+            351
+        );
+    }
+
+    /// An assistant has no fixed days and no target. Both halves matter, and
+    /// they pull in opposite directions: every calendar day of theirs can
+    /// carry an absence, yet none of them asks for work.
+    #[test]
+    fn an_assistant_carries_every_calendar_day_and_no_target() {
+        let assistant = WorkScheduleHistory::without_history(WorkSchedule::without_fixed_days(7));
+        let monday = day(2026, 5, 4);
+        let saturday = day(2026, 5, 9);
+        let sunday = day(2026, 5, 10);
+
+        // Their weekly hours are zero, so no day asks for anything.
+        for date in [monday, saturday, sunday] {
+            assert_eq!(
+                scheduled_day_minutes(&assistant, date, hired_long_ago(), false, 0.0),
+                0,
+                "{date} asks for nothing"
+            );
+        }
+
+        // But a weekend absence is still charged to them, which is what the
+        // app has always done for an hourly contract.
+        let charged = scheduled_leave_days(
+            &assistant,
+            &[(saturday, sunday)],
+            hired_long_ago(),
+            monday,
+            sunday,
+            &HashSet::new(),
+        );
+        assert_eq!(charged, vec![saturday, sunday], "both weekend days count");
+    }
+
+    /// A leave range that runs across a change of working days is charged by
+    /// each day's own pattern, not by whichever pattern the range began under.
+    #[test]
+    fn a_leave_range_across_a_change_is_charged_day_by_day() {
+        // Monday to Thursday until the Wednesday, Tuesday to Friday from it.
+        let monday = day(2026, 5, 4);
+        let wednesday = day(2026, 5, 6);
+        let history = WorkScheduleHistory::new(
+            vec![(day(1900, 1, 1), sabine()), (wednesday, orell())],
+            WorkSchedule::without_fixed_days(5),
+        );
+        let charged = scheduled_leave_days(
+            &history,
+            &[(monday, monday + Duration::days(4))],
+            hired_long_ago(),
+            monday,
+            monday + Duration::days(6),
+            &HashSet::new(),
+        );
+        // Monday and Tuesday under the old pattern, Wednesday to Friday under
+        // the new one — five days, because the change widened the week.
+        assert_eq!(
+            charged,
+            vec![
+                monday,
+                monday + Duration::days(1),
+                wednesday,
+                monday + Duration::days(3),
+                monday + Duration::days(4),
+            ]
+        );
+    }
+
 
     fn sabine() -> WorkSchedule {
         WorkSchedule::fixed(&[MON, TUE, WED, THU]).unwrap()
@@ -1215,6 +1283,48 @@ mod tests {
     fn span(monday: NaiveDate, offsets: &[i64]) -> HashSet<NaiveDate> {
         offsets.iter().map(|o| monday + Duration::days(*o)).collect()
     }
+    /// Minutes a span asks for: the per-day rule summed. Every report loop
+    /// does exactly this with its own extra reasons to excuse a day, so this
+    /// is how the worked examples below exercise the shipped rule.
+    fn span_target_min(
+        history: &WorkScheduleHistory,
+        from: NaiveDate,
+        to: NaiveDate,
+        contract_start: NaiveDate,
+        holidays: &HashSet<NaiveDate>,
+        absence_days: &HashSet<NaiveDate>,
+        weekly_hours: f64,
+    ) -> i64 {
+        let mut total = 0i64;
+        let mut date = from;
+        while date <= to {
+            let excused = holidays.contains(&date) || absence_days.contains(&date);
+            total += scheduled_day_minutes(history, date, contract_start, excused, weekly_hours);
+            date += Duration::days(1);
+        }
+        total
+    }
+
+    /// A whole ISO week of [`span_target_min`].
+    fn week_target_min(
+        history: &WorkScheduleHistory,
+        week_monday: NaiveDate,
+        contract_start: NaiveDate,
+        holidays: &HashSet<NaiveDate>,
+        absence_days: &HashSet<NaiveDate>,
+        weekly_hours: f64,
+    ) -> i64 {
+        span_target_min(
+            history,
+            week_monday,
+            week_monday + Duration::days(6),
+            contract_start,
+            holidays,
+            absence_days,
+            weekly_hours,
+        )
+    }
+
     fn target(
         schedule: &WorkSchedule,
         monday: NaiveDate,
@@ -1222,7 +1332,7 @@ mod tests {
         absence_offsets: &[i64],
         weekly_hours: f64,
     ) -> i64 {
-        scheduled_week_target_min(
+        week_target_min(
             &always(*schedule),
             monday,
             hired_long_ago(),
@@ -1369,7 +1479,7 @@ mod tests {
                 let first = NaiveDate::from_ymd_opt(2026, month, 1).unwrap();
                 let last =
                     NaiveDate::from_ymd_opt(2026, month, last_day_of_month(2026, month)).unwrap();
-                scheduled_target_min(
+                span_target_min(
                     &history,
                     first,
                     last,
@@ -1380,7 +1490,7 @@ mod tests {
                 )
             })
             .sum();
-        let whole = scheduled_target_min(
+        let whole = span_target_min(
             &history,
             day(2026, 1, 1),
             day(2026, 12, 31),
@@ -1394,7 +1504,7 @@ mod tests {
         // And the week version is exactly seven days of the same function.
         let monday = day(2026, 8, 31);
         assert_eq!(
-            scheduled_week_target_min(
+            week_target_min(
                 &history,
                 monday,
                 day(2000, 1, 1),
@@ -1402,7 +1512,7 @@ mod tests {
                 &no_absence,
                 23.4
             ),
-            scheduled_target_min(
+            span_target_min(
                 &history,
                 monday,
                 monday + Duration::days(6),
@@ -1654,7 +1764,7 @@ mod tests {
         let monday = day(2026, 6, 29);
         let start = day(2026, 7, 1);
         assert_eq!(
-            scheduled_week_target_min(
+            week_target_min(
                 &always(sabine()), monday, start, &HashSet::new(), &HashSet::new(), 23.4),
             2 * 351,
             "Wednesday and Thursday are the working days she has that week"
@@ -1664,7 +1774,7 @@ mod tests {
     #[test]
     fn a_scheduled_week_entirely_before_the_start_date_is_empty() {
         assert_eq!(
-            scheduled_week_target_min(
+            week_target_min(
                 &always(sabine()), day(2026, 6, 22), day(2026, 7, 1),
                 &HashSet::new(), &HashSet::new(), 23.4),
             0
@@ -1931,10 +2041,10 @@ mod tests {
             WorkSchedule::without_fixed_days(5),
         );
         let january = day(2027, 1, 4); // a Monday
-        let target_before = scheduled_week_target_min(
+        let target_before = week_target_min(
             &before, january, day(2026, 7, 1),
             &HashSet::new(), &HashSet::new(), 23.4);
-        let target_after = scheduled_week_target_min(
+        let target_after = week_target_min(
             &after, january, day(2026, 7, 1),
             &HashSet::new(), &HashSet::new(), 23.4);
         assert_eq!(target_before, 4 * 351);
@@ -1987,7 +2097,7 @@ mod tests {
             ],
             WorkSchedule::without_fixed_days(5),
         );
-        let target = scheduled_week_target_min(
+        let target = week_target_min(
             &history, monday, hired_long_ago(),
             &HashSet::new(), &HashSet::new(), 23.4);
         assert_eq!(target, 2 * 468 + 3 * 281, "each day is worth what its own contract said");

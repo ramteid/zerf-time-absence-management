@@ -427,22 +427,23 @@ async fn build_range_with_user_core(
             .as_deref()
             .map(|kind| absence_removes_target(&category_flags, kind))
             .unwrap_or(false);
-        // The pattern in force on this very day, and what one of its working
-        // days is worth. A day the contract does not work carries nothing, so
-        // hours booked on it are pure overtime.
-        let schedule = schedule_history.on(current_date);
-        let target_per_day_min = schedule.day_minutes(target_weekly_hours);
-        let is_workday = schedule.covers(current_date)
-            && holiday.is_none()
-            && !absence_blocks_target
-            && !before_start;
-        let target = if is_workday && !after_today && !week_not_approved {
-            target_per_day_min
-        } else {
+        // What this day asks for, decided by the one rule every target in the
+        // app is built from. A holiday and a target-removing absence are this
+        // caller's own reasons for the day to ask nothing.
+        let full_target = crate::time_calc::scheduled_day_minutes(
+            &schedule_history,
+            current_date,
+            user.start_date,
+            holiday.is_some() || absence_blocks_target,
+            target_weekly_hours,
+        );
+        // `target` is the same figure capped at today: a day still ahead, or one
+        // in a week the balance pipelines have not approved, asks nothing yet.
+        let target = if after_today || week_not_approved {
             0
+        } else {
+            full_target
         };
-        // full_month_target counts all contract workdays without the "capped at today" cutoff.
-        let full_target = if is_workday { target_per_day_min } else { 0 };
 
         let mut entries: Vec<EntryDetail> = vec![];
         let mut actual = 0i64;
@@ -781,17 +782,15 @@ pub async fn build_flextime_for_user(
             .as_deref()
             .map(|kind| absence_removes_target(&category_flags, kind))
             .unwrap_or(false);
-        let schedule = schedule_history.on(current_date);
-        let is_workday = schedule.covers(current_date)
-            && holiday.is_none()
-            && !absence_blocks_target
-            && !before_start
-            && !week_not_approved;
-        let target = if is_workday {
-            schedule.day_minutes(user.weekly_hours)
-        } else {
-            0
-        };
+        // The same rule as the range report, with one reason of its own: a day
+        // whose week is not fully approved contributes nothing to a balance.
+        let target = crate::time_calc::scheduled_day_minutes(
+            &schedule_history,
+            current_date,
+            user.start_date,
+            holiday.is_some() || absence_blocks_target || week_not_approved,
+            user.weekly_hours,
+        );
         let actual = if before_start || week_not_approved {
             0
         } else {
