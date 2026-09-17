@@ -240,7 +240,7 @@ pub async fn create_initial_admin(
     // the place would be the one account whose working days are a guess.
     // `create_initial_admin` stores a five-day contract, which is Monday to
     // Friday.
-    if tracks_time {
+    if crate::roles::has_work_target(crate::roles::ROLE_ADMIN, tracks_time) {
         crate::repository::WorkScheduleDb::set_for_user_tx(
             &mut transaction,
             new_user_id,

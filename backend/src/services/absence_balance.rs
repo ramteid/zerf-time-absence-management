@@ -52,19 +52,27 @@ pub fn validate_auto_approve_end_date(
     Ok(())
 }
 
-/// Check whether the date range contains at least one effective workday:
-/// a day that belongs to the user's potential workday pool and is not a
-/// public holiday.
+/// Check whether the date range contains at least one day this contract works
+/// and that is not a public holiday.
+///
+/// With the weekdays recorded this is a sharper question than it used to be. A
+/// contract that works Tuesday to Friday has nothing to take off on a Monday,
+/// so a request covering only that Monday asks for leave from a day that was
+/// never going to be worked.
+///
+/// An irregular contract needs no special case here. It has no weekday pool,
+/// and [`crate::time_calc::WorkSchedule::covers`] answers true for all seven of
+/// its days, so a range of calendar days that are not all holidays passes —
+/// exactly as before.
 pub fn has_effective_workday(
+    schedule: &crate::services::work_schedules::ContractSchedule,
     start_date: NaiveDate,
     end_date: NaiveDate,
-    workdays_per_week: i16,
     holidays: &std::collections::HashSet<NaiveDate>,
 ) -> bool {
-    let mut day = start_date;
+    let mut day = std::cmp::max(start_date, schedule.start_date);
     while day <= end_date {
-        let is_contract_day = crate::time_calc::is_potential_workday(day, workdays_per_week);
-        if is_contract_day && !holidays.contains(&day) {
+        if schedule.history.on(day).covers(day) && !holidays.contains(&day) {
             return true;
         }
         day += Duration::days(1);
@@ -72,31 +80,19 @@ pub fn has_effective_workday(
     false
 }
 
-/// Validate that the absence range includes at least one effective workday.
-/// For irregular users (workdays_per_week==0) we count calendar days excluding
-/// holidays, so a pure-holiday range must still be rejected.
+/// Validate that the absence range includes at least one day the contract
+/// works and that is not a public holiday.
 pub async fn validate_absence_has_workday(
     pool: &crate::db::DatabasePool,
-    workdays_per_week: i16,
+    user_id: i64,
     start_date: NaiveDate,
     end_date: NaiveDate,
 ) -> AppResult<()> {
     let holidays = crate::repository::HolidayDb::new(pool.clone())
         .get_dates_in_range(start_date, end_date)
         .await?;
-    if workdays_per_week == 0 {
-        let mut day = start_date;
-        while day <= end_date {
-            if !holidays.contains(&day) {
-                return Ok(());
-            }
-            day += Duration::days(1);
-        }
-        return Err(AppError::BadRequest(
-            "Absence must include at least one workday.".into(),
-        ));
-    }
-    if !has_effective_workday(start_date, end_date, workdays_per_week, &holidays) {
+    let schedule = crate::services::work_schedules::contract_schedule(pool, user_id).await?;
+    if !has_effective_workday(&schedule, start_date, end_date, &holidays) {
         return Err(AppError::BadRequest(
             "Absence must include at least one workday.".into(),
         ));
@@ -117,10 +113,13 @@ pub fn clamp_range_to_window(
     (clamped_start <= clamped_end).then_some((clamped_start, clamped_end))
 }
 
-/// Sum workdays for a list of date ranges after clamping each range to the
-/// provided inclusive window. Ranges are treated as a union, not summed independently,
-/// so the weekly cap (`workdays_per_week`) is applied once per week across all ranges
-/// (fixing the double-count bug where Mon-Tue + Wed-Fri with quota 4 counted as 5).
+/// Sum leave days for a list of date ranges after clamping each range to the
+/// provided inclusive window.
+///
+/// Ranges are treated as a union, not summed independently, so a calendar week
+/// touched by two separate bookings is charged once for each of its working
+/// days and never twice (the double-count bug where Monday-Tuesday plus
+/// Wednesday-Friday counted as five days on a four-day contract).
 pub async fn workdays_for_ranges_in_window(
     pool: &crate::db::DatabasePool,
     user_id: i64,
@@ -145,19 +144,20 @@ pub async fn workdays_for_ranges_in_window(
     // Single DB round-trip for holidays and workdays config.
     let absence_db = crate::repository::AbsenceDb::new(pool.clone());
     let holidays = absence_db.holidays_set(window_start, window_end).await?;
-    let workdays_per_week = absence_db.user_workdays_per_week(user_id).await?;
+    let schedule = crate::services::work_schedules::contract_schedule(pool, user_id).await?;
     Ok(workdays_for_ranges_in_window_with_calendar(
         &clamped,
         window_start,
         window_end,
         &holidays,
-        workdays_per_week,
+        &schedule,
     ))
 }
 
-/// [`crate::time_calc::counted_workdays`] for one user, loading their holidays and
-/// weekly day count. The counterpart of [`workdays_for_ranges_in_window`] for
-/// callers that need the individual days rather than just their number.
+/// [`crate::time_calc::scheduled_leave_days`] for one user, loading their
+/// holidays and working-day timeline. The counterpart of
+/// [`workdays_for_ranges_in_window`] for callers that need the individual days
+/// rather than just their number.
 pub async fn counted_workdays_for_user(
     pool: &crate::db::DatabasePool,
     user_id: i64,
@@ -170,13 +170,14 @@ pub async fn counted_workdays_for_user(
     }
     let absence_db = crate::repository::AbsenceDb::new(pool.clone());
     let holidays = absence_db.holidays_set(window_start, window_end).await?;
-    let workdays_per_week = absence_db.user_workdays_per_week(user_id).await?;
-    Ok(crate::time_calc::counted_workdays(
+    let schedule = crate::services::work_schedules::contract_schedule(pool, user_id).await?;
+    Ok(crate::time_calc::scheduled_leave_days(
+        &schedule.history,
         ranges,
+        schedule.start_date,
         window_start,
         window_end,
         &holidays,
-        workdays_per_week,
     ))
 }
 
@@ -201,23 +202,27 @@ pub async fn usage_split_at_expiry(
     Ok((before_or_on_expiry, days.len() as f64 - before_or_on_expiry))
 }
 
-/// Count workdays for already-loaded absence ranges with a caller-provided
-/// calendar. Team reports use this after loading every account range and the
-/// month's holidays in bulk, avoiding a database round trip for every
-/// user/account cell. Implements union + weekly cap to avoid double counting.
+/// Count leave days for already-loaded absence ranges with a caller-provided
+/// calendar and timeline.
+///
+/// Team reports use this after loading every account range, the month's
+/// holidays and each person's schedule in bulk, avoiding a database round trip
+/// for every user/account cell. Counting is by union, so a week touched twice
+/// is charged once.
 pub fn workdays_for_ranges_in_window_with_calendar(
     ranges: &[(NaiveDate, NaiveDate)],
     window_start: NaiveDate,
     window_end: NaiveDate,
     holidays: &std::collections::HashSet<NaiveDate>,
-    workdays_per_week: i16,
+    schedule: &crate::services::work_schedules::ContractSchedule,
 ) -> f64 {
-    crate::time_calc::counted_workdays(
+    crate::time_calc::scheduled_leave_days(
+        &schedule.history,
         ranges,
+        schedule.start_date,
         window_start,
         window_end,
         holidays,
-        workdays_per_week,
     )
     .len() as f64
 }
@@ -636,39 +641,42 @@ pub async fn carryover_remaining_days(input: CarryoverRemainingInput<'_>) -> App
 /// `services::reports::build_flextime_for_user`'s day loop) minus public
 /// holidays.
 ///
-/// This is deliberately NOT the same day count as `workdays()`/
-/// `workdays_for_ranges_in_window`, which cap at the configured weekly quota
-/// (`workdays_per_week`) — correct for leave-account billing, where a 3-day/
-/// week contract should only be charged 3 leave days for a calendar week off.
-/// A `cost_type='flextime'` absence works differently: it keeps every
-/// potential weekday's target in the ledger (1-4 day/week contracts are not
-/// pinned to fixed weekdays — see `time_calc::is_potential_workday`), so a
-/// full calendar week off costs the full weekly target across all 5 (or 6/7)
-/// potential weekdays, not just the contracted count. Using the capped count
-/// here would under-reserve a full-week flextime-cost absence for anyone on a
-/// reduced schedule.
-async fn flextime_cost_workdays(
+/// The cost is returned in minutes rather than days, because what one day
+/// costs is a question about that day. A contract whose working days change
+/// partway through the range prices each half by the pattern in force on it,
+/// and a flat "days times one rate" cannot express that.
+///
+/// Days are counted by the contract's own working days. This used to count the
+/// whole Monday-to-Friday pool instead, on the grounds that a contract of one
+/// to four days was not pinned to particular weekdays and might have placed its
+/// work on any of them. With the weekdays recorded that reason is gone: a
+/// Tuesday-to-Friday contract is away on Tuesday, Wednesday, Thursday and
+/// Friday, and its Monday costs nothing because it was never worked. A contract
+/// with no recorded pattern still sees the whole pool, so it keeps costing
+/// exactly what it costs today.
+async fn flextime_cost_minutes(
     pool: &crate::db::DatabasePool,
-    workdays_per_week: i16,
+    schedule: &crate::services::work_schedules::ContractSchedule,
+    weekly_hours: f64,
     from: NaiveDate,
     to: NaiveDate,
-) -> AppResult<f64> {
+) -> AppResult<i64> {
     if to < from {
-        return Ok(0.0);
+        return Ok(0);
     }
     let holidays = crate::repository::HolidayDb::new(pool.clone())
         .get_dates_in_range(from, to)
         .await?;
-    let mut count = 0.0;
-    let mut day = from;
+    let mut minutes = 0i64;
+    let mut day = std::cmp::max(from, schedule.start_date);
     while day <= to {
-        if crate::time_calc::is_potential_workday(day, workdays_per_week) && !holidays.contains(&day)
-        {
-            count += 1.0;
+        let day_schedule = schedule.history.on(day);
+        if day_schedule.covers(day) && !holidays.contains(&day) {
+            minutes += day_schedule.day_minutes(weekly_hours);
         }
         day += Duration::days(1);
     }
-    Ok(count)
+    Ok(minutes)
 }
 
 /// Validate that a flextime-cost absence (cost_type='flextime') does not
@@ -701,13 +709,14 @@ pub async fn validate_flextime_balance(
     exclude_id: Option<i64>,
 ) -> AppResult<()> {
     use crate::repository::AbsenceDb;
-    // Assistants have no flextime account; a schedule with no potential workday
-    // pool has no target to spend against.
-    let base_days = crate::time_calc::potential_workdays_per_week(user.workdays_per_week);
-    if crate::roles::is_assistant_role(&user.role) || base_days == 0 {
+    // A contract with no work target has no flextime account to spend from, and
+    // one with no weekday pool at all has no target to spend.
+    if !crate::roles::has_work_target(&user.role, user.tracks_time)
+        || crate::time_calc::potential_workdays_per_week(user.workdays_per_week) == 0
+    {
         return Ok(());
     }
-    let target_per_day_min = (user.weekly_hours / f64::from(base_days) * 60.0).round() as i64;
+    let schedule = crate::services::work_schedules::contract_schedule(pool, user.id).await?;
 
     let floor_min: i64 =
         crate::services::settings::load_setting(pool, "flextime_min_balance_min", "0")
@@ -770,10 +779,14 @@ pub async fn validate_flextime_balance(
             // Range was entirely before the cutoff and is already accounted for.
             continue;
         }
-        let days =
-            flextime_cost_workdays(pool, user.workdays_per_week, effective_start, *range_end)
-                .await?;
-        committed_cost_min += (days * target_per_day_min as f64).round() as i64;
+        committed_cost_min += flextime_cost_minutes(
+            pool,
+            &schedule,
+            user.weekly_hours,
+            effective_start,
+            *range_end,
+        )
+        .await?;
     }
 
     // (3) Post-cutoff portion of the proposed range. Same reasoning as (2):
@@ -788,9 +801,7 @@ pub async fn validate_flextime_balance(
         // pending commitments do not already breach the floor.
         0
     } else {
-        let days =
-            flextime_cost_workdays(pool, user.workdays_per_week, proposed_start, end_date).await?;
-        (days * target_per_day_min as f64).round() as i64
+        flextime_cost_minutes(pool, &schedule, user.weekly_hours, proposed_start, end_date).await?
     };
 
     if current_balance_min - committed_cost_min - proposed_cost_min < floor_min {
@@ -1019,6 +1030,25 @@ mod tests {
     // has_effective_workday
     // ──────────────────────────────────────────────────────────────────────
 
+    /// Build a contract for these tests: `weekdays` empty means no recorded
+    /// pattern, so the old day count answers instead.
+    fn contract(
+        weekdays: &[u8],
+        workdays_per_week: i16,
+    ) -> crate::services::work_schedules::ContractSchedule {
+        use crate::time_calc::{WorkSchedule, WorkScheduleHistory};
+        let long_ago = NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let fallback = WorkSchedule::without_fixed_days(workdays_per_week);
+        let history = match WorkSchedule::fixed(weekdays) {
+            Some(fixed) => WorkScheduleHistory::new(vec![(long_ago, fixed)], fallback),
+            None => WorkScheduleHistory::without_history(fallback),
+        };
+        crate::services::work_schedules::ContractSchedule {
+            history,
+            start_date: long_ago,
+        }
+    }
+
     /// A range that contains at least one Mon–Fri day and no holidays must
     /// return true.
     #[test]
@@ -1026,7 +1056,12 @@ mod tests {
         // 2026-05-18 is a Monday.
         let monday = NaiveDate::from_ymd_opt(2026, 5, 18).unwrap();
         let friday = NaiveDate::from_ymd_opt(2026, 5, 22).unwrap();
-        assert!(has_effective_workday(monday, friday, 5, &HashSet::new()));
+        assert!(has_effective_workday(
+            &contract(&[], 5),
+            monday,
+            friday,
+            &HashSet::new()
+        ));
     }
 
     /// A range that only covers Saturday and Sunday must return false for a
@@ -1036,7 +1071,12 @@ mod tests {
         // 2026-05-23 Saturday, 2026-05-24 Sunday.
         let sat = NaiveDate::from_ymd_opt(2026, 5, 23).unwrap();
         let sun = NaiveDate::from_ymd_opt(2026, 5, 24).unwrap();
-        assert!(!has_effective_workday(sat, sun, 5, &HashSet::new()));
+        assert!(!has_effective_workday(
+            &contract(&[], 5),
+            sat,
+            sun,
+            &HashSet::new()
+        ));
     }
 
     /// A holiday falling on the only workday must result in false.
@@ -1047,22 +1087,56 @@ mod tests {
         let mut holidays = HashSet::new();
         holidays.insert(monday);
         // Range is exactly one Monday — blocked by holiday.
-        assert!(!has_effective_workday(monday, monday, 5, &holidays));
+        assert!(!has_effective_workday(
+            &contract(&[], 5),
+            monday,
+            monday,
+            &holidays
+        ));
     }
 
-    /// A 4-day schedule does not pin fixed weekdays; Friday can be a valid
-    /// potential workday within Mon-Fri.
+    /// A contract with no recorded pattern is not pinned to particular
+    /// weekdays: any Monday-to-Friday day can be one of its working days, so a
+    /// four-day contract still accepts a Friday.
     #[test]
-    fn has_effective_workday_respects_workdays_per_week() {
-        // 2026-05-22 is a Friday.
+    fn has_effective_workday_accepts_any_weekday_without_a_pattern() {
+        // 2026-05-22 is a Friday, 2026-05-21 a Thursday.
         let friday = NaiveDate::from_ymd_opt(2026, 5, 22).unwrap();
-        assert!(has_effective_workday(friday, friday, 4, &HashSet::new()));
-        // Thursday is also a valid potential workday.
         let thursday = NaiveDate::from_ymd_opt(2026, 5, 21).unwrap();
         assert!(has_effective_workday(
+            &contract(&[], 4),
+            friday,
+            friday,
+            &HashSet::new()
+        ));
+        assert!(has_effective_workday(
+            &contract(&[], 4),
             thursday,
             thursday,
-            4,
+            &HashSet::new()
+        ));
+    }
+
+    /// A recorded pattern *is* pinned, which is the whole point of it. Somebody
+    /// who works Tuesday to Friday has nothing to take off on a Monday, so a
+    /// request covering only that Monday asks for leave from a day that was
+    /// never going to be worked. The same request on their Tuesday is fine.
+    #[test]
+    fn has_effective_workday_rejects_a_day_the_pattern_does_not_work() {
+        // 2026-05-18 is a Monday, 2026-05-19 the Tuesday after it.
+        let monday = NaiveDate::from_ymd_opt(2026, 5, 18).unwrap();
+        let tuesday = NaiveDate::from_ymd_opt(2026, 5, 19).unwrap();
+        let tue_to_fri = contract(&[2u8, 3, 4, 5], 4);
+        assert!(!has_effective_workday(
+            &tue_to_fri,
+            monday,
+            monday,
+            &HashSet::new()
+        ));
+        assert!(has_effective_workday(
+            &tue_to_fri,
+            tuesday,
+            tuesday,
             &HashSet::new()
         ));
     }

@@ -49,7 +49,7 @@ pub use time_entries::{
     NewEntryData, PayrollCarryScope, PayrollEntrySnapshot, TimeEntry, TimeEntryDb,
 };
 pub use timesheet_export_queue::{ExportQueueEntry, TimesheetExportQueueDb};
-pub use work_schedules::{WorkScheduleDb, WorkWeekdays};
+pub use work_schedules::{ContractShape, WorkScheduleDb, WorkWeekdays};
 pub use users::{
     ActiveUserRow, LeaveAccountDefinition, User, UserDb, UserLeaveAccountDetails,
     UserLeaveAccountInput,

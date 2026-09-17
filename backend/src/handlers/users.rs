@@ -616,8 +616,10 @@ pub async fn update(
     // to a role that has one. Without a pattern every calculation for that
     // person falls back to the old spread over Monday to Friday, silently and
     // for them alone.
-    let now_has_work_target = effective_tracks_time.unwrap_or(previous_user.tracks_time)
-        && !crate::roles::is_assistant_role(&effective_role);
+    let now_has_work_target = crate::roles::has_work_target(
+        &effective_role,
+        effective_tracks_time.unwrap_or(previous_user.tracks_time),
+    );
     let start_date_now = effective_start_date.unwrap_or(previous_user.start_date);
     let workdays_now = effective_workdays_update.unwrap_or(previous_user.workdays_per_week);
     if now_has_work_target {

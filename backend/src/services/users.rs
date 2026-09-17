@@ -898,7 +898,7 @@ pub async fn create(
     // Assistants get none: they are paid for the hours they are present, have
     // no work target and no flextime account, so there is nothing for a weekday
     // pattern to decide. Pure-admin users likewise.
-    if body.tracks_time && !crate::roles::is_assistant_role(&body.role) {
+    if crate::roles::has_work_target(&body.role, body.tracks_time) {
         crate::repository::WorkScheduleDb::set_for_user_tx(
             &mut transaction,
             new_user_id,
@@ -1232,7 +1232,7 @@ pub async fn restore(
     // without one; and a contract that somehow has no pattern at all gets a
     // starting one rather than falling back silently to the old spread over
     // Monday to Friday.
-    if target.tracks_time && !is_assistant_role(&target.role) {
+    if crate::roles::has_work_target(&target.role, target.tracks_time) {
         let start_date_now = req.new_start_date.unwrap_or(target.start_date);
         crate::repository::WorkScheduleDb::ensure_for_user_tx(
             &mut tx,

@@ -88,6 +88,24 @@ pub fn has_submission_obligation(role: &str, weekly_hours: f64) -> bool {
     !is_assistant_role(role) && weekly_hours > 0.0
 }
 
+/// True when the app places a work target on this contract.
+///
+/// A work target is an amount of time the app expects somebody to work. Two
+/// kinds of contract have none. Assistants are paid for the hours they are
+/// present, so there is nothing to fall short of and no flextime account to
+/// fall short into. Accounts that do not track time record nothing at all.
+///
+/// This is the single answer to that question. It decides who gets a pattern of
+/// working weekdays written for them, and — just as importantly — whose
+/// recorded pattern is read back. Somebody who moves from employee to assistant
+/// keeps their old pattern rows, because a report covering the months they were
+/// an employee still has to be able to read them; what changes is that no
+/// calculation consults those rows while the contract has no work target.
+#[inline]
+pub fn has_work_target(role: &str, tracks_time: bool) -> bool {
+    tracks_time && !is_assistant_role(role)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,6 +185,23 @@ mod tests {
         // are non-booking users and have no obligation either.
         assert!(!has_submission_obligation("employee", 0.0));
         assert!(!has_submission_obligation("team_lead", -1.0));
+    }
+
+    /// `has_work_target` requires time tracking AND a non-assistant role.
+    /// Both halves matter: an assistant who tracks time still has no target,
+    /// and an employee who does not track time has nothing to measure.
+    #[test]
+    fn has_work_target_requires_tracking_and_a_non_assistant_role() {
+        assert!(has_work_target("employee", true));
+        assert!(has_work_target("team_lead", true));
+        assert!(has_work_target("admin", true));
+        assert!(has_work_target(" EMPLOYEE ", true));
+        // Assistants never have one, however their time is recorded.
+        assert!(!has_work_target("assistant", true));
+        assert!(!has_work_target(" Assistant ", true));
+        // Neither does anybody whose time is not tracked at all.
+        assert!(!has_work_target("employee", false));
+        assert!(!has_work_target("admin", false));
     }
 
     /// `role_sort_rank` must order team_lead, employee, assistant, admin,

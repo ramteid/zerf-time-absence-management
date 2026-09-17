@@ -195,24 +195,6 @@ fn weekday_en(d: NaiveDate) -> &'static str {
     ][d.weekday().num_days_from_monday() as usize]
 }
 
-/// Determine whether a date belongs to the user's potential workday pool.
-///
-/// For 1-5 day schedules this is intentionally Mon-Fri (flexible day
-/// placement), not a fixed Mon..N mapping.
-fn is_contract_workday(date: NaiveDate, workdays_per_week: i16) -> bool {
-    crate::time_calc::is_potential_workday(date, workdays_per_week)
-}
-
-/// Calculate the per-day target based on weekly hours and the potential
-/// workday pool size.
-fn target_minutes_per_day(weekly_hours: f64, workdays_per_week: i16) -> i64 {
-    let base_days = crate::time_calc::potential_workdays_per_week(workdays_per_week);
-    if base_days == 0 {
-        return 0;
-    }
-    (weekly_hours / f64::from(base_days) * 60.0).round() as i64
-}
-
 /// Loads the auto-break configuration from the database.
 /// Returns `Some(rules)` when the feature is enabled and at least tier-1 is valid,
 /// or `None` when the feature is off. Thresholds are strictly increasing, which
@@ -335,12 +317,24 @@ async fn build_range_with_user_core(
     approved_weeks: Option<&ApprovedWeeks>,
 ) -> AppResult<MonthReport> {
     let user_id = user.id;
-    // Role is the canonical source for fixed-target behavior. Assistants never
-    // have target minutes, even if legacy/imported data contains non-zero hours.
-    let target_per_day_min = if is_assistant_role(&user.role) {
-        0
+    // Which weekdays this contract places work on. The timeline is asked per
+    // day inside the loop below, never once for the whole range: a range is
+    // usually a month or a year, and the pattern may well change inside it.
+    let schedule_history = crate::services::work_schedules::history_for(
+        pool,
+        user_id,
+        &user.role,
+        user.tracks_time,
+        user.workdays_per_week,
+    )
+    .await?;
+    // A contract with no work target carries no minutes on any day. Role is the
+    // canonical source for that, never the stored hours: legacy and imported
+    // data contain non-zero weekly hours on assistants.
+    let target_weekly_hours = if crate::roles::has_work_target(&user.role, user.tracks_time) {
+        user.weekly_hours
     } else {
-        target_minutes_per_day(user.weekly_hours, user.workdays_per_week)
+        0.0
     };
     let today = crate::services::settings::app_today(pool).await;
 
@@ -425,7 +419,12 @@ async fn build_range_with_user_core(
             .as_deref()
             .map(|kind| absence_removes_target(&category_flags, kind))
             .unwrap_or(false);
-        let is_workday = is_contract_workday(current_date, user.workdays_per_week)
+        // The pattern in force on this very day, and what one of its working
+        // days is worth. A day the contract does not work carries nothing, so
+        // hours booked on it are pure overtime.
+        let schedule = schedule_history.on(current_date);
+        let target_per_day_min = schedule.day_minutes(target_weekly_hours);
+        let is_workday = schedule.covers(current_date)
             && holiday.is_none()
             && !absence_blocks_target
             && !before_start;
@@ -584,20 +583,22 @@ pub async fn build_flextime_for_user(
     from: NaiveDate,
     to: NaiveDate,
 ) -> AppResult<(Vec<FlextimeDay>, NaiveDate)> {
-    // Assistant role is the canonical source for "no flextime account" behavior.
-    if is_assistant_role(&user.role) {
+    // A flextime balance measures worked time against a work target, so a
+    // contract that has none has no balance to show.
+    if !crate::roles::has_work_target(&user.role, user.tracks_time) {
         return Ok((vec![], user.start_date - Duration::days(1)));
     }
     let target_user_id = user.id;
-    let target_per_day_min = {
-        let weekly_hours = user.weekly_hours;
-        let base_days = crate::time_calc::potential_workdays_per_week(user.workdays_per_week);
-        if base_days == 0 {
-            0
-        } else {
-            (weekly_hours / f64::from(base_days) * 60.0).round() as i64
-        }
-    };
+    // Asked per day below, for the same reason as in the range report: this
+    // walks a span that may contain a change of working days.
+    let schedule_history = crate::services::work_schedules::history_for(
+        pool,
+        target_user_id,
+        &user.role,
+        user.tracks_time,
+        user.workdays_per_week,
+    )
+    .await?;
 
     let reports_db = crate::repository::ReportDb::new(pool.clone());
 
@@ -771,12 +772,17 @@ pub async fn build_flextime_for_user(
             .as_deref()
             .map(|kind| absence_removes_target(&category_flags, kind))
             .unwrap_or(false);
-        let is_workday = is_contract_workday(current_date, user.workdays_per_week)
+        let schedule = schedule_history.on(current_date);
+        let is_workday = schedule.covers(current_date)
             && holiday.is_none()
             && !absence_blocks_target
             && !before_start
             && !week_not_approved;
-        let target = if is_workday { target_per_day_min } else { 0 };
+        let target = if is_workday {
+            schedule.day_minutes(user.weekly_hours)
+        } else {
+            0
+        };
         let actual = if before_start || week_not_approved {
             0
         } else {
@@ -2697,24 +2703,12 @@ mod tests {
     }
 
     #[test]
-    fn weekday_and_contract_workday_follow_iso_week_rules() {
+    fn weekday_en_follows_iso_week_rules() {
         let monday = NaiveDate::from_ymd_opt(2026, 5, 4).unwrap();
         let friday = NaiveDate::from_ymd_opt(2026, 5, 8).unwrap();
-        let saturday = NaiveDate::from_ymd_opt(2026, 5, 9).unwrap();
 
         assert_eq!(weekday_en(monday), "Monday");
         assert_eq!(weekday_en(friday), "Friday");
-        assert!(is_contract_workday(monday, 5));
-        assert!(is_contract_workday(friday, 5));
-        assert!(!is_contract_workday(saturday, 5));
-        assert!(is_contract_workday(friday, 4));
-    }
-
-    #[test]
-    fn target_minutes_per_day_uses_weekly_hours_divided_by_workdays() {
-        assert_eq!(target_minutes_per_day(40.0, 5), 480);
-        assert_eq!(target_minutes_per_day(40.0, 4), 480);
-        assert_eq!(target_minutes_per_day(37.5, 5), 450);
     }
 
     #[test]

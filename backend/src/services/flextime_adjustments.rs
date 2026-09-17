@@ -17,7 +17,6 @@ use crate::middleware::auth::User;
 use crate::repository::{
     FlextimeAdjustment, FlextimeAdjustmentDb, KIND_CORRECTION, MAX_ADJUSTMENT_MIN,
 };
-use crate::roles::is_assistant_role;
 use crate::AppState;
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
@@ -54,11 +53,15 @@ pub struct NewAdjustment {
     pub reason: Option<String>,
 }
 
-/// Whether this user can have a flextime account at all. Assistants are paid
-/// for the hours they are present and have no work target, so there is no
-/// balance to correct; a pure-admin user has no time data whatsoever.
+/// Whether this user can have a flextime account at all.
+///
+/// A flextime balance measures worked time against a work target, so a contract
+/// with no target has nothing to measure and no balance to correct. That is the
+/// same question [`crate::roles::has_work_target`] answers for the working-day
+/// pattern, and it must stay the same answer: a contract that is given a target
+/// schedule and no flextime account, or the reverse, is incoherent.
 fn has_flextime_account(user: &crate::repository::User) -> bool {
-    !is_assistant_role(&user.role) && user.tracks_time
+    crate::roles::has_work_target(&user.role, user.tracks_time)
 }
 
 /// Read one user's flextime account. Visible to admins, to a team lead for

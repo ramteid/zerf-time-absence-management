@@ -2012,13 +2012,18 @@ async fn build_late_absence_rows(
         ) else {
             continue;
         };
-        let member = segments_to_print[indices[0]].member;
-        let counted = crate::time_calc::counted_days_per_range(
+        let member_id = segments_to_print[indices[0]].member.id;
+        // The person's own working days decide what a stretch of absence is
+        // worth, so a day they never work claims no continued pay.
+        let schedule =
+            crate::services::work_schedules::contract_schedule(&app_state.pool, member_id).await?;
+        let counted = crate::time_calc::scheduled_days_per_range(
+            &schedule.history,
             &ranges,
+            schedule.start_date,
             window_start,
             window_end,
             &holidays,
-            member.workdays_per_week,
         );
         for (index, days) in indices.iter().zip(counted) {
             days_by_index[*index] = days;
@@ -2153,15 +2158,18 @@ async fn build_absence_rows(
         // together. Counting each absence alone charged a part-time contract
         // twice for a week two sick notes happened to share, and the document
         // then claimed more days than that week can ever hold.
-        let counted_days = crate::time_calc::counted_days_per_range(
+        let schedule =
+            crate::services::work_schedules::contract_schedule(&app_state.pool, member.id).await?;
+        let counted_days = crate::time_calc::scheduled_days_per_range(
+            &schedule.history,
             &printable
                 .iter()
                 .map(|(_, row_from, row_to, _, _)| (*row_from, *row_to))
                 .collect::<Vec<_>>(),
+            schedule.start_date,
             from.max(member.start_date),
             to,
             &holidays,
-            member.workdays_per_week,
         );
         for ((absence_id, row_from, row_to, slug, category), days) in
             printable.into_iter().zip(counted_days)

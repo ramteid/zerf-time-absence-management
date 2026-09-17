@@ -16,6 +16,7 @@ pub mod reports;
 pub mod settings;
 pub mod time_entries;
 pub mod users;
+pub mod work_schedules;
 
 /// Default page size used by paginated log/audit listings.
 const DEFAULT_PAGE_SIZE: i64 = 100;
