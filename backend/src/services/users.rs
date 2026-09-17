@@ -890,6 +890,24 @@ pub async fn create(
         user_unique_conflict(&e)
             .unwrap_or_else(|| AppError::Conflict("Could not create user.".into()))
     })?;
+    // Record which weekdays this person works, in the same transaction as the
+    // user row. Somebody with a work target but no recorded pattern would fall
+    // back to the old spread over Monday to Friday without anyone noticing, so
+    // the two facts are written together or not at all.
+    //
+    // Assistants get none: they are paid for the hours they are present, have
+    // no work target and no flextime account, so there is nothing for a weekday
+    // pattern to decide. Pure-admin users likewise.
+    if body.tracks_time && !crate::roles::is_assistant_role(&body.role) {
+        crate::repository::WorkScheduleDb::set_for_user_tx(
+            &mut transaction,
+            new_user_id,
+            body.start_date,
+            &crate::repository::WorkScheduleDb::default_weekdays(effective_workdays),
+            Some(requester.id),
+        )
+        .await?;
+    }
     // Book the carry-in balance as the account's opening ledger entry, in the
     // same transaction as the user row so a failure can never leave a user
     // without their starting balance.
