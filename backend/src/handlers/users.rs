@@ -619,14 +619,13 @@ pub async fn update(
     let now_has_work_target = effective_tracks_time.unwrap_or(previous_user.tracks_time)
         && !crate::roles::is_assistant_role(&effective_role);
     let start_date_now = effective_start_date.unwrap_or(previous_user.start_date);
+    let workdays_now = effective_workdays_update.unwrap_or(previous_user.workdays_per_week);
     if now_has_work_target {
         crate::repository::WorkScheduleDb::ensure_for_user_tx(
             &mut transaction,
             user_id,
             start_date_now,
-            &crate::repository::WorkScheduleDb::default_weekdays(
-                effective_workdays_update.unwrap_or(previous_user.workdays_per_week),
-            ),
+            &crate::repository::WorkScheduleDb::default_weekdays(workdays_now),
             Some(requester.id),
         )
         .await?;
@@ -638,6 +637,27 @@ pub async fn update(
             start_date_now,
         )
         .await?;
+        // A contract that now works a different number of days has to say so on
+        // the record too. `ensure_for_user_tx` writes only for somebody who has
+        // no pattern at all, so without this an employee moved from five days a
+        // week to three kept a Monday-to-Friday pattern for good, and every
+        // calculation went on giving them a five-day target and charging them
+        // five days of leave a week.
+        //
+        // The change takes effect from the day it is made — not from the
+        // contract start, which would re-judge every week already worked — and
+        // never before the contract began.
+        if workdays_now != previous_user.workdays_per_week {
+            let today = crate::services::settings::app_today(&app_state.pool).await;
+            crate::repository::WorkScheduleDb::align_day_count_tx(
+                &mut transaction,
+                user_id,
+                today.max(start_date_now),
+                workdays_now,
+                Some(requester.id),
+            )
+            .await?;
+        }
     }
     crate::services::users::seed_leave_accounts_for_user_tx(
         &mut transaction,

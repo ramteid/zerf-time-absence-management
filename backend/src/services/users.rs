@@ -1239,7 +1239,7 @@ pub async fn restore(
             target_id,
             start_date_now,
             &crate::repository::WorkScheduleDb::default_weekdays(target.workdays_per_week),
-            None,
+            Some(requester.id),
         )
         .await?;
         crate::repository::WorkScheduleDb::extend_earliest_to_tx(
