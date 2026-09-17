@@ -398,6 +398,7 @@ mod tests {
                 }],
                 actual_min: 450,
                 target_min: 480,
+                full_target_min: 480,
                 absence: None,
                 absence_name: None,
                 holiday: None,

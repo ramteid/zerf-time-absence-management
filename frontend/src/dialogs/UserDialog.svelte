@@ -27,7 +27,42 @@
   let last_name = template.last_name || "";
   let role = lockedRole || template.role || "employee";
   let weekly_hours = fmtDecimal(template.weekly_hours ?? 39, 2);
-  let workdays_per_week = Math.min(template.workdays_per_week ?? 5, 5);
+  // Which weekdays this contract works, as ISO numbers: 1 is Monday, 5 Friday.
+  // A contract recorded before working days were stored has none, so fall back
+  // to counting up from Monday — the same guess the server made for the roster
+  // that existed then, and the one an admin is here to correct.
+  let work_weekdays = normalizeWeekdays(
+    template.work_weekdays?.length
+      ? template.work_weekdays
+      : Array.from(
+          { length: Math.min(Math.max(template.workdays_per_week ?? 5, 1), 5) },
+          (_, index) => index + 1,
+        ),
+  );
+  const WEEKDAY_CHOICES = [
+    { value: 1, name: "Monday" },
+    { value: 2, name: "Tuesday" },
+    { value: 3, name: "Wednesday" },
+    { value: 4, name: "Thursday" },
+    { value: 5, name: "Friday" },
+  ];
+  // Deliberately keyed by `data-weekday` rather than `value`: the form is full
+  // of checkboxes identified by their value (categories, approvers), and a
+  // weekday sharing one of those numbers would be picked up by them.
+  function toggleWeekday(value, nowChecked) {
+    work_weekdays = normalizeWeekdays(
+      nowChecked
+        ? [...work_weekdays, value]
+        : work_weekdays.filter((day) => day !== value),
+    );
+  }
+
+  function normalizeWeekdays(days) {
+    return [...new Set((days || []).map(Number))]
+      .filter((day) => day >= 1 && day <= 5)
+      .sort((a, b) => a - b);
+  }
+
   $: _thisYear = appTodayDate($settings?.timezone).getFullYear();
   $: _nextYear = _thisYear + 1;
   let leaveAccounts = [];
@@ -362,11 +397,8 @@
     }
     const leave_accounts = leaveAccountsPayload();
     if (leave_accounts === null) return;
-    if (
-      !isAssistantRole &&
-      (Number(workdays_per_week) < 1 || Number(workdays_per_week) > 5)
-    ) {
-      error = $t("Workdays per week must be between 1 and 5.");
+    if (!isAssistantRole && work_weekdays.length === 0) {
+      error = $t("Pick at least one weekday this person works.");
       return;
     }
     // Double-confirmation when disabling time tracking for an existing admin user.
@@ -426,9 +458,7 @@
         last_name,
         role: normalizedRole,
         weekly_hours: normalizedWeeklyHours,
-        ...(isAssistantRole
-          ? {}
-          : { workdays_per_week: Number(workdays_per_week) }),
+        ...(isAssistantRole ? {} : { work_weekdays }),
         leave_accounts,
         start_date,
         // Always send explicitly: `null` clears it back to the start_date
@@ -614,20 +644,28 @@
               bind:value={weekly_hours}
             />
           </div>
-          <div>
-            <label class="zf-label" for="user-workdays-per-week"
-              >{$t("Workdays per week")}</label
-            >
-            <input
-              id="user-workdays-per-week"
-              class="zf-input"
-              type="number"
-              step="1"
-              min="1"
-              max="5"
-              bind:value={workdays_per_week}
-            />
-          </div>
+          <fieldset class="weekday-picker">
+            <legend class="zf-label">{$t("Working days")}</legend>
+            <div class="weekday-options">
+              {#each WEEKDAY_CHOICES as choice (choice.value)}
+                <label class="weekday-option">
+                  <input
+                    type="checkbox"
+                    data-weekday={choice.value}
+                    checked={work_weekdays.includes(choice.value)}
+                    on:click={(event) =>
+                      toggleWeekday(choice.value, event.currentTarget.checked)}
+                  />
+                  <span>{$t(choice.name)}</span>
+                </label>
+              {/each}
+            </div>
+            <div class="field-hint">
+              {$t(
+                "A day that is not ticked carries no target hours, costs no leave day, and any time booked on it counts as overtime.",
+              )}
+            </div>
+          </fieldset>
         </div>
         {#if showOpeningBalanceField}
           <div>
@@ -950,5 +988,28 @@
     height: 10px;
     border-radius: 50%;
     flex: 0 0 auto;
+  }
+
+  /* The weekday picker sits in the same grid cell the day-count field used to
+     occupy, so it has to wrap rather than force the row wider on a phone. */
+  .weekday-picker {
+    border: 0;
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+  }
+
+  .weekday-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    margin-top: 4px;
+  }
+
+  .weekday-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
   }
 </style>

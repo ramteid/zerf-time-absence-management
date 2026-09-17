@@ -17,7 +17,7 @@ vi.mock("../../lib/api/reportsApi.js", () => ({
   getTeamReport: vi.fn(),
   getTeamCategoryReport: vi.fn(),
   getAbsenceReport: vi.fn(),
-  getUserAbsencesByYear: vi.fn(),
+  getUserAbsencesInRange: vi.fn(),
   getHolidaysByYear: vi.fn(),
 }));
 
@@ -25,7 +25,7 @@ import {
   getTeamReport,
   getTeamCategoryReport,
   getAbsenceReport,
-  getUserAbsencesByYear,
+  getUserAbsencesInRange,
   getHolidaysByYear,
 } from "../../lib/api/reportsApi.js";
 
@@ -116,7 +116,7 @@ describe("TeamReport", () => {
     getTeamReport.mockResolvedValue({ rows: [], leave_account_categories: [] });
     getTeamCategoryReport.mockResolvedValue([]);
     getAbsenceReport.mockResolvedValue([]);
-    getUserAbsencesByYear.mockResolvedValue([]);
+    getUserAbsencesInRange.mockResolvedValue([]);
     getHolidaysByYear.mockResolvedValue([]);
   });
 
@@ -361,7 +361,7 @@ describe("TeamReport", () => {
         status: "approved",
       },
     ]);
-    getUserAbsencesByYear.mockResolvedValueOnce([
+    getUserAbsencesInRange.mockResolvedValueOnce([
       {
         id: 202,
         user_id: 7,
@@ -385,11 +385,12 @@ describe("TeamReport", () => {
     expect(target.textContent).toContain("Ada Lead");
   });
 
-  it("caps an absurdly long custom range instead of firing one absence/holiday request per year", async () => {
+  it("caps an absurdly long custom range instead of loading it", async () => {
     // Regression test: an unvalidated custom range used to expand into one
-    // getUserAbsencesByYear + getHolidaysByYear call per calendar year via
-    // Promise.all — a multi-century span would flood the API with
-    // thousands of requests. It must now be rejected up front.
+    // request per calendar year, so a multi-century span flooded the API with
+    // thousands of them. The per-year fan-out is gone — one window is asked
+    // for once — but the cap stays: a span that long is a mistake, and the
+    // server refuses it anyway.
     currentUser.set({
       id: 7,
       role: "team_lead",
@@ -408,7 +409,7 @@ describe("TeamReport", () => {
     });
     await settle();
 
-    expect(getUserAbsencesByYear).not.toHaveBeenCalled();
+    expect(getUserAbsencesInRange).not.toHaveBeenCalled();
     expect(getHolidaysByYear).not.toHaveBeenCalled();
   });
 
@@ -419,10 +420,13 @@ describe("TeamReport", () => {
     });
     await settle();
 
-    expect(getUserAbsencesByYear).not.toHaveBeenCalled();
+    expect(getUserAbsencesInRange).not.toHaveBeenCalled();
   });
 
-  it("waits for the roster, then calculates a three-day employee's absence correctly", async () => {
+  it("shows the leave days the server counted rather than working them out", async () => {
+    // The day count arrives with the row. A three-day contract's week off costs
+    // three days, and the page prints that number instead of deriving it from
+    // the roster with a second copy of the rule.
     getAbsenceReport.mockResolvedValueOnce([
       {
         id: 81,
@@ -431,25 +435,10 @@ describe("TeamReport", () => {
         start_date: "2026-05-04",
         end_date: "2026-05-08",
         status: "approved",
+        days: 3,
       },
     ]);
-    const mutable = mountWithMutableProps({
-      users: [],
-      periodMode: "month",
-      month: "2026-05",
-      from: "",
-      to: "",
-    });
-
-    await waitFor(() => getHolidaysByYear.mock.calls.length === 1);
-    await settle();
-
-    // No five-day fallback or placeholder row is rendered while the roster
-    // request owned by Reports is still pending.
-    expect(target.textContent).not.toContain("Ben Employee");
-    expect(target.textContent).toContain("Loading");
-
-    mutable.$set({
+    mountWithMutableProps({
       users: [
         {
           id: 8,
@@ -458,6 +447,10 @@ describe("TeamReport", () => {
           workdays_per_week: 3,
         },
       ],
+      periodMode: "month",
+      month: "2026-05",
+      from: "",
+      to: "",
     });
 
     const absenceRow = await waitFor(() =>
@@ -466,8 +459,6 @@ describe("TeamReport", () => {
       ),
     );
     expect(absenceRow.querySelectorAll("td")[4].textContent.trim()).toBe("3");
-    // The roster arrival recomputes the cached raw absence instead of firing
-    // another request for the same period.
     expect(getAbsenceReport).toHaveBeenCalledTimes(1);
   });
 

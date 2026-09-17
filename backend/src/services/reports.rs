@@ -126,7 +126,15 @@ pub struct DayDetail {
     pub weekday: String,
     pub entries: Vec<EntryDetail>,
     pub actual_min: i64,
+    /// What this day asks for, counted only up to today: a day still ahead asks
+    /// for nothing yet. This is what a running week total is built from.
     pub target_min: i64,
+    /// What this day asks for regardless of whether it has arrived, so that a
+    /// day card can say "Thursday is a seven-hour day" while it is still
+    /// Monday. It is zero on anything the contract does not ask work of: a
+    /// weekday it does not work, a public holiday, a day covered by an absence
+    /// that removes the target, and any day before the contract began.
+    pub full_target_min: i64,
     /// Absence category slug (`vacation`, `sick`, or an admin-created slug).
     /// The frontend resolves this against the `absenceCategories` store to
     /// look up the display name and color.
@@ -516,6 +524,7 @@ async fn build_range_with_user_core(
             entries,
             actual_min: actual,
             target_min: target,
+            full_target_min: full_target,
             absence,
             absence_name,
             holiday,
@@ -3360,6 +3369,7 @@ mod tests {
             }],
             actual_min: 120,
             target_min: 480,
+            full_target_min: 480,
             absence: Some("+absence".to_string()),
             absence_name: Some("+absence".to_string()),
             holiday: Some("\tholiday".to_string()),

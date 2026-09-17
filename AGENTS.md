@@ -158,12 +158,14 @@ because submitting and approving cover a week at a time, a single day carrying
 the required status *is* the whole week being handed in, regardless of how many
 days the person worked and regardless of
 `workdays_per_week`; a week with nothing booked passes only when nothing was
-due (every potential workday a holiday, an absence, or before the start date).
-`workdays_per_week` survives in that function purely as the potential-day pool
-(Mon-Fri vs. the full week) — it is no longer a quota, because counting days
-punished part-timers whose real pattern is shorter than their contract's day
-count. Target hours and leave-day maths are a different question and still cap
-per week at `workdays_per_week`. `time_calc::counted_workdays` is the single
+due — every one of *that contract's* working days a holiday, an absence, or
+before the start date. It asks the working-day timeline, so somebody on Tuesday
+to Friday who takes their whole week off is not chased for the bare Monday
+they never work. Judging against the whole Monday-to-Friday pool is exactly
+what used to chase them.
+
+The old count-based calendar below still answers for contracts with no
+recorded pattern. `time_calc::counted_workdays` is the single
 implementation of that calendar, and it returns the *days*, not just their
 number, because the cap has to be applied once across the whole window and the
 buckets cut out of the result afterwards. Counting two narrower windows applies
@@ -189,45 +191,45 @@ document did account for it, an earlier row simply held every day the week has,
 and leaving it unmarked would hand it to a later report's catch-up section —
 which, counting it alone, gives it exactly the days this document withheld.
 
-The frontend mirrors that calendar rather than keeping a second one:
-`apiMappers.js` exports `countedWorkdays` (the union count, with `countWorkdays`
-as its single-range case, exactly as `count_workdays` delegates in Rust) and
-`withAbsenceDays`, which attributes the counted days to the absences that
-produced them in chronological order. Every page showing a leave-day figure —
-the Absences list, the person report's stat cards, the team report's absence
-table — goes through `withAbsenceDays`. Counting each absence on its own, which
-is what those pages used to do, re-applied the weekly quota per absence: for a
-part-timer with two bookings in one calendar week the page reported more leave
-than that week can ever cost, and contradicted the balance shown beside it.
+The frontend keeps no calendar of its own. Every page showing a leave-day
+figure — the Absences list, the person report's stat cards, the team report's
+absence table — prints the `days` the server put on each row
+(`services::absences::fill_counted_days`), and the request dialog asks
+`GET /absences/workday-preview` rather than working its own number out. It used
+to mirror the rule in `apiMappers.js`, and a mirror is a thing that can drift:
+when the server learned a contract's weekdays and the browser had not, the
+dialog promised a day count the booking was not charged.
 
-The quota there belongs to a **leave account**, not to the person, so
-`withAbsenceDays` unions within one account and never across two. That is what
-the backend does — `leave_account_absences_in_year` loads one account's
-bookings at a time — and a week can legitimately draw on two accounts: a
+The count belongs to a **leave account**, not to the person, so
+`fill_counted_days` groups within one account and never across two. That is
+what the rest of the backend does — `leave_account_absences_in_year` loads one
+account's bookings at a time — and a week can legitimately draw on two
+accounts: a
 part-timer taking two days of one category and three of another in one week
 costs the first account two days and the second three, even where that totals
 more than the week's own working days. Pooling the quota across the person
 instead silently took days off one account because another had already spent
-them. The account an absence is billed to is deliberately not on the wire
-(`leave_account_category_id` is `skip_serializing`), so the displayed category
-stands in for it — which it is, for everything but a historical booking
-remapped to another account.
+them. A request that was turned down or withdrawn gets a group of its own: it
+still shows how long it was, but it must not absorb days a live booking is
+charged for. The account an absence is billed to stays off the wire
+(`leave_account_category_id` is `skip_serializing`); nothing outside the server
+needs it now that the server answers the question it was needed for.
 
 The payroll report's absence rows are the deliberate exception: they union per
 *person* across categories, because their question is "how many working days
 was this person absent", and a document claiming five absent days in a week
 somebody works four is wrong whatever the days were booked as.
 
-**A leave day is not yet worth a contract day, and that is a known defect.**
-Today a leave day removes one *potential* day of target (`weekly_hours / 5`)
-while the leave account is charged per calendar workday capped at
-`workdays_per_week`. Those two units disagree, so on a three-day, 24-hour
-contract the same three leave days buy a whole week off when booked Monday to
-Friday and 60% of a week when booked Monday to Wednesday. Booking the days
-somebody actually works costs them the leave days *and* leaves them nearly ten
-hours short for the week. The root cause is that `workdays_per_week` only ever
-said *how many* days somebody works, never *which*, so every calculation had to
-guess and the guesses disagreed with each other.
+**A leave day is worth one of the contract's own working days.** It did not
+use to be: a leave day removed one *potential* day of target
+(`weekly_hours / 5`) while the leave account was charged per calendar workday
+capped at `workdays_per_week`. Those two units disagreed, so on a three-day,
+24-hour contract the same three leave days bought a whole week off when booked
+Monday to Friday and 60% of a week when booked Monday to Wednesday. Booking the
+days somebody actually works cost them the leave days *and* left them nearly
+ten hours short for the week. The root cause was that `workdays_per_week` only
+ever said *how many* days somebody works, never *which*, so every calculation
+had to guess and the guesses disagreed with each other.
 
 **Fixed working weekdays are the replacement rule.** `user_work_weekdays`
 (migration 048) records which weekdays a contract places work on, and
@@ -236,9 +238,33 @@ guess and the guesses disagreed with each other.
 working day carries `weekly_hours / <days actually worked>` and one covered by
 an absence costs one leave day; a day that is not a working day carries nothing,
 costs nothing, and makes hours booked on it pure overtime; a public holiday
-costs the day's target and no leave. **Nothing calls them yet** — they carry the
-rule and its worked examples so it can be reviewed before any running
-calculation moves.
+costs the day's target and no leave.
+
+**Every calculation goes through them.** The range and month report, the
+flextime day ledger, the leave-day counters (including the bulk form team
+reports use), the "does this request contain a working day" check, the cost of
+a flextime-bearing absence, the payroll report's absence rows, and
+`week_is_accounted_for` — which decides whether a week with nothing booked was
+due anything — all ask the timeline, per day. Asking once for a whole span
+would judge part of it under a pattern that was not in force on it.
+
+`services::work_schedules::history_for` is the only way a calculation should
+obtain a timeline, and `contract_schedule` the same thing looked up by user id
+alone. Both apply the rule that **a contract with no work target never has
+fixed working days**, whatever rows it carries: somebody who moves from
+employee to assistant keeps their pattern rows, because the months they worked
+that way really happened and a report over them has to read them, but nothing
+applies those rows while the contract has no target. Deleting them instead
+would lose the pattern for good if the same person moved back.
+
+**The browser holds no copy of any of this.** The leave days a booking costs
+travel with the booking (`Absence::days`, filled by the listing endpoints,
+which know the window), the request dialog asks
+`GET /absences/workday-preview`, and a day's target comes from the range
+report's `target_min` (capped at today, for a running total) and
+`full_target_min` (uncapped, for a day card). `apiMappers.js` and
+`lib/domain/time.js` used to mirror the rule and could drift from it; they no
+longer contain it.
 
 With the days known there is no weekly quota and no whole-week arithmetic left:
 a week cannot hold more of a contract's working days than the contract has, so

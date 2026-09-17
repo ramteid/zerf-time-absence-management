@@ -247,6 +247,11 @@ const TRANSLATIONS = {
     "All draft entries of this week will be submitted for approval.":
       "All draft days of this week will be submitted for approval.",
     Override: "Override",
+    "Working days": "Working days",
+    "Pick at least one weekday this person works.":
+      "Pick at least one weekday this person works.",
+    "A day that is not ticked carries no target hours, costs no leave day, and any time booked on it counts as overtime.":
+      "A day that is not ticked carries no target hours, costs no leave day, and any time booked on it counts as overtime.",
     "Workdays per week": "Workdays per week",
     "Workdays per week must be between 1 and 7.":
       "Workdays per week must be between 1 and 7.",
@@ -587,6 +592,11 @@ const TRANSLATIONS = {
     "Password must be between 8 and 128 characters.":
       "Das Passwort muss zwischen 8 und 128 Zeichen lang sein.",
     "Weekly hours": "Wochenstunden",
+    "Working days": "Arbeitstage",
+    "Pick at least one weekday this person works.":
+      "Wähle mindestens einen Wochentag aus, an dem diese Person arbeitet.",
+    "A day that is not ticked carries no target hours, costs no leave day, and any time booked on it counts as overtime.":
+      "Ein Tag ohne Haken hat keine Sollzeit, kostet keinen Urlaubstag, und dort gebuchte Zeit zählt als Überstunden.",
     "Workdays per week": "Arbeitstage pro Woche",
     "Workdays per week must be between 1 and 7.":
       "Arbeitstage pro Woche muss zwischen 1 und 7 liegen.",

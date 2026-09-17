@@ -61,6 +61,15 @@ const defaultApiImpl = vi.hoisted(
         const year = path.split("year=")[1];
         return mockState.ownAbsencesByYear[year] || [];
       }
+      // The person report asks for its own window now, and every row comes
+      // back with the leave days the server counted for it.
+      if (path.startsWith("/absences?from=")) {
+        const year = path.slice(
+          path.indexOf("from=") + 5,
+          path.indexOf("from=") + 9,
+        );
+        return mockState.ownAbsencesByYear[year] || [];
+      }
       if (path.startsWith("/holidays?year=")) {
         const year = path.split("year=")[1];
         return mockState.holidaysByYear[year] || [];
@@ -652,6 +661,8 @@ describe("Reports", () => {
         start_date: "2030-01-07",
         end_date: "2030-01-11",
         status: "approved",
+        // Counted by the server against this contract's three working days.
+        days: 3,
       },
     ];
     component = mount(Reports, { target });
@@ -1131,6 +1142,8 @@ describe("Reports", () => {
         start_date: "2030-01-07",
         end_date: "2030-01-11",
         status: "approved",
+        // Counted by the server against this contract's three working days.
+        days: 3,
         comment: "Three-day employee absence",
       },
     ];

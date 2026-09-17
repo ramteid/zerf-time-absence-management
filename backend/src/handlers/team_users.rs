@@ -126,6 +126,7 @@ pub async fn create(
         role: ROLE_ASSISTANT.to_string(),
         weekly_hours: 0.0,
         workdays_per_week: None,
+        work_weekdays: None,
         leave_accounts: body
             .leave_accounts
             .map(|accounts| accounts.into_iter().map(Into::into).collect()),

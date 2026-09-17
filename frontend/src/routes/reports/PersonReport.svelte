@@ -20,11 +20,7 @@
     minToHM,
     fmtDate,
   } from "../../format.js";
-  import {
-    normalizeMonthReport,
-    withAbsenceDays,
-    holidayDateSet,
-  } from "../../apiMappers.js";
+  import { normalizeMonthReport } from "../../apiMappers.js";
   import Icon from "../../Icons.svelte";
   import FlextimeChart from "../../FlextimeChart.svelte";
   import FlextimeRangeControls from "../dashboard/FlextimeRangeControls.svelte";
@@ -40,13 +36,11 @@
     getMonthReport,
     getRangeReport,
     getAbsenceReport,
-    getUserAbsencesByYear,
-    getHolidaysByYear,
+    getUserAbsencesInRange,
   } from "../../lib/api/reportsApi.js";
   import {
     monthEnd,
     monthStart,
-    yearsBetweenDates,
     isReportRangeTooLong,
   } from "../../lib/domain/dates.js";
   import {
@@ -57,7 +51,7 @@
     absenceKindTotals,
     dedupeAbsences,
   } from "../../lib/domain/reports.js";
-  import { findUserById, userWorkdaysPerWeek } from "../../lib/domain/users.js";
+  import { findUserById } from "../../lib/domain/users.js";
 
   export let userId = null;
   export let users = [];
@@ -106,65 +100,29 @@
 
   // --- Absences (always the full selected period — unlike hours/flextime,
   // planned absences are shown even when they fall in the future). ---
-  async function loadAbsencesFor(
-    targetUserId,
-    absenceFrom,
-    absenceTo,
-    workdaysPerWeek,
-  ) {
+  async function loadAbsencesFor(targetUserId, absenceFrom, absenceTo) {
     // A custom range with no sane upper bound (picked via the calendar, or
-    // supplied unvalidated through a "View in report" deep link) would
-    // otherwise expand into one API call per calendar year below — capping
-    // here keeps that expansion bounded instead of flooding the API.
+    // supplied unvalidated through a "View in report" deep link) is capped
+    // here, so a deep link cannot turn into an unbounded query.
     if (isReportRangeTooLong(absenceFrom, absenceTo)) {
       toast($t("report_range_too_long"), "error");
       return [];
     }
-    let raw;
-    if (targetUserId === $currentUser?.id) {
-      const years = yearsBetweenDates(absenceFrom, absenceTo);
-      const lists = await Promise.all(
-        years.map((year) => getUserAbsencesByYear(year)),
-      );
-      raw = lists
-        .flat()
-        .filter((a) => a.end_date >= absenceFrom && a.start_date <= absenceTo);
-    } else {
-      // Only reachable when a lead/admin picked another employee — the
-      // /absences/all endpoint they call here is lead-only server-side.
-      const teamAbsences = await getAbsenceReport({
-        from: absenceFrom,
-        to: absenceTo,
-      });
-      raw = (teamAbsences || []).filter((a) => a.user_id === targetUserId);
-    }
-    raw = dedupeAbsences(raw).filter(
+    // Every row arrives with the leave days it costs inside this window,
+    // counted by the server. The browser used to work that out itself, which
+    // meant the same rule lived in two places and the stat cards could
+    // disagree with the leave balance beside them.
+    const raw =
+      targetUserId === $currentUser?.id
+        ? await getUserAbsencesInRange({ from: absenceFrom, to: absenceTo })
+        : // Only reachable when a lead/admin picked another employee — the
+          // /absences/all endpoint they call here is lead-only server-side.
+          (
+            (await getAbsenceReport({ from: absenceFrom, to: absenceTo })) || []
+          ).filter((a) => a.user_id === targetUserId);
+    return dedupeAbsences(raw).filter(
       (a) => a.status !== "rejected" && a.status !== "cancelled",
     );
-    if (raw.length === 0) return [];
-
-    const years = [
-      ...new Set(
-        raw.flatMap((a) => [
-          parseInt(a.start_date.slice(0, 4), 10),
-          parseInt(a.end_date.slice(0, 4), 10),
-        ]),
-      ),
-    ];
-    const holidayLists = await Promise.all(
-      years.map((year) => getHolidaysByYear(year)),
-    );
-    const holidayDates = holidayDateSet(holidayLists.flat());
-    // Counted together, so one calendar week's quota is charged once across
-    // every absence that shares it. Pricing each absence on its own billed a
-    // part-timer's split week twice, and the stat cards above then disagreed
-    // with the leave balance right beside them.
-    return withAbsenceDays(raw, {
-      from: absenceFrom,
-      to: absenceTo,
-      holidays: holidayDates,
-      workdaysPerWeek,
-    });
   }
 
   // Shape returned by `getFlextimeReport`, used wherever the request is
@@ -182,7 +140,6 @@
   async function loadReportData(id, user, mode, m, f, t2) {
     const isAssist = isAssistantUser(user);
     const flexAccount = hasFlextimeAccount(user);
-    const workdaysPerWeek = userWorkdaysPerWeek(user);
     const period = { mode, month: m, from: f, to: t2 };
 
     if (mode === "month") {
@@ -206,10 +163,10 @@
               to: chartTo,
             }).catch(() => emptyFlextime())
           : Promise.resolve(emptyFlextime()),
-        loadAbsencesFor(id, absenceFrom, absenceTo, workdaysPerWeek),
+        loadAbsencesFor(id, absenceFrom, absenceTo),
       ]);
 
-      const monthReport = normalizeMonthReport(monthRaw, workdaysPerWeek);
+      const monthReport = normalizeMonthReport(monthRaw);
       return {
         periodMode: mode,
         monthReport,
@@ -249,12 +206,10 @@
             to: cappedTo,
           }).catch(() => emptyFlextime())
         : Promise.resolve(emptyFlextime()),
-      loadAbsencesFor(id, f, t2, workdaysPerWeek),
+      loadAbsencesFor(id, f, t2),
     ]);
 
-    const monthReport = rangeRaw
-      ? normalizeMonthReport(rangeRaw, workdaysPerWeek)
-      : null;
+    const monthReport = rangeRaw ? normalizeMonthReport(rangeRaw) : null;
     return {
       periodMode: mode,
       monthReport,

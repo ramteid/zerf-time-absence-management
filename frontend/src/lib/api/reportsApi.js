@@ -65,8 +65,16 @@ export function getTimesheetPdf({ userId, from, to }) {
   return api(`/reports/pdf?${paramsFrom({ user_id: userId, from, to })}`);
 }
 
-export function getUserAbsencesByYear(year) {
-  return api(`/absences?year=${year}`);
+/**
+ * The requester's own absences over an explicit window.
+ *
+ * Each row carries the leave days it costs inside that window, worked out by
+ * the server. The window matters: a booking split by the edge of the period
+ * costs only the days that fall inside it, so asking per calendar year and
+ * clipping afterwards gives a different answer from asking for the period.
+ */
+export function getUserAbsencesInRange({ from, to }) {
+  return api(`/absences?${paramsFrom({ from, to })}`);
 }
 
 export function getHolidaysByYear(year) {

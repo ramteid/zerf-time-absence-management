@@ -114,7 +114,7 @@ impl WorkScheduleDb {
     /// a plain mistake into a 500, and it cannot reject duplicates at all
     /// because a CHECK may not contain a subquery. Every write goes through
     /// here, so a stored pattern is always a sorted set of Monday to Friday.
-    fn normalised_weekdays(weekdays: &[i16]) -> AppResult<Vec<i16>> {
+    pub fn normalised_weekdays(weekdays: &[i16]) -> AppResult<Vec<i16>> {
         let mut normalised: Vec<i16> = weekdays.to_vec();
         normalised.sort_unstable();
         normalised.dedup();

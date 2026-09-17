@@ -165,6 +165,21 @@ pub async fn get_one(
         .get_approver_ids(user.id)
         .await
         .unwrap_or_default();
+    // The weekdays currently on record, so the form shows what is stored rather
+    // than a guess derived from the day count. An empty list means no pattern
+    // was ever recorded for this contract, which is the case for assistants and
+    // for accounts that do not track time.
+    let today = crate::services::settings::app_today(&app_state.pool).await;
+    let work_weekdays: Vec<i16> = app_state
+        .db
+        .work_schedules
+        .list_for_user(user.id)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .rfind(|row| row.valid_from <= today)
+        .map(|row| row.weekdays)
+        .unwrap_or_default();
     let user_json = serde_json::json!({
         "id": user.id,
         "email": user.email,
@@ -173,6 +188,7 @@ pub async fn get_one(
         "role": user.role,
         "weekly_hours": user.weekly_hours,
         "workdays_per_week": user.workdays_per_week,
+        "work_weekdays": work_weekdays,
         "start_date": user.start_date,
         "hire_date": user.hire_date,
         "active": user.active,
@@ -218,6 +234,12 @@ pub struct NewUser {
     pub weekly_hours: f64,
     #[serde(default)]
     pub workdays_per_week: Option<i16>,
+    /// The weekdays this contract places work on, as ISO numbers: 1 is Monday
+    /// and 5 is Friday. Supplying them is what pins the contract to particular
+    /// days; `workdays_per_week` is then derived from how many were named, so
+    /// the two statements of the same fact cannot drift apart.
+    #[serde(default)]
+    pub work_weekdays: Option<Vec<i16>>,
     /// Optional values for individual leave accounts. Omitted accounts are
     /// initialized with their category default (or zero for assistants).
     #[serde(default)]
@@ -281,6 +303,7 @@ pub async fn create(
         role: body.role,
         weekly_hours: body.weekly_hours,
         workdays_per_week: body.workdays_per_week,
+        work_weekdays: body.work_weekdays,
         leave_accounts: body
             .leave_accounts
             .map(|accounts| accounts.into_iter().map(Into::into).collect()),
@@ -310,6 +333,12 @@ pub struct UpdateUser {
     pub role: Option<String>,
     pub weekly_hours: Option<f64>,
     pub workdays_per_week: Option<i16>,
+    /// The weekdays this contract works, as ISO numbers. Omitted leaves the
+    /// recorded pattern alone; supplied, it is recorded as a change taking
+    /// effect today, so the weeks already worked keep the pattern they were
+    /// worked under.
+    #[serde(default)]
+    pub work_weekdays: Option<Vec<i16>>,
     /// Omitted means leave accounts unchanged; supplied values replace the
     /// affected base/current/next-year values atomically.
     #[serde(default, deserialize_with = "deserialize_optional_leave_accounts")]
@@ -460,9 +489,9 @@ pub async fn update(
         // every balance path already ignores them, and keeping the rows means
         // a change back to a flextime-bearing role restores the exact balance
         // instead of silently starting from zero.
-        if body.workdays_per_week.is_some() {
+        if body.workdays_per_week.is_some() || body.work_weekdays.is_some() {
             return Err(AppError::BadRequest(
-                "Assistants cannot have fixed working days per week.".into(),
+                "Assistants cannot have fixed working days.".into(),
             ));
         }
     }
@@ -470,8 +499,17 @@ pub async fn update(
     // When switching FROM assistant TO another role, reset to 5 (default) unless the
     // admin explicitly provides a value — otherwise the sentinel 7 would persist via
     // COALESCE and produce wrong daily-target calculations for the new role.
+    // Naming the days is the authoritative statement, and the count follows from
+    // it. Sending both cannot produce a contradiction, because the count sent is
+    // simply ignored in favour of the days.
+    let requested_weekdays: Option<Vec<i16>> = match &body.work_weekdays {
+        Some(days) => Some(crate::repository::WorkScheduleDb::normalised_weekdays(days)?),
+        None => None,
+    };
     let effective_workdays_update: Option<i16> = if is_assistant_role(&new_role) {
         Some(7)
+    } else if let Some(days) = &requested_weekdays {
+        Some(i16::try_from(days.len()).unwrap_or(5))
     } else if is_assistant_role(&previous_user.role) {
         Some(body.workdays_per_week.unwrap_or(5))
     } else {
@@ -623,11 +661,19 @@ pub async fn update(
     let start_date_now = effective_start_date.unwrap_or(previous_user.start_date);
     let workdays_now = effective_workdays_update.unwrap_or(previous_user.workdays_per_week);
     if now_has_work_target {
+        // A contract with no pattern at all gets a starting one. When the form
+        // named the days, they are the starting pattern too — writing the
+        // Monday-first guess for the earlier period and the named days from
+        // today would invent a change that never happened.
+        let starting_pattern = match &requested_weekdays {
+            Some(days) => days.clone(),
+            None => crate::repository::WorkScheduleDb::default_weekdays(workdays_now),
+        };
         crate::repository::WorkScheduleDb::ensure_for_user_tx(
             &mut transaction,
             user_id,
             start_date_now,
-            &crate::repository::WorkScheduleDb::default_weekdays(workdays_now),
+            &starting_pattern,
             Some(requester.id),
         )
         .await?;
@@ -649,8 +695,19 @@ pub async fn update(
         // The change takes effect from the day it is made — not from the
         // contract start, which would re-judge every week already worked — and
         // never before the contract began.
-        if workdays_now != previous_user.workdays_per_week {
-            let today = crate::services::settings::app_today(&app_state.pool).await;
+        let today = crate::services::settings::app_today(&app_state.pool).await;
+        if let Some(days) = &requested_weekdays {
+            // Days named by hand are recorded as they are, dated from today, so
+            // the weeks already worked keep the pattern they were worked under.
+            crate::repository::WorkScheduleDb::set_for_user_tx(
+                &mut transaction,
+                user_id,
+                today.max(start_date_now),
+                days,
+                Some(requester.id),
+            )
+            .await?;
+        } else if workdays_now != previous_user.workdays_per_week {
             crate::repository::WorkScheduleDb::align_day_count_tx(
                 &mut transaction,
                 user_id,

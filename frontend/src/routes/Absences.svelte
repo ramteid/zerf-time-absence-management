@@ -1,12 +1,6 @@
 <script>
   import { api } from "../api.js";
   import { currentUser, settings, toast } from "../stores.js";
-  import {
-    countWorkdays,
-    holidayDateSet,
-    withAbsenceDays,
-  } from "../apiMappers.js";
-  import { userWorkdaysPerWeek } from "../lib/domain/users.js";
   import { t, absenceKindLabel, statusLabel, formatDayCount } from "../i18n.js";
   import { fmtDate, parseDate, appTodayDate } from "../format.js";
   import Icon from "../Icons.svelte";
@@ -19,7 +13,6 @@
   // eslint-disable-next-line no-useless-assignment
   let absenceRows = [];
   let leaveBalances = [];
-  let holidayDates = new Set();
   let showDialog = null;
   let loadToken = 0;
   $: baseYear = appTodayDate($settings?.timezone).getFullYear();
@@ -49,7 +42,6 @@
       if (token !== loadToken) return;
       absences = [];
       leaveBalances = [];
-      holidayDates = new Set();
       toast($t(e?.message || "Error"), "error");
       return;
     }
@@ -64,27 +56,6 @@
       if (token !== loadToken) return;
       leaveBalances = [];
       toast($t(e?.message || "Leave balance unavailable."), "error");
-    }
-
-    try {
-      const years = [
-        ...new Set([
-          year,
-          ...absences.flatMap((absence) => [
-            parseDate(absence.start_date).getFullYear(),
-            parseDate(absence.end_date).getFullYear(),
-          ]),
-        ]),
-      ];
-      const holidayLists = await Promise.all(
-        years.map((year) => api(`/holidays?year=${year}`)),
-      );
-      if (token !== loadToken) return;
-      holidayDates = holidayDateSet(holidayLists.flat());
-    } catch (e) {
-      if (token !== loadToken) return;
-      holidayDates = new Set();
-      toast($t(e?.message || "Error"), "error");
     }
   }
 
@@ -125,42 +96,13 @@
 
   // Absence days use the user's weekly day quota (flexible for 1-5 day
   // schedules) and exclude public holidays. The live bookings are counted
-  // together so one calendar week costs its quota once no matter how many
-  // absences share it — these rows have to add up to the leave balance shown
-  // above them. A rejected or cancelled request consumes nothing, so it is
-  // kept out of that shared count and simply shows its own length.
-  $: liveAbsences = absences.filter(
-    (absence) =>
-      absence.status !== "rejected" && absence.status !== "cancelled",
-  );
-  $: liveAbsenceDays = new Map(
-    withAbsenceDays(liveAbsences, {
-      from: liveAbsences.reduce(
-        (earliest, absence) =>
-          !earliest || absence.start_date < earliest
-            ? absence.start_date
-            : earliest,
-        "",
-      ),
-      to: liveAbsences.reduce(
-        (latest, absence) =>
-          absence.end_date > latest ? absence.end_date : latest,
-        "",
-      ),
-      holidays: holidayDates,
-      workdaysPerWeek: userWorkdaysPerWeek($currentUser),
-    }).map((absence) => [absence.id, absence.days]),
-  );
+
+  // Every row arrives with the leave days it costs, counted by the server
+  // against this contract's own working days. The page used to work that out
+  // here, which meant the same rule lived in two places and this list could
+  // disagree with the leave balance shown above it.
   $: absenceRows = absences.map((absence) => ({
     ...absence,
-    days:
-      liveAbsenceDays.get(absence.id) ??
-      countWorkdays(
-        absence.start_date,
-        absence.end_date,
-        holidayDates,
-        userWorkdaysPerWeek($currentUser),
-      ),
     editable: canEdit(absence),
     cancellable: canCancel(absence),
   }));
@@ -318,11 +260,7 @@
 </div>
 
 {#if showDialog}
-  <AbsenceDialog
-    template={showDialog}
-    onClose={handleDialogClose}
-    holidays={holidayDates}
-  />
+  <AbsenceDialog template={showDialog} onClose={handleDialogClose} />
 {/if}
 
 {#if detailAbsence}
