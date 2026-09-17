@@ -2670,3 +2670,95 @@ async fn work_schedule_history_repository_workflow() {
 
     app.cleanup().await;
 }
+
+/// Gaining a work target after the fact must not leave somebody without a
+/// pattern of working days. Two paths reach that state, and both are covered
+/// here: switching time tracking on for an admin account, and promoting an
+/// assistant. A start date moved earlier is covered too.
+#[tokio::test]
+async fn a_user_who_gains_a_work_target_gains_a_pattern() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let schedules = &app.state.db.work_schedules;
+
+    // An admin account without time tracking starts with no pattern.
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "pureadmin@example.com",
+                "first_name": "Paula", "last_name": "Pur",
+                "role": "admin", "weekly_hours": 0,
+                "start_date": "2026-07-01",
+                "tracks_time": false,
+                "approver_ids": [],
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create pure admin: {body}");
+    let admin_id = id(&body);
+    assert!(
+        schedules.list_for_user(admin_id).await.expect("list").is_empty(),
+        "no time tracking, no pattern"
+    );
+
+    // Switching time tracking on gives them one.
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{admin_id}"),
+            &json!({"tracks_time": true, "weekly_hours": 40, "workdays_per_week": 5}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "enable time tracking: {body}");
+    let rows = schedules.list_for_user(admin_id).await.expect("list");
+    assert_eq!(rows.len(), 1, "enabling tracking records a pattern: {rows:?}");
+    assert_eq!(rows[0].weekdays, vec![1, 2, 3, 4, 5]);
+
+    // An assistant has none, and gains one on promotion.
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "promoted@example.com",
+                "first_name": "Aaron", "last_name": "Aushilfe",
+                "role": "assistant", "weekly_hours": 0,
+                "start_date": "2026-07-01",
+                "approver_ids": [1],
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create assistant: {body}");
+    let promoted_id = id(&body);
+    assert!(
+        schedules.list_for_user(promoted_id).await.expect("list").is_empty(),
+        "an assistant has no pattern"
+    );
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{promoted_id}"),
+            &json!({"role": "employee", "weekly_hours": 23.4, "workdays_per_week": 4}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "promote: {body}");
+    let rows = schedules.list_for_user(promoted_id).await.expect("list");
+    assert_eq!(rows.len(), 1, "promotion records a pattern: {rows:?}");
+    assert_eq!(rows[0].weekdays, vec![1, 2, 3, 4]);
+
+    // Moving a contract start earlier pulls the oldest pattern back with it,
+    // so no employed day is left without one.
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{promoted_id}"),
+            &json!({"start_date": "2026-05-04"}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "move the start date earlier: {body}");
+    let rows = schedules.list_for_user(promoted_id).await.expect("list");
+    assert_eq!(rows.len(), 1, "extending is not a change of pattern");
+    assert_eq!(
+        rows[0].valid_from,
+        chrono::NaiveDate::from_ymd_opt(2026, 5, 4).unwrap()
+    );
+
+    app.cleanup().await;
+}
