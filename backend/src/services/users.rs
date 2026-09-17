@@ -1226,6 +1226,30 @@ pub async fn restore(
     // Restore: active=TRUE, archived_at=NULL, must_change_password=TRUE.
     UserDb::restore_tx(&mut tx, target_id, req.new_start_date).await?;
 
+    // A restored contract keeps the working days it had. Two things still need
+    // doing: a start date moved earlier has to pull the oldest pattern back
+    // with it, or the days between the new start and that pattern are left
+    // without one; and a contract that somehow has no pattern at all gets a
+    // starting one rather than falling back silently to the old spread over
+    // Monday to Friday.
+    if target.tracks_time && !is_assistant_role(&target.role) {
+        let start_date_now = req.new_start_date.unwrap_or(target.start_date);
+        crate::repository::WorkScheduleDb::ensure_for_user_tx(
+            &mut tx,
+            target_id,
+            start_date_now,
+            &crate::repository::WorkScheduleDb::default_weekdays(target.workdays_per_week),
+            None,
+        )
+        .await?;
+        crate::repository::WorkScheduleDb::extend_earliest_to_tx(
+            &mut tx,
+            target_id,
+            start_date_now,
+        )
+        .await?;
+    }
+
     // Set approvers for the restored user.
     UserDb::set_approvers_tx(&mut tx, target_id, &req.approver_ids).await?;
 

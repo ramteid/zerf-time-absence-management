@@ -2762,3 +2762,65 @@ async fn a_user_who_gains_a_work_target_gains_a_pattern() {
 
     app.cleanup().await;
 }
+
+/// Restoring an archived contract must leave no employed day without a pattern
+/// of working days, and must not invent a change that never happened.
+#[tokio::test]
+async fn restoring_a_contract_keeps_its_working_days_covered() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let schedules = &app.state.db.work_schedules;
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "archived@example.com",
+                "first_name": "Rita", "last_name": "Rueck",
+                "role": "employee", "weekly_hours": 23.4,
+                "workdays_per_week": 4,
+                "start_date": "2026-07-01",
+                "approver_ids": [1],
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create: {body}");
+    let user_id = id(&body);
+
+    // Give them the days they really work, as an admin would.
+    schedules
+        .set_for_user(
+            user_id,
+            chrono::NaiveDate::from_ymd_opt(2026, 7, 1).unwrap(),
+            &[2, 3, 4, 5],
+            Some(1),
+        )
+        .await
+        .expect("record the real days");
+
+    let (st, body) = admin
+        .post(&format!("/api/v1/users/{user_id}/archive"), &json!({}))
+        .await;
+    assert_eq!(st, StatusCode::OK, "archive: {body}");
+
+    // Restored with an earlier start date: the pattern must reach back to it,
+    // and must still say Tuesday to Friday.
+    let (st, body) = admin
+        .post(
+            &format!("/api/v1/users/{user_id}/restore"),
+            &json!({"start_date": "2026-05-04", "approver_ids": [1]}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "restore: {body}");
+
+    let rows = schedules.list_for_user(user_id).await.expect("list");
+    assert_eq!(rows.len(), 1, "restoring is not a change of working days: {rows:?}");
+    assert_eq!(
+        rows[0].valid_from,
+        chrono::NaiveDate::from_ymd_opt(2026, 5, 4).unwrap(),
+        "the pattern reaches back to the new start"
+    );
+    assert_eq!(rows[0].weekdays, vec![2, 3, 4, 5], "and still says Tuesday to Friday");
+
+    app.cleanup().await;
+}
