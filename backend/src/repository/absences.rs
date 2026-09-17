@@ -139,15 +139,6 @@ impl AbsenceDb {
             .await
     }
 
-    /// Fetch the user's configured workdays_per_week.
-    pub async fn user_workdays_per_week(&self, user_id: i64) -> AppResult<i16> {
-        Ok(
-            sqlx::query_scalar("SELECT workdays_per_week FROM users WHERE id=$1")
-                .bind(user_id)
-                .fetch_one(&self.pool)
-                .await?,
-        )
-    }
 
     /// Sum of workdays for approved (and cancellation_pending) absences whose
     /// category matches `category_id`, clamped to the [from, to] window. Used

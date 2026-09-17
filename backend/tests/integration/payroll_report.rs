@@ -402,17 +402,22 @@ async fn payroll_report_lists_absence_days_and_assistant_hours() {
     assert_eq!(row.category, sick.name);
     assert_eq!(row.from, monday);
     assert_eq!(row.to, wednesday);
-    let holidays = app
-        .state
-        .db
-        .reports
-        .holiday_set(from, to)
-        .await
-        .expect("holidays");
+    // Checked against the app's own leave calendar rather than a second count
+    // written into the test: the document has to agree with what the rest of
+    // Zerf charges for the same days.
     assert_eq!(
         row.days,
-        zerf::time_calc::count_workdays(monday, wednesday, &holidays, 5),
-        "days are contract workdays without holidays"
+        zerf::services::absence_balance::counted_workdays_for_user(
+            &app.state.pool,
+            row.user_id,
+            &[(monday, wednesday)],
+            from,
+            to,
+        )
+        .await
+        .expect("the leave days of those dates")
+        .len() as f64,
+        "days are the contract's own working days, holidays excluded"
     );
 
     assert_eq!(data.hours_sections.len(), 1, "only assistants requested");
