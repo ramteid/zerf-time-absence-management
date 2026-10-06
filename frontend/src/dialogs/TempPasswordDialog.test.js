@@ -82,20 +82,60 @@ describe("TempPasswordDialog", () => {
     expect(target.textContent).toContain("No email was sent");
   });
 
-  it("shows the registration-email notice when SMTP is configured", async () => {
-    // When SMTP is working, the new user will automatically receive their
-    // login link by email, so the admin does not need to deliver it manually.
+  it("says the registration email is queued when SMTP is configured", async () => {
+    // The mail is only queued at this point; the mail server has not accepted
+    // it yet, so the dialog must not promise more than "queued for sending".
+    component = mount(TempPasswordDialog, {
+      target,
+      props: {
+        password: "TempPass123!",
+        title: "User created.",
+        smtpEnabled: true,
+        onDismiss: vi.fn(),
+      },
+    });
+    await settle();
+    expect(target.textContent).toContain(
+      "The registration email is queued for sending.",
+    );
+  });
+
+  it("says the password email is queued after a reset when SMTP is configured", async () => {
+    // Same honesty for a reset: the wording must describe a queued mail,
+    // not a sent one, and must not fall back to the registration text.
     component = mount(TempPasswordDialog, {
       target,
       props: {
         password: "TempPass123!",
         title: "Password reset.",
         smtpEnabled: true,
+        mode: "reset",
         onDismiss: vi.fn(),
       },
     });
     await settle();
-    expect(target.textContent).toContain("Registration email will be sent");
+    expect(target.textContent).toContain(
+      "The email with the new password is queued for sending.",
+    );
+    expect(target.textContent).not.toContain("registration email");
+  });
+
+  it("shows the German wording for a queued reset email", async () => {
+    setLanguage("de");
+    component = mount(TempPasswordDialog, {
+      target,
+      props: {
+        password: "TempPass123!",
+        title: "Passwort zurückgesetzt.",
+        smtpEnabled: true,
+        mode: "reset",
+        onDismiss: vi.fn(),
+      },
+    });
+    await settle();
+    expect(target.textContent).toContain(
+      "Die E-Mail mit dem neuen Passwort wird für den Versand vorgemerkt.",
+    );
   });
 
   it("renders a Copy button for the password", async () => {
