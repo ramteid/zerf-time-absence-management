@@ -185,6 +185,7 @@ pub async fn attach_counts_as_work(
 /// Groups the affected entries by owner, computes distinct ISO weeks per owner,
 /// and sends one notification per user (not per entry). When `reason` is
 /// `Some`, it is included as a template parameter for rejection messages.
+/// `requester_id` is the approver who decided: replies to the email go to them.
 pub async fn notify_week_status_change(
     app_state: &AppState,
     requester_id: i64,
@@ -237,6 +238,7 @@ pub async fn notify_week_status_change(
             )
             .email_body(&email_body)
             .channels(channels)
+            .reply_to_user(requester_id)
             .reference("time_entries", None),
         )
         .await;

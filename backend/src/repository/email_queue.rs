@@ -20,6 +20,16 @@ pub struct EmailQueueEntry {
     pub last_error: Option<String>,
     pub subject: String,
     pub body_text: String,
+    /// Where an answer to this mail should go (empty = no Reply-To header).
+    pub reply_to_address: String,
+    pub reply_to_name: String,
+}
+
+/// A person as shown in a mail header: address plus display name (the name may
+/// be empty).
+pub struct EmailContact {
+    pub address: String,
+    pub name: String,
 }
 
 #[derive(Clone)]
@@ -33,7 +43,8 @@ impl EmailQueueDb {
     }
 
     /// Queue one email for delivery. `kind` is the notification kind that
-    /// produced it (see `services::notifications::Outgoing`).
+    /// produced it (see `services::notifications::Outgoing`). `reply_to` is the
+    /// person answers should reach instead of the system sender, if any.
     pub async fn enqueue(
         &self,
         to_address: &str,
@@ -41,16 +52,20 @@ impl EmailQueueDb {
         kind: &str,
         subject: &str,
         body_text: &str,
+        reply_to: Option<&EmailContact>,
     ) -> AppResult<()> {
         sqlx::query(
-            "INSERT INTO email_queue (to_address, to_name, kind, subject, body_text) \
-             VALUES ($1, $2, $3, $4, $5)",
+            "INSERT INTO email_queue \
+             (to_address, to_name, kind, subject, body_text, reply_to_address, reply_to_name) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
         )
         .bind(to_address)
         .bind(to_name)
         .bind(kind)
         .bind(subject)
         .bind(body_text)
+        .bind(reply_to.map_or("", |contact| contact.address.as_str()))
+        .bind(reply_to.map_or("", |contact| contact.name.as_str()))
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -70,7 +85,8 @@ impl EmailQueueDb {
     /// fails, so fresh messages and other stuck messages get their turn.
     pub async fn list_pending(&self, limit: i64) -> AppResult<Vec<EmailQueueEntry>> {
         Ok(sqlx::query_as::<_, EmailQueueEntry>(
-            "SELECT id, to_address, to_name, kind, last_error, subject, body_text FROM email_queue \
+            "SELECT id, to_address, to_name, kind, last_error, subject, body_text, \
+             reply_to_address, reply_to_name FROM email_queue \
              ORDER BY last_attempt_at ASC NULLS FIRST, id ASC LIMIT $1",
         )
         .bind(limit)

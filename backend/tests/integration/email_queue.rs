@@ -5,7 +5,7 @@
 use reqwest::StatusCode;
 use serde_json::json;
 
-use crate::common::TestApp;
+use crate::common::{TestApp, TestClient};
 use crate::helpers::*;
 
 /// Point SMTP at a closed local port: `load_smtp_config` returns a config (so
@@ -48,6 +48,7 @@ async fn queue_email_is_a_noop_without_smtp_configured() {
         "test",
         "subject",
         "body",
+        None,
     )
     .await;
 
@@ -71,6 +72,7 @@ async fn queue_email_persists_the_already_rendered_message() {
         "test_kind",
         "subject line",
         "body text",
+        None,
     )
     .await;
 
@@ -81,6 +83,10 @@ async fn queue_email_persists_the_already_rendered_message() {
     assert_eq!(pending[0].kind, "test_kind");
     assert_eq!(pending[0].subject, "subject line");
     assert_eq!(pending[0].body_text, "body text");
+    assert_eq!(
+        pending[0].reply_to_address, "",
+        "without a reply-to person the mail carries no Reply-To"
+    );
     app.cleanup().await;
 }
 
@@ -122,7 +128,7 @@ async fn failed_delivery_keeps_the_row_queued_and_records_the_error() {
     app.state
         .db
         .email_queue
-        .enqueue("someone@example.com", "Someone", "test", "subject", "body")
+        .enqueue("someone@example.com", "Someone", "test", "subject", "body", None)
         .await
         .expect("enqueue");
 
@@ -148,7 +154,7 @@ async fn disabling_smtp_leaves_queued_emails_untouched() {
     app.state
         .db
         .email_queue
-        .enqueue("someone@example.com", "Someone", "test", "subject", "body")
+        .enqueue("someone@example.com", "Someone", "test", "subject", "body", None)
         .await
         .expect("enqueue");
 
@@ -176,7 +182,7 @@ async fn a_previously_failed_row_is_demoted_behind_a_fresh_one() {
     app.state
         .db
         .email_queue
-        .enqueue("stuck@example.com", "Stuck", "test", "subject", "body")
+        .enqueue("stuck@example.com", "Stuck", "test", "subject", "body", None)
         .await
         .expect("enqueue stuck row");
     let stuck_id = app.state.db.email_queue.list_pending(1).await.unwrap()[0].id;
@@ -188,7 +194,7 @@ async fn a_previously_failed_row_is_demoted_behind_a_fresh_one() {
     app.state
         .db
         .email_queue
-        .enqueue("fresh@example.com", "Fresh", "test", "subject", "body")
+        .enqueue("fresh@example.com", "Fresh", "test", "subject", "body", None)
         .await
         .expect("enqueue fresh row");
 
@@ -218,7 +224,7 @@ async fn delete_with_retry_removes_the_row() {
     app.state
         .db
         .email_queue
-        .enqueue("someone@example.com", "Someone", "test", "subject", "body")
+        .enqueue("someone@example.com", "Someone", "test", "subject", "body", None)
         .await
         .expect("enqueue");
     let id = app.state.db.email_queue.list_pending(1).await.unwrap()[0].id;
@@ -246,7 +252,7 @@ async fn repeated_failures_trip_the_circuit_breaker_and_stop_further_attempts() 
     app.state
         .db
         .email_queue
-        .enqueue("someone@example.com", "Someone", "test", "subject", "body")
+        .enqueue("someone@example.com", "Someone", "test", "subject", "body", None)
         .await
         .expect("enqueue");
     let id = app.state.db.email_queue.list_pending(1).await.unwrap()[0].id;
@@ -324,6 +330,7 @@ async fn a_failed_delivery_is_reported_to_the_opted_in_admins() {
             "admin_password_reset",
             "Your temporary password",
             "TOP-SECRET-TEMPORARY-PASSWORD",
+            None,
         )
         .await
         .expect("enqueue");
@@ -377,7 +384,7 @@ async fn a_failing_delivery_is_reported_at_the_first_and_the_persistent_attempt_
     app.state
         .db
         .email_queue
-        .enqueue("stuck@example.com", "Stuck", "test", "subject", "body")
+        .enqueue("stuck@example.com", "Stuck", "test", "subject", "body", None)
         .await
         .expect("enqueue");
     let id = app.state.db.email_queue.list_pending(1).await.unwrap()[0].id;
@@ -436,7 +443,7 @@ async fn a_failure_with_a_new_reason_is_reported_again() {
     app.state
         .db
         .email_queue
-        .enqueue("someone@example.com", "Someone", "test", "subject", "body")
+        .enqueue("someone@example.com", "Someone", "test", "subject", "body", None)
         .await
         .expect("enqueue");
     let id = app.state.db.email_queue.list_pending(1).await.unwrap()[0].id;
@@ -477,7 +484,7 @@ async fn a_failed_alert_mail_is_not_reported_again() {
     app.state
         .db
         .email_queue
-        .enqueue("someone@example.com", "Someone", "test", "subject", "body")
+        .enqueue("someone@example.com", "Someone", "test", "subject", "body", None)
         .await
         .expect("enqueue");
 
@@ -501,6 +508,194 @@ async fn a_failed_alert_mail_is_not_reported_again() {
         queued_alerts(&app).await.is_empty(),
         "a failed alert mail must not raise another alert"
     );
+
+    app.cleanup().await;
+}
+
+// ---------------------------------------------------------------------------
+// Reply-To: mail that follows an approver's decision is answered by them
+// ---------------------------------------------------------------------------
+
+/// Everything queued for `address` with the given kind.
+async fn queued_mail(
+    app: &TestApp,
+    address: &str,
+    kind: &str,
+) -> Vec<zerf::repository::EmailQueueEntry> {
+    app.state
+        .db
+        .email_queue
+        .list_pending(100)
+        .await
+        .expect("list queued mail")
+        .into_iter()
+        .filter(|mail| mail.to_address == address && mail.kind == kind)
+        .collect()
+}
+
+/// A team (lead approving one employee) with both logged in, set up *before*
+/// SMTP is configured so the onboarding mails of the new accounts stay out of
+/// the queue.
+async fn team_with_smtp(app: &TestApp) -> (TestClient, TestClient, String, i64) {
+    let admin = admin_login(app).await;
+    let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
+        bootstrap_team(app, &admin, false).await;
+    let lead = login_change_pw(app, "lead-r@example.com", &lead_pw).await;
+    let emp = login_change_pw(app, "emp-r@example.com", &emp_pw).await;
+    configure_unreachable_smtp(app).await;
+    (lead, emp, monday_iso, cat_id)
+}
+
+/// The lead's decision on an absence reaches the employee with the lead as
+/// Reply-To, while the employee's own request to the lead carries none.
+#[tokio::test]
+async fn rejected_absence_email_is_answered_by_the_approver() {
+    let app = TestApp::spawn().await;
+    let (lead, emp, _monday_iso, _cat_id) = team_with_smtp(&app).await;
+
+    let day = next_monday(21).format("%Y-%m-%d").to_string();
+    let (st, body) = emp
+        .post(
+            "/api/v1/absences",
+            &json!({"kind": "vacation", "start_date": day, "end_date": day}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "request vacation: {body}");
+    let absence_id = id(&body);
+
+    let requested = queued_mail(&app, "lead-r@example.com", "absence_requested").await;
+    assert_eq!(requested.len(), 1, "the lead is told about the request");
+    assert_eq!(
+        requested[0].reply_to_address, "",
+        "a request is not an approver's decision: no Reply-To"
+    );
+
+    let (st, body) = lead
+        .post(
+            &format!("/api/v1/absences/{absence_id}/reject"),
+            &json!({"reason": "team is short-staffed"}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "reject vacation: {body}");
+
+    let rejected = queued_mail(&app, "emp-r@example.com", "absence_rejected").await;
+    assert_eq!(rejected.len(), 1, "the employee is told about the decision");
+    assert_eq!(rejected[0].reply_to_address, "lead-r@example.com");
+    assert_eq!(rejected[0].reply_to_name, "Lara Lead");
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn rejected_timesheet_email_is_answered_by_the_approver() {
+    let app = TestApp::spawn().await;
+    let (lead, emp, monday_iso, cat_id) = team_with_smtp(&app).await;
+
+    let entry_id = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+    let submitted = queued_mail(&app, "lead-r@example.com", "timesheet_submitted").await;
+    assert_eq!(submitted.len(), 1, "the lead is told about the submission");
+    assert_eq!(submitted[0].reply_to_address, "");
+
+    let (st, _) = lead
+        .post(
+            "/api/v1/time-entries/batch-reject",
+            &json!({"ids": [entry_id], "reason": "wrong category"}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "reject week");
+
+    let rejected = queued_mail(&app, "emp-r@example.com", "timesheet_rejected").await;
+    assert_eq!(rejected.len(), 1, "the employee is told about the decision");
+    assert_eq!(rejected[0].reply_to_address, "lead-r@example.com");
+    assert_eq!(rejected[0].reply_to_name, "Lara Lead");
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn approved_timesheet_email_is_answered_by_the_approver() {
+    let app = TestApp::spawn().await;
+    let (lead, emp, monday_iso, cat_id) = team_with_smtp(&app).await;
+
+    let entry_id = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+    let (st, _) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [entry_id]}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "approve week");
+
+    let approved = queued_mail(&app, "emp-r@example.com", "timesheet_approved").await;
+    assert_eq!(approved.len(), 1);
+    assert_eq!(approved[0].reply_to_address, "lead-r@example.com");
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn reopen_decision_email_is_answered_by_the_approver() {
+    let app = TestApp::spawn().await;
+    let (lead, emp, monday_iso, cat_id) = team_with_smtp(&app).await;
+
+    let entry_id = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+    let (st, _) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [entry_id]}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "approve week");
+
+    let (st, body) = emp
+        .post(
+            "/api/v1/reopen-requests",
+            &json!({"week_start": monday_iso, "reason": "Need to fix an entry"}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "request reopen: {body}");
+    let request_id = id(&body);
+
+    let created = queued_mail(&app, "lead-r@example.com", "reopen_request_created").await;
+    assert_eq!(created.len(), 1, "the lead is told about the request");
+    assert_eq!(created[0].reply_to_address, "");
+
+    let (st, _) = lead
+        .post(
+            &format!("/api/v1/reopen-requests/{request_id}/approve"),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "approve reopen");
+
+    let approved = queued_mail(&app, "emp-r@example.com", "reopen_approved").await;
+    assert_eq!(approved.len(), 1);
+    assert_eq!(approved[0].reply_to_address, "lead-r@example.com");
+    assert_eq!(approved[0].reply_to_name, "Lara Lead");
+
+    app.cleanup().await;
+}
+
+/// System mail that is nobody's decision (here: the account-created mail an
+/// admin's action triggers) keeps coming from the system sender only.
+#[tokio::test]
+async fn system_mail_has_no_reply_to() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    configure_unreachable_smtp(&app).await;
+
+    let (status, _body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({"email":"onboard@example.com","first_name":"On","last_name":"Board",
+                "role":"employee","weekly_hours":39,"start_date":"2024-01-01","approver_ids":[1]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create user");
+
+    let onboarding = queued_mail(&app, "onboard@example.com", "account_created").await;
+    assert_eq!(onboarding.len(), 1);
+    assert_eq!(onboarding[0].reply_to_address, "");
 
     app.cleanup().await;
 }

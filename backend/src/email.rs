@@ -164,6 +164,11 @@ impl std::error::Error for GuardedSendError {}
 /// `kind` is the notification kind that produced the mail. The queue worker
 /// reads it back to avoid reporting the failure of an admin alert with yet
 /// another admin alert.
+///
+/// `reply_to` is set for mail that follows directly from a person's action
+/// (e.g. an approver rejecting a request): the recipient's answer then reaches
+/// that person rather than the system sender's mailbox.
+#[allow(clippy::too_many_arguments)]
 pub async fn queue_email(
     email_queue: &crate::repository::EmailQueueDb,
     smtp_configured: bool,
@@ -172,12 +177,13 @@ pub async fn queue_email(
     kind: &str,
     subject: &str,
     body_text: &str,
+    reply_to: Option<&crate::repository::EmailContact>,
 ) {
     if !smtp_configured || to.trim().is_empty() {
         return;
     }
     if let Err(e) = email_queue
-        .enqueue(to, to_name, kind, subject, body_text)
+        .enqueue(to, to_name, kind, subject, body_text, reply_to)
         .await
     {
         tracing::warn!(target: "zerf::email", "failed to queue email to {to}: {e}");
@@ -196,13 +202,10 @@ pub async fn queue_email(
 pub async fn send_queued(
     breaker: &CircuitBreaker,
     cfg: &SmtpConfig,
-    to: &str,
-    to_name: &str,
-    subject: &str,
-    body_text: &str,
+    entry: &crate::repository::EmailQueueEntry,
 ) -> Result<(), GuardedSendError> {
     guarded_send(breaker, QUEUED_EMAIL_SEND_TIMEOUT, || {
-        send_now(cfg, to, to_name, subject, body_text, None)
+        send_now(cfg, entry, None)
     })
     .await
 }
@@ -320,35 +323,68 @@ fn sanitize_display_name(name: &str) -> String {
 
 async fn send_now(
     cfg: &SmtpConfig,
-    to: &str,
-    to_name: &str,
-    subject: &str,
-    body_text: &str,
+    entry: &crate::repository::EmailQueueEntry,
     attachment: Option<EmailAttachment>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let from: Mailbox = cfg.from.parse()?;
-    // Build the mailbox via lettre's structured constructor rather than
-    // hand-quoting a "Name" <addr> string: Mailbox::new takes the display
-    // name as a plain String next to an already-parsed Address, so it never
-    // re-parses the name and can't choke on punctuation in it.
-    let to_box: Mailbox = if to_name.trim().is_empty() {
-        to.parse()?
-    } else {
-        let sanitized = sanitize_display_name(to_name);
-        if sanitized.is_empty() {
-            to.parse()?
-        } else {
-            let address = to
-                .parse::<lettre::Address>()
-                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
-            Mailbox::new(Some(sanitized), address)
-        }
-    };
-    let clean_subject = subject.replace(['\r', '\n'], "");
-    let builder = Message::builder().from(from).to(to_box).subject(clean_subject);
-    let email = finish_message(builder, body_text, attachment)?;
+    let email = build_queued_message(&cfg.from, entry, attachment)?;
     build_mailer(cfg, None)?.send(email).await?;
     Ok(())
+}
+
+/// Turn one queued row into a ready-to-send message: system sender in `From`,
+/// the recipient in `To`, and — when the row names one — the acting person in
+/// `Reply-To`. Kept separate from the SMTP call so the headers can be tested
+/// without a mail server.
+fn build_queued_message(
+    from: &str,
+    entry: &crate::repository::EmailQueueEntry,
+    attachment: Option<EmailAttachment>,
+) -> Result<Message, Box<dyn std::error::Error + Send + Sync>> {
+    let from: Mailbox = from.parse()?;
+    let to_box = mailbox(&entry.to_address, &entry.to_name)?;
+    let clean_subject = entry.subject.replace(['\r', '\n'], "");
+    let mut builder = Message::builder().from(from).to(to_box).subject(clean_subject);
+    if let Some(reply_to) = reply_to_mailbox(entry) {
+        builder = builder.reply_to(reply_to);
+    }
+    finish_message(builder, &entry.body_text, attachment)
+}
+
+/// Build a header mailbox via lettre's structured constructor rather than
+/// hand-quoting a "Name" <addr> string: Mailbox::new takes the display name as
+/// a plain String next to an already-parsed Address, so it never re-parses the
+/// name and can't choke on punctuation in it.
+fn mailbox(address: &str, name: &str) -> Result<Mailbox, Box<dyn std::error::Error + Send + Sync>> {
+    let sanitized = sanitize_display_name(name);
+    if sanitized.is_empty() {
+        return Ok(address.parse()?);
+    }
+    let address = address
+        .parse::<lettre::Address>()
+        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
+    Ok(Mailbox::new(Some(sanitized), address))
+}
+
+/// The `Reply-To` header of a queued row, if it has one. An address that does
+/// not parse is dropped with a warning instead of failing the send: a failed
+/// row is retried forever, so a bad Reply-To would otherwise block a message
+/// that is perfectly deliverable without it.
+fn reply_to_mailbox(entry: &crate::repository::EmailQueueEntry) -> Option<Mailbox> {
+    if entry.reply_to_address.trim().is_empty() {
+        return None;
+    }
+    match mailbox(&entry.reply_to_address, &entry.reply_to_name) {
+        Ok(reply_to) => Some(reply_to),
+        Err(e) => {
+            tracing::warn!(
+                target: "zerf::email",
+                "ignoring invalid Reply-To address {:?} on queued email {}: {e}",
+                entry.reply_to_address,
+                entry.id
+            );
+            None
+        }
+    }
 }
 
 /// Like `send_now`, but addresses every entry in `to` as an equal recipient
@@ -428,6 +464,81 @@ mod tests {
     #[test]
     fn sanitize_display_name_trims_surrounding_whitespace() {
         assert_eq!(sanitize_display_name("  Jane Doe  "), "Jane Doe");
+    }
+
+    fn queued_entry(reply_to_address: &str, reply_to_name: &str) -> crate::repository::EmailQueueEntry {
+        crate::repository::EmailQueueEntry {
+            id: 7,
+            to_address: "emil@example.com".into(),
+            to_name: "Emil Emp".into(),
+            kind: "absence_rejected".into(),
+            last_error: None,
+            subject: "Absence rejected".into(),
+            body_text: "body".into(),
+            reply_to_address: reply_to_address.into(),
+            reply_to_name: reply_to_name.into(),
+        }
+    }
+
+    fn header_lines(message: &Message) -> Vec<String> {
+        String::from_utf8(message.formatted())
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// The acting person becomes the Reply-To, with their display name, while
+    /// the system account stays the sender.
+    #[test]
+    fn queued_message_carries_the_reply_to_person() {
+        let entry = queued_entry("lara@example.com", "Lara Lead");
+        let message = build_queued_message("Zerf <zerf@example.com>", &entry, None).unwrap();
+
+        let lines = header_lines(&message);
+        let reply_to = lines
+            .iter()
+            .find(|line| line.starts_with("Reply-To:"))
+            .expect("Reply-To header present");
+        assert!(reply_to.contains("Lara Lead"), "Reply-To: {reply_to}");
+        assert!(reply_to.contains("<lara@example.com>"), "Reply-To: {reply_to}");
+        let from = lines.iter().find(|line| line.starts_with("From:")).unwrap();
+        assert!(from.contains("zerf@example.com"), "From: {from}");
+    }
+
+    /// A row without a Reply-To is sent exactly as before: no such header.
+    #[test]
+    fn queued_message_without_reply_to_has_no_header() {
+        let entry = queued_entry("", "");
+        let message = build_queued_message("zerf@example.com", &entry, None).unwrap();
+
+        assert!(header_lines(&message)
+            .iter()
+            .all(|line| !line.starts_with("Reply-To:")));
+    }
+
+    /// A Reply-To that does not parse must not stop the mail: a failed row is
+    /// retried forever, and the message is deliverable without the header.
+    #[test]
+    fn queued_message_ignores_an_unparseable_reply_to() {
+        let entry = queued_entry("not an address", "Lara Lead");
+        let message = build_queued_message("zerf@example.com", &entry, None)
+            .expect("the message is still built");
+
+        assert!(header_lines(&message)
+            .iter()
+            .all(|line| !line.starts_with("Reply-To:")));
+    }
+
+    /// A reply-to name could try to smuggle in another header line.
+    #[test]
+    fn queued_message_reply_to_name_cannot_inject_headers() {
+        let entry = queued_entry("lara@example.com", "Lara\r\nBcc: evil@example.com");
+        let message = build_queued_message("zerf@example.com", &entry, None).unwrap();
+
+        assert!(header_lines(&message)
+            .iter()
+            .all(|line| !line.starts_with("Bcc:")));
     }
 
     /// Guards the assumption `send_now_multi` relies on: repeated `.to()`

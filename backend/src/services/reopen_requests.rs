@@ -136,6 +136,9 @@ pub async fn notify_assigned_approvers_if_admin_acted(
                 &text.body,
             )
             .email_body(&email_body)
+            // The admin's decision is what the assigned approvers are told
+            // about, so a question about it goes back to the admin.
+            .reply_to_user(requester.id)
             .reference("reopen_request", Some(reopen_request.id)),
         )
         .await;

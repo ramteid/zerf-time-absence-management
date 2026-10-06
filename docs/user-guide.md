@@ -821,6 +821,16 @@ a booking they have not handed in.
 If an admin approves or rejects their own item, Zerf records the audit event
 and sends an in-app-only notification (no email) back to the same user.
 
+### Replying to an email about a decision
+
+Emails about a decision are sent from Zerf's sender address. If you reply to
+such an email, your reply goes to the person who made the decision. That
+covers approved or rejected weeks, absences, absence cancellations, and reopen
+requests. The same applies to approvers: when an admin decides a reopen
+request of their team, a reply to the email they receive goes to that admin.
+Reminders and all other emails have no reply address. A reply to them goes to
+Zerf's sender address.
+
 ### Approver receives notifications when
 
 - a week is submitted (one notification identifying the submitted weeks),

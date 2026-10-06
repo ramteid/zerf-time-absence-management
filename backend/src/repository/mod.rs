@@ -28,7 +28,7 @@ pub use absences::{
 pub use app_logs::{AppLogDb, AppLogEntry};
 pub use audit::{AuditDb, LogEntry};
 pub use categories::{Category, CategoryDb};
-pub use email_queue::{EmailQueueDb, EmailQueueEntry};
+pub use email_queue::{EmailContact, EmailQueueDb, EmailQueueEntry};
 pub use error_notification_queue::{ErrorNotificationEntry, ErrorNotificationQueueDb};
 pub use facade::Db;
 pub use flextime_adjustments::{
