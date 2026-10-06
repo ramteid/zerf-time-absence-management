@@ -13,8 +13,16 @@
 //! only once the SMTP server confirmed it accepted the message. A row that
 //! keeps failing simply stays queued — nothing is ever silently dropped, and
 //! it is retried indefinitely.
+//!
+//! A failed delivery is never silent either. Its first failed attempt, any
+//! attempt that fails for a different reason than the one before, and its
+//! 100th (`PERSISTENT_FAILURE_ATTEMPTS`) are logged as errors and reported to
+//! the opted-in admins (see `is_reported_failure` and
+//! `report_failed_delivery`); the repeats in between are logged at INFO only.
 
 use crate::error::AppResult;
+use crate::repository::EmailQueueEntry;
+use crate::services::notifications::{enqueue_error, load_language, SYSTEM_ERROR_KIND};
 use crate::AppState;
 use std::time::Duration;
 
@@ -26,10 +34,18 @@ const POLL_INTERVAL: Duration = Duration::from_secs(2 * 60);
 /// rest simply waits for the next poll.
 const BATCH_LIMIT: i64 = 50;
 
-/// Attempt count at which a still-failing email is worth a one-time log
-/// line. Not re-logged on every attempt past this point — the row keeps
-/// retrying forever regardless, per the "never drop an email" requirement.
-const ATTEMPT_WARNING_THRESHOLD: i32 = 100;
+/// Attempt count at which an email that is *still* undeliverable is reported
+/// once more, even though its reason has not changed. The first report may have
+/// been dismissed as a passing blip; after this many polls (hours, not minutes)
+/// it clearly is not one. Past this point only a changed reason is reported
+/// again — the row keeps retrying forever regardless, per the "never drop an
+/// email" requirement.
+const PERSISTENT_FAILURE_ATTEMPTS: i32 = 100;
+
+/// Longest server reply shown in an admin alert. The full text stays in the
+/// log and in the row's `last_error`; a pathological multi-line reply must not
+/// bloat a notification.
+const MAX_ALERT_ERROR_CHARS: usize = 300;
 
 pub async fn run_loop(state: AppState) {
     loop {
@@ -66,8 +82,7 @@ pub async fn process_pending(state: &AppState) {
             &entry.subject,
             &entry.body_text,
         )
-        .await
-        {
+        .await {
             Ok(()) => {
                 // SMTP already confirmed delivery — a failure here must not
                 // leave the row looking untouched, or the next poll would
@@ -96,14 +111,24 @@ pub async fn process_pending(state: &AppState) {
                 break;
             }
             Err(crate::email::GuardedSendError::Smtp(e)) => {
+                let error_text = e.to_string();
                 let attempts = match state
                     .db
                     .email_queue
-                    .record_failure(entry.id, &e.to_string())
+                    .record_failure(entry.id, &error_text)
                     .await
                 {
                     Ok(attempts) => attempts,
                     Err(db_err) => {
+                        // The failed send is the news, whatever state the
+                        // attempt counter is in: a bookkeeping error must
+                        // never swallow it.
+                        tracing::error!(
+                            target: "zerf::email_queue",
+                            "email {} to {} could not be delivered: {error_text}",
+                            entry.id,
+                            entry.to_address
+                        );
                         tracing::error!(
                             target: "zerf::email_queue",
                             "record_failure for entry {} failed: {db_err}",
@@ -112,16 +137,123 @@ pub async fn process_pending(state: &AppState) {
                         continue;
                     }
                 };
-                if attempts == ATTEMPT_WARNING_THRESHOLD {
-                    tracing::warn!(
-                        target: "zerf::email_queue",
-                        "email {} to {} has failed {attempts} delivery attempts and remains queued: {e}",
-                        entry.id,
-                        entry.to_address
-                    );
-                }
+                report_failed_delivery(state, &entry, attempts, &error_text).await;
             }
         }
+    }
+}
+
+/// Whether this failure is reported (logged as an error and raised to the
+/// admins) rather than merely noted at INFO level.
+///
+/// Three kinds of failure are news to an admin:
+/// * the first one of a mail, because a new problem has appeared;
+/// * one whose reason differs from the previous attempt's. The first report
+///   may have been about a passing outage, and the server that is back now
+///   refuses the recipient — that must not wait hours for the next milestone;
+/// * the [`PERSISTENT_FAILURE_ATTEMPTS`]th, because the problem has not gone
+///   away.
+///
+/// The quiet for everything else protects the System Log: it keeps 1000 rows,
+/// and one address the server keeps refusing is retried on every poll — an
+/// error row per retry would push every other entry out of the log within days.
+fn is_reported_failure(attempts: i32, previous_error: Option<&str>, error_text: &str) -> bool {
+    attempts == 1
+        || attempts == PERSISTENT_FAILURE_ATTEMPTS
+        // No previous error on a later attempt cannot happen in practice;
+        // reporting is the safe reading of it.
+        || previous_error.map(failure_class) != Some(failure_class(error_text))
+}
+
+/// The stable head of an SMTP error text, such as `permanent error (550)` or
+/// `Connection error`: what is left once the details after the first colon
+/// (the server's wording, addresses, OS error numbers) are dropped. Two
+/// failures of one class are the same reason. Comparing whole texts instead
+/// would report every retry whenever the server's wording carries something
+/// that changes from attempt to attempt, such as a queue id.
+fn failure_class(error_text: &str) -> &str {
+    error_text.split(':').next().unwrap_or(error_text).trim()
+}
+
+/// Log one failed delivery attempt and, when it is worth reporting (see
+/// [`is_reported_failure`]), raise it to the opted-in admins like any other
+/// technical error.
+///
+/// The error is logged under this module's own `zerf::email_queue` target,
+/// which the log-capture writer keeps out of its automatic error → admin
+/// alert path (a delivery failure must not spawn a notification about
+/// itself). So the alert is raised explicitly here — except for a failed
+/// *admin alert* ([`SYSTEM_ERROR_KIND`]). Reporting that one would queue one
+/// more alert mail, which fails the same way, and so on for as long as the
+/// mail server stays down. Such a failure is still logged, and the alert
+/// about the original problem already sits in the admins' app notifications.
+///
+/// The mail body is never logged or quoted: it can carry a temporary password
+/// or a reset link.
+async fn report_failed_delivery(
+    state: &AppState,
+    entry: &EmailQueueEntry,
+    attempts: i32,
+    error_text: &str,
+) {
+    if !is_reported_failure(attempts, entry.last_error.as_deref(), error_text) {
+        tracing::info!(
+            target: "zerf::email_queue",
+            "email {} to {} is still not delivered (attempt {attempts}): {error_text}",
+            entry.id,
+            entry.to_address
+        );
+        return;
+    }
+
+    tracing::error!(
+        target: "zerf::email_queue",
+        "email {} to {} (subject {:?}) could not be delivered (attempt {attempts}): {error_text}",
+        entry.id,
+        entry.to_address,
+        entry.subject
+    );
+
+    if entry.kind == SYSTEM_ERROR_KIND {
+        return;
+    }
+
+    let language = load_language(&state.pool).await;
+    let text = crate::i18n::notification_text(
+        &language,
+        "email_delivery_failed_title",
+        "email_delivery_failed_body",
+        &[
+            ("recipient", entry.to_address.clone()),
+            ("subject", entry.subject.clone()),
+            ("attempts", attempts.to_string()),
+            ("error", alert_error_text(error_text)),
+        ],
+    );
+    // One key per queued mail: a later report about the same mail (new reason,
+    // or the persistent milestone) re-raises the first one with its new text
+    // instead of piling up beside it, while a different mail failing for the
+    // same reason gets a notification of its own.
+    enqueue_error(
+        state,
+        &language,
+        &format!("email_delivery_failed_{}", entry.id),
+        &text.title,
+        &text.body,
+    )
+    .await;
+}
+
+/// The server's reply as a single line of at most [`MAX_ALERT_ERROR_CHARS`]
+/// characters. SMTP replies can span several lines.
+fn alert_error_text(error_text: &str) -> String {
+    let one_line = error_text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut chars = one_line.chars();
+    let shortened: String = chars.by_ref().take(MAX_ALERT_ERROR_CHARS).collect();
+    if chars.next().is_some() {
+        format!("{shortened}…")
+    } else {
+        shortened
     }
 }
 
@@ -153,4 +285,100 @@ pub async fn delete_with_retry(email_queue: &crate::repository::EmailQueueDb, id
         tokio::time::sleep(DELETE_RETRY_DELAY).await;
     }
     email_queue.delete_entry(id).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const REFUSED: &str = "Connection error: Connection refused (os error 111)";
+    const UNKNOWN_USER: &str = "permanent error (550): 5.1.1 User unknown";
+
+    #[test]
+    fn the_first_and_the_persistent_attempt_are_always_reported() {
+        assert!(is_reported_failure(1, None, REFUSED));
+        assert!(is_reported_failure(
+            PERSISTENT_FAILURE_ATTEMPTS,
+            Some(REFUSED),
+            REFUSED
+        ));
+    }
+
+    #[test]
+    fn a_repeat_of_the_same_reason_stays_quiet() {
+        for attempts in [
+            2,
+            3,
+            5,
+            50,
+            PERSISTENT_FAILURE_ATTEMPTS - 1,
+            PERSISTENT_FAILURE_ATTEMPTS + 1,
+            500,
+        ] {
+            assert!(
+                !is_reported_failure(attempts, Some(REFUSED), REFUSED),
+                "attempt {attempts} must stay quiet"
+            );
+        }
+    }
+
+    #[test]
+    fn a_changed_reason_is_reported_between_the_milestones() {
+        // The server was unreachable at first and now answers, refusing the
+        // recipient: new information, not a repeat.
+        assert!(is_reported_failure(2, Some(REFUSED), UNKNOWN_USER));
+        assert!(is_reported_failure(
+            PERSISTENT_FAILURE_ATTEMPTS + 7,
+            Some(UNKNOWN_USER),
+            REFUSED
+        ));
+        // A failure with no recorded predecessor is reported rather than lost.
+        assert!(is_reported_failure(3, None, REFUSED));
+    }
+
+    #[test]
+    fn changing_server_detail_is_not_a_changed_reason() {
+        assert!(!is_reported_failure(
+            7,
+            Some("permanent error (550): 5.7.1 Blocked, id=abc123"),
+            "permanent error (550): 5.7.1 Blocked, id=def456"
+        ));
+        assert!(!is_reported_failure(
+            7,
+            Some("Connection error: Connection refused (os error 111)"),
+            "Connection error: timed out"
+        ));
+    }
+
+    #[test]
+    fn the_failure_class_is_the_text_before_the_first_colon() {
+        assert_eq!(failure_class(UNKNOWN_USER), "permanent error (550)");
+        assert_eq!(failure_class(REFUSED), "Connection error");
+        assert_eq!(failure_class("Connection error"), "Connection error");
+        assert_eq!(
+            failure_class("SMTP delivery timed out after 30 seconds"),
+            "SMTP delivery timed out after 30 seconds"
+        );
+    }
+
+    #[test]
+    fn a_multi_line_server_reply_becomes_one_line() {
+        assert_eq!(
+            alert_error_text("550-5.7.1 blocked\n550 5.7.1   see policy\r\n"),
+            "550-5.7.1 blocked 550 5.7.1 see policy"
+        );
+    }
+
+    #[test]
+    fn an_overlong_server_reply_is_cut_at_a_character_boundary() {
+        // 'ü' is two bytes in UTF-8, so a byte-based cut would split it.
+        let long = "ü".repeat(MAX_ALERT_ERROR_CHARS + 50);
+        let shortened = alert_error_text(&long);
+        assert_eq!(shortened.chars().count(), MAX_ALERT_ERROR_CHARS + 1);
+        assert!(shortened.ends_with('…'));
+
+        // A reply exactly at the limit is left alone.
+        let exact = "x".repeat(MAX_ALERT_ERROR_CHARS);
+        assert_eq!(alert_error_text(&exact), exact);
+    }
 }

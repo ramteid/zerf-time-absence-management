@@ -178,6 +178,8 @@ static LANGUAGES: &[LangDef] = &[
             ("report_upload_pre_start_review_body", "User: {first_name} {last_name} (ID {user_id})\nPeriod: {period}\nCurrent start date: {start_date}\nIssue: The start date falls within or after this period, and the change still requires review.\nAction: Confirm the start date and historical entries, then retry the PDF export."),
             ("report_upload_pre_start_content_body", "User: {first_name} {last_name} (ID {user_id})\nPeriod: {period}\nCurrent start date: {start_date}\nIssue: Stored report rows exist before the current start date.\nAction: Correct the start date or historical entries, then retry the PDF export."),
             ("report_upload_unsettled_time_body", "User: {first_name} {last_name} (ID {user_id})\nPeriod: {period}\nIssue: The account is archived or time tracking is disabled, but unresolved time entries remain.\nAction: Resolve draft, submitted, and rejected entries, then retry the PDF export."),
+            ("email_delivery_failed_title", "Email could not be delivered"),
+            ("email_delivery_failed_body", "Recipient: {recipient}\nSubject: {subject}\nAttempts: {attempts}\nIssue: The mail server did not accept the email: {error}\nAction: Check the email (SMTP) settings and the mail server. Zerf retries the delivery automatically."),
             // Monthly payroll report
             ("payroll_report_email_subject", "Payroll report {period} - {org_name}"),
             ("payroll_report_email_body", "Hello,\n\nattached you will find the payroll report for {period} from {org_name}.\n\nIt lists the absence days per employee and the working days and hours for the selected groups.\n\nThis email was generated automatically."),
@@ -377,6 +379,8 @@ static LANGUAGES: &[LangDef] = &[
             ("report_upload_pre_start_review_body", "Person: {first_name} {last_name} (ID {user_id})\nZeitraum: {period}\nAktuelles Startdatum: {start_date}\nProblem: Das Startdatum liegt in oder nach diesem Zeitraum und die \u{00c4}nderung muss noch gepr\u{00fc}ft werden.\nAktion: Pr\u{00fc}fen Sie das Startdatum und die historischen Eintr\u{00e4}ge und starten Sie den PDF-Export erneut."),
             ("report_upload_pre_start_content_body", "Person: {first_name} {last_name} (ID {user_id})\nZeitraum: {period}\nAktuelles Startdatum: {start_date}\nProblem: Gespeicherte Berichtsdaten liegen vor dem aktuellen Startdatum.\nAktion: Korrigieren Sie das Startdatum oder die historischen Eintr\u{00e4}ge und starten Sie den PDF-Export erneut."),
             ("report_upload_unsettled_time_body", "Person: {first_name} {last_name} (ID {user_id})\nZeitraum: {period}\nProblem: Das Konto ist archiviert oder die Zeiterfassung ist deaktiviert, aber es gibt noch ungekl\u{00e4}rte Zeiteintr\u{00e4}ge.\nAktion: Kl\u{00e4}ren Sie Eintr\u{00e4}ge im Entwurf, eingereichte und abgelehnte Eintr\u{00e4}ge und starten Sie den PDF-Export erneut."),
+            ("email_delivery_failed_title", "E-Mail konnte nicht zugestellt werden"),
+            ("email_delivery_failed_body", "Empf\u{00e4}nger: {recipient}\nBetreff: {subject}\nVersuche: {attempts}\nProblem: Der Mailserver hat die E-Mail nicht angenommen: {error}\nAktion: Pr\u{00fc}fen Sie die E-Mail-Einstellungen (SMTP) und den Mailserver. Zerf versucht die Zustellung automatisch erneut."),
             // Monatliche Lohnmeldung
             ("payroll_report_email_subject", "Lohnmeldung {period} - {org_name}"),
             ("payroll_report_email_body", "Hallo,\n\nim Anhang finden Sie die Lohnmeldung f\u{00fc}r {period} von {org_name}.\n\nDiese E-Mail wurde automatisch erstellt."),
@@ -1510,5 +1514,41 @@ mod tests {
             label_de.contains("bis"),
             "expected 'bis' separator, got: {label_de}"
         );
+    }
+
+    /// The admin alert for an undeliverable email must name everything the
+    /// admin needs in both languages and leave no placeholder unresolved.
+    #[test]
+    fn email_delivery_failed_alert_renders_in_both_languages() {
+        for (code, expected_title) in [
+            ("en", "Email could not be delivered"),
+            ("de", "E-Mail konnte nicht zugestellt werden"),
+        ] {
+            let text = notification_text(
+                &Language::from_setting(code),
+                "email_delivery_failed_title",
+                "email_delivery_failed_body",
+                &[
+                    ("recipient", "jurij@example.com".to_string()),
+                    ("subject", "Your temporary password".to_string()),
+                    ("attempts", "100".to_string()),
+                    ("error", "550 5.1.1 User unknown".to_string()),
+                ],
+            );
+            assert_eq!(text.title, expected_title);
+            for expected in [
+                "jurij@example.com",
+                "Your temporary password",
+                "100",
+                "550 5.1.1 User unknown",
+            ] {
+                assert!(
+                    text.body.contains(expected),
+                    "{code} body is missing {expected:?}: {}",
+                    text.body
+                );
+            }
+            assert!(!text.body.contains('{'), "unresolved placeholder: {}", text.body);
+        }
     }
 }

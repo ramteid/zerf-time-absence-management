@@ -10,6 +10,14 @@ pub struct EmailQueueEntry {
     pub id: i64,
     pub to_address: String,
     pub to_name: String,
+    /// Notification kind that produced this mail (empty for rows queued
+    /// before the column existed). The worker needs it to tell an admin
+    /// alert apart from ordinary mail when a delivery fails.
+    pub kind: String,
+    /// Why the previous delivery attempt failed (`None` before the first
+    /// one). The worker compares it with a new failure to notice that the
+    /// reason has changed.
+    pub last_error: Option<String>,
     pub subject: String,
     pub body_text: String,
 }
@@ -24,20 +32,23 @@ impl EmailQueueDb {
         Self { pool }
     }
 
-    /// Queue one email for delivery.
+    /// Queue one email for delivery. `kind` is the notification kind that
+    /// produced it (see `services::notifications::Outgoing`).
     pub async fn enqueue(
         &self,
         to_address: &str,
         to_name: &str,
+        kind: &str,
         subject: &str,
         body_text: &str,
     ) -> AppResult<()> {
         sqlx::query(
-            "INSERT INTO email_queue (to_address, to_name, subject, body_text) \
-             VALUES ($1, $2, $3, $4)",
+            "INSERT INTO email_queue (to_address, to_name, kind, subject, body_text) \
+             VALUES ($1, $2, $3, $4, $5)",
         )
         .bind(to_address)
         .bind(to_name)
+        .bind(kind)
         .bind(subject)
         .bind(body_text)
         .execute(&self.pool)
@@ -59,7 +70,7 @@ impl EmailQueueDb {
     /// fails, so fresh messages and other stuck messages get their turn.
     pub async fn list_pending(&self, limit: i64) -> AppResult<Vec<EmailQueueEntry>> {
         Ok(sqlx::query_as::<_, EmailQueueEntry>(
-            "SELECT id, to_address, to_name, subject, body_text FROM email_queue \
+            "SELECT id, to_address, to_name, kind, last_error, subject, body_text FROM email_queue \
              ORDER BY last_attempt_at ASC NULLS FIRST, id ASC LIMIT $1",
         )
         .bind(limit)

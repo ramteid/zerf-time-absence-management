@@ -141,6 +141,7 @@ pub async fn deliver(state: &AppState, msg: &Outgoing<'_>) -> bool {
             state,
             &msg.language,
             msg.user_id,
+            msg.kind,
             msg.title.to_string(),
             email_body,
             msg.append_email_footer,
@@ -224,10 +225,13 @@ async fn write_in_app(state: &AppState, msg: &Outgoing<'_>) -> bool {
 /// only logged). When `append_footer` is true the configured timestamp and
 /// public app URL are appended. No-op when SMTP is not enabled/configured
 /// (the whole email feature is opt-in) — nothing is queued in that case.
+/// `kind` is stored with the queued row so the delivery worker can recognise
+/// admin alerts ([`SYSTEM_ERROR_KIND`]) among the mail it fails to send.
 async fn send_notification_email(
     state: &AppState,
     language: &Language,
     user_id: i64,
+    kind: &str,
     subject: String,
     body: &str,
     append_footer: bool,
@@ -261,6 +265,7 @@ async fn send_notification_email(
             smtp_configured,
             &email,
             &recipient_name,
+            kind,
             &subject,
             &email_body,
         )

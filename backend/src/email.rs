@@ -8,7 +8,8 @@
 //!   returns immediately; [`crate::background::email_queue`] drains that
 //!   table on a 2-minute poll and only deletes a row once SMTP confirmed
 //!   delivery. A message that keeps failing simply stays queued forever —
-//!   nothing is silently lost to a transient SMTP outage anymore.
+//!   nothing is silently lost to a transient SMTP outage anymore. Every
+//!   failure is logged and reported to the opted-in admins by that worker.
 //! * [`send_with_attachment`] — used only by the monthly payroll report,
 //!   which already has its own period-keyed retry queue
 //!   (`payroll_report_queue`) with "stays queued until confirmed sent"
@@ -159,18 +160,26 @@ impl std::error::Error for GuardedSendError {}
 /// nothing is queued otherwise, matching the previous silent no-op when SMTP
 /// was unset. A message already queued when SMTP is later disabled is left
 /// in place untouched; only enqueueing is gated, not draining.
+///
+/// `kind` is the notification kind that produced the mail. The queue worker
+/// reads it back to avoid reporting the failure of an admin alert with yet
+/// another admin alert.
 pub async fn queue_email(
     email_queue: &crate::repository::EmailQueueDb,
     smtp_configured: bool,
     to: &str,
     to_name: &str,
+    kind: &str,
     subject: &str,
     body_text: &str,
 ) {
     if !smtp_configured || to.trim().is_empty() {
         return;
     }
-    if let Err(e) = email_queue.enqueue(to, to_name, subject, body_text).await {
+    if let Err(e) = email_queue
+        .enqueue(to, to_name, kind, subject, body_text)
+        .await
+    {
         tracing::warn!(target: "zerf::email", "failed to queue email to {to}: {e}");
     }
 }

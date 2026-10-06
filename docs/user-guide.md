@@ -928,11 +928,13 @@ notifications/emails.
 
 ### System error notifications (admin)
 
-When a technical failure occurs — such as a database backup failure, a Nextcloud upload error, or any error logged by the application — admins can be alerted. This is **opt-in per admin**: only admins whose profile has **"Receives notifications about technical system errors"** enabled are notified. The option is off by default and is set when creating or editing an admin user (it appears only for the Admin role).
+When a technical failure occurs — such as a database backup failure, a Nextcloud upload error, an email that cannot be delivered, or any error logged by the application — admins can be alerted. This is **opt-in per admin**: only admins whose profile has **"Receives notifications about technical system errors"** enabled are notified. The option is off by default and is set when creating or editing an admin user (it appears only for the Admin role).
 
 - Opted-in admins receive both a **pinned** in-app notification (highlighted at the top of the notification panel) **and an email**.
 - If no admin has opted in, technical errors are still recorded in the System Log but no one is notified — enable the option for at least one admin to receive alerts.
 - Each failure class produces **at most one active notification** per admin. If the notification is dismissed and the failure recurs, it is raised again.
+- **Undeliverable emails are reported.** If the email server cannot be reached or refuses a message, the notification names the recipient, the subject and the reason the server gave. It appears when the first attempt fails, again if a later attempt fails for a different reason, and once more if the message is still undelivered after 100 attempts (several hours later). Zerf keeps trying in between without further notices.
+- If the email server is down, the notification still appears in the app right away. The alert email follows as soon as the server works again. An alert email that fails is not reported a second time.
 - If no email server (SMTP) is configured, the in-app notification is still created and the missing email is noted in the System Log; no delivery is retried endlessly.
 - **Backup and upload failure notifications are automatically resolved** when the next cycle succeeds. You do not need to dismiss them manually after fixing the underlying problem; the notification disappears on the next successful backup or upload.
 
@@ -1585,6 +1587,10 @@ work without needing access to the server.
   popup.
 - The log keeps at most 1000 entries, and entries are removed after one year.
   Older entries are deleted automatically.
+- An email that cannot be delivered is listed when its first attempt fails,
+  when a later attempt fails for a different reason, and at the 100th attempt.
+  The other retries are not listed, so one address that keeps being refused
+  cannot fill the log.
 
 ### Creating a user
 
@@ -1773,9 +1779,14 @@ Resets the password for any active user.
 - A new temporary password is generated automatically.
 - The user is required to change it on next login.
 - All existing sessions for that user end immediately.
-- When SMTP is configured, the user receives an email with the new temporary
-  password. When SMTP is not configured, the admin must deliver the password
-  to the user manually.
+- When SMTP is configured, the dialog says that the email with the new
+  password is queued for sending; Zerf sends it within a few minutes. When SMTP
+  is not configured, the dialog warns that no email is sent, and the admin must
+  deliver the password to the user manually.
+- Zerf can only tell whether the email server accepted the message, not
+  whether it reached the user's inbox. If it does not arrive, reset the
+  password again and hand the new one over directly — a password is shown only
+  once, in the dialog.
 
 ### Managing approver assignments
 
@@ -1880,6 +1891,11 @@ email queued and automatically retries delivery every few minutes until it
 succeeds — no email is silently lost. If SMTP is turned off while emails are
 still waiting to go out, they stay queued and are sent once it is turned back
 on.
+
+Zerf can only see whether the email server accepted a message. If the server
+accepts it and the recipient's email provider refuses it afterwards (for
+example because the sending server is on a blocklist), the refusal arrives as
+a bounce message in the mailbox of the sender address. Zerf does not show it.
 
 ### Nextcloud Upload
 

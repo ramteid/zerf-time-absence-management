@@ -139,7 +139,7 @@ let user = UserDb::new(pool.clone()).find_by_id(id).await?;
 - Monthly timesheet PDF upload to Nextcloud (daily, after midnight)
 - Monthly payroll report email to the tax office (daily, after midnight)
 - Error-notification worker: drains `error_notification_queue` and alerts opted-in admins in-app + by email (poll every 10s)
-- Email queue worker: drains `email_queue` and delivers via SMTP, guarded by a shared circuit breaker (poll every 2 minutes)
+- Email queue worker: drains `email_queue` and delivers via SMTP, guarded by a shared circuit breaker; logs failed deliveries as errors and alerts opted-in admins (poll every 2 minutes)
 
 Both monthly jobs share `background/schedule.rs` (daily loop, `YYYY-MM` period
 math, queue backfill through the previous month, day-of-month deferral) and the
@@ -600,13 +600,32 @@ warned about. A shared `email::CircuitBreaker` (5 consecutive failures opens
 it; a 5-minute cooldown then grants one half-open trial) guards every real
 SMTP attempt so a longer outage stops being retried on every poll; the
 breaker is shared with the payroll report's own `send_with_attachment` call so
-both paths back off together. A row is only logged as a system warning (not
-raised as an admin notification, to avoid emailing about email being broken)
-once it has failed 100 delivery attempts — logged once at that threshold, not
-repeated on every attempt after. The one exception that bypasses the queue
-entirely is the monthly payroll report PDF, which already has its own
-period-keyed retry queue (`payroll_report_queue`) with "stays queued until
-confirmed sent" semantics; it still routes its actual SMTP transaction
+both paths back off together. A failed delivery is never silent: its first failed
+attempt, any attempt that fails for a different reason than the one before, and
+its 100th (`PERSISTENT_FAILURE_ATTEMPTS`) are logged as errors under the
+`zerf::email_queue` target and raised to the opted-in admins through
+`enqueue_error` (dedupe key `email_delivery_failed_<queue id>`, so a later report
+re-raises the first with its new text). "A different reason" compares
+`failure_class` — the part of lettre's error text before the first colon, such as
+`permanent error (550)` — so server detail that changes per attempt (a queue id)
+is not a new reason; without this rule an outage reported at the first attempt
+would hide the recipient refusal that surfaces once the server is back, for
+hours. The repeats in between are logged at INFO only: `app_logs` keeps 1000
+rows, and one address the server keeps refusing is retried on every poll, so an
+error row per retry would push every other entry out of the System Log within
+days. The target stays on the
+log-capture loop guard's exclusion list (`zerf::email*`) on purpose, so the
+automatic error → alert path never fires for it and the alert is raised
+explicitly instead — except for a failed *admin alert*. Those mails carry
+`email_queue.kind = system_error` (stored by `services::notifications::deliver`),
+and their failure is logged but never reported: reporting it would queue another
+alert mail, which fails the same way, endlessly, while the mail server is down.
+The mail body is never logged or quoted (it can hold a temporary password or a
+reset link). What Zerf cannot see is a bounce that arrives after the SMTP server
+accepted the message — that lands in the sender mailbox. The one exception that
+bypasses the queue entirely is the monthly payroll report PDF, which already has
+its own period-keyed retry queue (`payroll_report_queue`) with "stays queued
+until confirmed sent" semantics; it still routes its actual SMTP transaction
 through the same breaker-guarded sender. The admin's SMTP "test connection"
 probe also bypasses both the queue and the breaker deliberately — it never
 sends a real message and must not be blocked by unrelated breaker state.
@@ -647,7 +666,7 @@ sends a real message and must not be blocked by unrelated breaker state.
 | `reopen_requests` | Requests to reopen a submitted week |
 | `payroll_report_queue` | Months whose payroll report PDF still has to be emailed |
 | `error_notification_queue` | Technical-error events awaiting fan-out to opted-in admins |
-| `email_queue` | Outbound emails awaiting SMTP delivery (attempts, last error) |
+| `email_queue` | Outbound emails awaiting SMTP delivery (kind, attempts, last error) |
 | `notifications` | Per-user in-app notifications |
 | `app_settings` | Key-value app settings |
 | `audit_log` | Before/after JSON snapshots of all mutations |
