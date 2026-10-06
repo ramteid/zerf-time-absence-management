@@ -1404,10 +1404,10 @@ const TRANSLATIONS = {
     "Default weekly hours": "Standard-Wochenstunden",
     "Generate password": "Passwort generieren",
     "Password (min 12 chars)": "Passwort (mind. 12 Zeichen)",
-    "Registration email will be sent.":
-      "Es wird eine Registrierungs-E-Mail gesendet.",
-    "Password reset email will be sent.":
-      "Es wird eine E-Mail mit dem neuen Passwort gesendet.",
+    "The registration email is queued for sending.":
+      "Die Registrierungs-E-Mail wird für den Versand vorgemerkt.",
+    "The email with the new password is queued for sending.":
+      "Die E-Mail mit dem neuen Passwort wird für den Versand vorgemerkt.",
     "No email was sent! Email / SMTP is not configured.":
       "Es wurde keine E-Mail gesendet! E-Mail / SMTP ist nicht konfiguriert.",
     "You must deliver this password to the user in person!":

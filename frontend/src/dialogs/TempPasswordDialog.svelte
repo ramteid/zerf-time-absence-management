@@ -28,8 +28,8 @@
   {#if smtpEnabled}
     <div class="text-hint mt-8">
       {mode === "reset"
-        ? $t("Password reset email will be sent.")
-        : $t("Registration email will be sent.")}
+        ? $t("The email with the new password is queued for sending.")
+        : $t("The registration email is queued for sending.")}
     </div>
   {:else}
     <div class="danger-box">
