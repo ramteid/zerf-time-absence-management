@@ -257,6 +257,14 @@ async fn send_notification_email(state: &AppState, msg: &Outgoing<'_>) {
         } else {
             body.to_string()
         };
+        // Mail nobody can answer ends with the "do not reply" notice, after the
+        // footer. The test is the resolved Reply-To, not the request for one:
+        // if the deciding person is gone, the mail carries no Reply-To either.
+        let email_body = if reply_to.is_none() {
+            crate::i18n::email_with_no_reply_notice(language, &email_body)
+        } else {
+            email_body
+        };
         crate::email::queue_email(
             &state.db.email_queue,
             smtp_configured,

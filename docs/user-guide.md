@@ -828,8 +828,11 @@ such an email, your reply goes to the person who made the decision. That
 covers approved or rejected weeks, absences, absence cancellations, and reopen
 requests. The same applies to approvers: when an admin decides a reopen
 request of their team, a reply to the email they receive goes to that admin.
-Reminders and all other emails have no reply address. A reply to them goes to
-Zerf's sender address.
+All other emails have no reply address. That includes requests to approvers,
+reminders, account emails, and the payroll report. These emails end with the
+note "Please do not reply! This email was sent automatically by the system."
+In German it reads "Bitte nicht antworten! Diese E-Mail wurde automatisch vom
+System versendet."
 
 ### Approver receives notifications when
 

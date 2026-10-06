@@ -533,6 +533,25 @@ async fn queued_mail(
         .collect()
 }
 
+/// Both wordings of the closing "do not reply" notice; a mail follows the
+/// configured interface language.
+const NO_REPLY_NOTICES: [&str; 2] = [
+    "Please do not reply! This email was sent automatically by the system.",
+    "Bitte nicht antworten! Diese E-Mail wurde automatisch vom System versendet.",
+];
+
+fn ends_with_no_reply_notice(mail: &zerf::repository::EmailQueueEntry) -> bool {
+    NO_REPLY_NOTICES
+        .iter()
+        .any(|notice| mail.body_text.ends_with(notice))
+}
+
+fn mentions_no_reply_notice(mail: &zerf::repository::EmailQueueEntry) -> bool {
+    NO_REPLY_NOTICES
+        .iter()
+        .any(|notice| mail.body_text.contains(notice))
+}
+
 /// A team (lead approving one employee) with both logged in, set up *before*
 /// SMTP is configured so the onboarding mails of the new accounts stay out of
 /// the queue.
@@ -568,6 +587,10 @@ async fn rejected_absence_email_is_answered_by_the_approver() {
     assert_eq!(
         requested[0].reply_to_address, "",
         "a request is not an approver's decision: no Reply-To"
+    );
+    assert!(
+        ends_with_no_reply_notice(&to_lead[0]),
+        "a mail nobody can answer ends with the do-not-reply notice"
     );
 
     let (st, body) = lead
@@ -659,6 +682,10 @@ async fn reopen_decision_email_is_answered_by_the_approver() {
     let created = queued_mail(&app, "lead-r@example.com", "reopen_request_created").await;
     assert_eq!(created.len(), 1, "the lead is told about the request");
     assert_eq!(created[0].reply_to_address, "");
+    assert!(
+        ends_with_no_reply_notice(&created[0]),
+        "a request to the lead ends with the do-not-reply notice"
+    );
 
     let (st, _) = lead
         .post(
@@ -672,6 +699,10 @@ async fn reopen_decision_email_is_answered_by_the_approver() {
     assert_eq!(approved.len(), 1);
     assert_eq!(approved[0].reply_to_address, "lead-r@example.com");
     assert_eq!(approved[0].reply_to_name, "Lara Lead");
+    assert!(
+        !mentions_no_reply_notice(&approved[0]),
+        "a mail with a Reply-To must not tell the reader not to reply"
+    );
 
     app.cleanup().await;
 }
@@ -696,6 +727,13 @@ async fn system_mail_has_no_reply_to() {
     let onboarding = queued_mail(&app, "onboard@example.com", "account_created").await;
     assert_eq!(onboarding.len(), 1);
     assert_eq!(onboarding[0].reply_to_address, "");
+    // The account mail builds its own complete body and switches the footer
+    // off, but it still cannot be answered.
+    assert!(
+        ends_with_no_reply_notice(&onboarding[0]),
+        "even a mail without footer ends with the do-not-reply notice: {}",
+        onboarding[0].body_text
+    );
 
     app.cleanup().await;
 }

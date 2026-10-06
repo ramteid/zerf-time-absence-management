@@ -158,6 +158,7 @@ static LANGUAGES: &[LangDef] = &[
             ("email_login_url_line", "\nSign-in URL: {app_url}\n"),
             ("email_footer_with_url", "{body}\n\n{timestamp}\n\n{app_url}"),
             ("email_footer_without_url", "{body}\n\n{timestamp}"),
+            ("email_no_reply_notice", "{body}\n\nPlease do not reply! This email was sent automatically by the system."),
             ("password_reset_subject", "Reset your password"),
             ("password_reset_body", "Hello,\n\nWe received a request to reset your password.\n\nReset link (valid for 1 hour):\n{reset_link}\n\nIf you did not request this, you can ignore this email."),
             ("admin_password_reset_subject", "Your temporary password - {org_name}"),
@@ -182,7 +183,7 @@ static LANGUAGES: &[LangDef] = &[
             ("email_delivery_failed_body", "Recipient: {recipient}\nSubject: {subject}\nAttempts: {attempts}\nIssue: The mail server did not accept the email: {error}\nAction: Check the email (SMTP) settings and the mail server. Zerf retries the delivery automatically."),
             // Monthly payroll report
             ("payroll_report_email_subject", "Payroll report {period} - {org_name}"),
-            ("payroll_report_email_body", "Hello,\n\nattached you will find the payroll report for {period} from {org_name}.\n\nIt lists the absence days per employee and the working days and hours for the selected groups.\n\nThis email was generated automatically."),
+            ("payroll_report_email_body", "Hello,\n\nattached you will find the payroll report for {period} from {org_name}.\n\nIt lists the absence days per employee and the working days and hours for the selected groups."),
             ("payroll_report_email_manual_note", "\n\nNote: this report was sent manually via \"Send now\" in Zerf. It does not replace the regular automatic delivery for this month, which is still scheduled to go out separately."),
             ("payroll_report_email_provisional_note", "\n\nPlease note: this report is provisional. It covers {included} of {total} people; the following are not included yet:\n{employees}\nThe complete report follows automatically once everyone's month is finished."),
             ("payroll_report_email_snapshot_note", "\n\nPlease note: this is an interim status. The month is still running, so the report shows the approved figures for {included} people up to today and they will still change. The complete report follows automatically after the end of the month."),
@@ -359,6 +360,7 @@ static LANGUAGES: &[LangDef] = &[
             ("email_login_url_line", "\nAnmelde-URL: {app_url}\n"),
             ("email_footer_with_url", "{body}\n\n{timestamp}\n\n{app_url}"),
             ("email_footer_without_url", "{body}\n\n{timestamp}"),
+            ("email_no_reply_notice", "{body}\n\nBitte nicht antworten! Diese E-Mail wurde automatisch vom System versendet."),
             ("password_reset_subject", "Ihr Passwort zur\u{00fc}cksetzen"),
             ("password_reset_body", "Hallo,\n\nwir haben eine Anfrage zum Zur\u{00fc}cksetzen Ihres Passworts erhalten.\n\nLink zum Zur\u{00fc}cksetzen (1 Stunde g\u{00fc}ltig):\n{reset_link}\n\nFalls Sie diese Anfrage nicht gestellt haben, k\u{00f6}nnen Sie diese E-Mail ignorieren."),
             ("admin_password_reset_subject", "Ihr vorl\u{00e4}ufiges Passwort - {org_name}"),
@@ -383,7 +385,7 @@ static LANGUAGES: &[LangDef] = &[
             ("email_delivery_failed_body", "Empf\u{00e4}nger: {recipient}\nBetreff: {subject}\nVersuche: {attempts}\nProblem: Der Mailserver hat die E-Mail nicht angenommen: {error}\nAktion: Pr\u{00fc}fen Sie die E-Mail-Einstellungen (SMTP) und den Mailserver. Zerf versucht die Zustellung automatisch erneut."),
             // Monatliche Lohnmeldung
             ("payroll_report_email_subject", "Lohnmeldung {period} - {org_name}"),
-            ("payroll_report_email_body", "Hallo,\n\nim Anhang finden Sie die Lohnmeldung f\u{00fc}r {period} von {org_name}.\n\nDiese E-Mail wurde automatisch erstellt."),
+            ("payroll_report_email_body", "Hallo,\n\nim Anhang finden Sie die Lohnmeldung f\u{00fc}r {period} von {org_name}."),
             ("payroll_report_email_manual_note", "\n\nHinweis: Dieser Bericht wurde manuell \u{00fc}ber \"Jetzt senden\" in Zerf versendet. Er ersetzt nicht den regul\u{00e4}ren automatischen Versand f\u{00fc}r diesen Monat, der weiterhin separat erfolgt."),
             ("payroll_report_email_provisional_note", "\n\nBitte beachten Sie: Diese Meldung ist vorl\u{00e4}ufig. Sie enth\u{00e4}lt {included} von {total} Personen; folgende Personen fehlen noch:\n{employees}\nDie vollst\u{00e4}ndige Meldung folgt automatisch, sobald alle ihren Monat abgeschlossen haben."),
             ("payroll_report_email_snapshot_note", "\n\nBitte beachten Sie: Dies ist ein Zwischenstand. Der Monat l\u{00e4}uft noch, die Meldung zeigt daher die genehmigten Zahlen von {included} Personen bis heute und diese \u{00e4}ndern sich noch. Die vollst\u{00e4}ndige Meldung folgt automatisch nach Monatsende."),
@@ -796,6 +798,17 @@ pub fn email_with_footer(
             ("timestamp", timestamp.to_string()),
             ("app_url", app_url.trim_end_matches('/').to_string()),
         ],
+    )
+}
+
+/// Close an email nobody can answer with the "do not reply" notice. Every
+/// email that carries no `Reply-To` ends with it, so the recipient does not
+/// write back to the system sender's mailbox. Goes last, after the footer.
+pub fn email_with_no_reply_notice(language: &Language, body: &str) -> String {
+    required_translation(
+        language,
+        "email_no_reply_notice",
+        &[("body", body.trim_end().to_string())],
     )
 }
 
@@ -1239,6 +1252,21 @@ mod tests {
         assert_eq!(
             email_with_footer(&language, "Message body", "04/27/2026 09:00", None),
             "Message body\n\n04/27/2026 09:00"
+        );
+    }
+
+    /// The notice closes the email in the recipient's language, keeps the whole
+    /// body (footer included) above it, and does not stack trailing blank lines.
+    #[test]
+    fn no_reply_notice_closes_the_email_in_both_languages() {
+        assert_eq!(
+            email_with_no_reply_notice(&Language::from_setting("de"), "Hallo\n\n04/27/2026 09:00\n"),
+            "Hallo\n\n04/27/2026 09:00\n\n\
+             Bitte nicht antworten! Diese E-Mail wurde automatisch vom System versendet."
+        );
+        assert_eq!(
+            email_with_no_reply_notice(&Language::from_setting("en"), "Hello"),
+            "Hello\n\nPlease do not reply! This email was sent automatically by the system."
         );
     }
 
