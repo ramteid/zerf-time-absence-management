@@ -280,17 +280,23 @@ async fn send_notification_email(state: &AppState, msg: &Outgoing<'_>) {
 }
 
 /// Resolve the person whose answers a mail should receive. `None` when the
-/// message has no such person, or when the person can no longer be found
-/// (deactivated since acting) — the mail then simply carries no Reply-To.
+/// message has no such person, when the person can no longer be found
+/// (deactivated since acting), or when their address cannot be used in a header
+/// — the mail then carries no Reply-To and therefore the "do not reply" notice.
 async fn load_reply_to(
     state: &AppState,
     reply_to_user_id: Option<i64>,
 ) -> Option<crate::repository::EmailContact> {
-    let (address, first_name, last_name) = state
-        .db
-        .notifications
-        .get_user_email(reply_to_user_id?)
-        .await?;
+    let user_id = reply_to_user_id?;
+    let (address, first_name, last_name) =
+        state.db.notifications.get_user_email(user_id).await?;
+    if !crate::email::is_valid_address(&address) {
+        tracing::warn!(
+            target: "zerf::notifications",
+            "user {user_id} has an email address that cannot be used as Reply-To; sending without it"
+        );
+        return None;
+    }
     Some(crate::repository::EmailContact {
         address,
         name: format!("{} {}", first_name, last_name),

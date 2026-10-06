@@ -630,26 +630,29 @@ through the same breaker-guarded sender. The admin's SMTP "test connection"
 probe also bypasses both the queue and the breaker deliberately — it never
 sends a real message and must not be blocked by unrelated breaker state.
 
-**Reply-To on decision mail**: mail that follows directly from one person's
-action — an approver's or admin's decision on a week, an absence, an absence
-cancellation or a reopen request — names that person as `Reply-To`, so the
-employee's answer reaches them instead of the system sender's mailbox.
-Producers opt in with `Outgoing::reply_to_user(actor_id)`;
+**Reply-To on mail that follows a person's action**: mail that is the direct
+result of what one person did — an approver's or admin's decision on a week, an
+absence, an absence cancellation or a reopen request; an employee's request to
+their approvers; an admin setting up an account or resetting a password — names
+that person as `Reply-To`, so an answer reaches them instead of the system
+sender's mailbox. Producers opt in with `Outgoing::reply_to_user(actor_id)`;
 `send_notification_email` resolves the actor's address when it queues the mail
 and stores it in `email_queue.reply_to_address` / `reply_to_name` (empty = no
-header). Requests *to* approvers, reminders and auth mails (password reset,
-account created) deliberately carry none. An unparseable stored address is
-dropped with a warning instead of failing the send, because a failing row is
-retried forever.
+header). Mail the system starts on its own (reminders, payroll hold notice,
+error alerts, the self-service password reset) carries none. An address that
+`email::is_valid_address` rejects counts as "no Reply-To" at queue time; one
+that is stored anyway is dropped at send time with a warning instead of failing
+the send, because a failing row is retried forever.
 
 **Every mail without a Reply-To ends with the "do not reply" notice**
 (`i18n::email_with_no_reply_notice`, key `email_no_reply_notice`, rendered in
 the mail's own language). `send_notification_email` appends it after the footer
 whenever the *resolved* Reply-To is `None` — so also for mail with
 `append_email_footer(false)`, and for a decision mail whose deciding person is
-gone. The payroll report bypasses the queue, so `background/payroll_report.rs`
-appends it at the send site, after the manual/provisional notes (not inside
-`email_text`, whose tests require the manual body to extend the scheduled one).
+gone, or whose address cannot be used. The payroll report bypasses the queue, so
+`background/payroll_report.rs` appends it in `email_for_sending`, after the
+manual/provisional notes (not inside `email_text`, whose tests require the
+manual body to extend the scheduled one).
 The admin's SMTP test sends no message and needs none.
 
 ### Configuration (environment variables)

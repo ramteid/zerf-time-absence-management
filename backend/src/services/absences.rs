@@ -14,9 +14,9 @@ async fn notification_language(pool: &crate::db::DatabasePool) -> i18n::Language
     crate::services::notifications::load_language(pool).await
 }
 
-/// `reply_to` is the approver whose decision this notice reports: the
-/// employee's answer to the email then reaches them instead of the system
-/// sender. `None` for notices that are not a person's decision.
+/// `actor_id` is the person whose action this notice reports (the approver who
+/// decided, or the employee who asked): a reply to the email then reaches them
+/// instead of the system sender.
 async fn notify_absence(
     app_state: &AppState,
     language: &i18n::Language,
@@ -24,23 +24,24 @@ async fn notify_absence(
     event: &str,
     params: Vec<(&'static str, String)>,
     absence_id: i64,
-    reply_to: Option<i64>,
+    actor_id: i64,
 ) {
     let text = i18n::notification_event_text(language, event, &params);
     let email_body = i18n::notification_email_body(language, event, &params);
-    let mut message = crate::services::notifications::Outgoing::new(
-        recipient_id,
-        language,
-        event,
-        &text.title,
-        &text.body,
+    crate::services::notifications::deliver(
+        app_state,
+        &crate::services::notifications::Outgoing::new(
+            recipient_id,
+            language,
+            event,
+            &text.title,
+            &text.body,
+        )
+        .email_body(&email_body)
+        .reply_to_user(actor_id)
+        .reference("absences", Some(absence_id)),
     )
-    .email_body(&email_body)
-    .reference("absences", Some(absence_id));
-    if let Some(approver_id) = reply_to {
-        message = message.reply_to_user(approver_id);
-    }
-    crate::services::notifications::deliver(app_state, &message).await;
+    .await;
 }
 
 async fn notify_absence_inapp_only(
@@ -67,6 +68,8 @@ async fn notify_absence_inapp_only(
     .await;
 }
 
+/// Tell the approvers about something the employee `actor_id` did to an
+/// absence. Replies to the email go to that employee.
 pub async fn notify_approvers(
     app_state: &AppState,
     language: &i18n::Language,
@@ -74,9 +77,10 @@ pub async fn notify_approvers(
     event: &str,
     params: Vec<(&'static str, String)>,
     absence_id: i64,
+    actor_id: i64,
 ) {
     for &id in recipient_ids {
-        notify_absence(app_state, language, id, event, params.clone(), absence_id, None).await;
+        notify_absence(app_state, language, id, event, params.clone(), absence_id, actor_id).await;
     }
 }
 
@@ -509,6 +513,7 @@ pub async fn create_absence(
             "absence_requested",
             absence_period_params(&language, requester, &created_absence),
             new_absence_id,
+            requester.id,
         )
         .await;
     } else if created_absence.auto_approve_past && created_absence.status == "approved" {
@@ -685,6 +690,7 @@ pub async fn update_absence(
             "absence_updated",
             absence_period_params(&language, requester, &absence_after_update),
             absence_id,
+            requester.id,
         )
         .await;
     } else if absence_after_update.auto_approve_past && absence_after_update.status == "approved" {
@@ -726,6 +732,7 @@ async fn notify_auto_approved_absence(
         "absence_auto_approved_notice",
         absence_period_params(&language, requester, absence),
         absence_id,
+        requester.id,
     )
     .await;
 }
@@ -789,6 +796,7 @@ pub async fn cancel_absence(
                 "absence_cancelled",
                 approver_params,
                 absence_id,
+                requester.id,
             )
             .await;
             Ok(serde_json::json!({"ok": true}))
@@ -827,6 +835,7 @@ pub async fn cancel_absence(
                 "absence_cancellation_requested",
                 approver_params,
                 absence_id,
+                requester.id,
             )
             .await;
             Ok(serde_json::json!({"ok": true, "pending": true}))
@@ -959,7 +968,7 @@ pub async fn approve_absence(
             "absence_approved",
             notify_params,
             absence_id,
-            Some(requester.id),
+            requester.id,
         )
         .await;
     } else {
@@ -1066,7 +1075,7 @@ pub async fn reject_absence(
             "absence_rejected",
             notify_params,
             absence_id,
-            Some(requester.id),
+            requester.id,
         )
         .await;
     } else {
@@ -1159,7 +1168,7 @@ pub async fn approve_cancellation_absence(
             "absence_cancellation_approved",
             notify_params,
             absence_id,
-            Some(requester.id),
+            requester.id,
         )
         .await;
     } else {
@@ -1259,7 +1268,7 @@ pub async fn reject_cancellation_absence(
             "absence_cancellation_rejected",
             notify_params,
             absence_id,
-            Some(requester.id),
+            requester.id,
         )
         .await;
     } else {
@@ -1327,7 +1336,7 @@ pub async fn revoke_absence(
             "absence_revoked",
             notify_params,
             absence_id,
-            Some(requester.id),
+            requester.id,
         )
         .await;
     } else {

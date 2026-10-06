@@ -937,7 +937,9 @@ pub async fn reset_password(
             &text.body,
         )
         .channels(crate::services::notifications::Channels::EmailOnly)
-        .append_email_footer(false),
+        .append_email_footer(false)
+        // The admin who reset the password is who the user asks if it fails.
+        .reply_to_user(requester.id),
     )
     .await;
     Ok(Json(
