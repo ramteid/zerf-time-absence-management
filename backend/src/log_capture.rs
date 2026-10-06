@@ -150,6 +150,12 @@ fn truncate_at_char_boundary(mut message: String) -> String {
 /// Error logs from the notification/email/log subsystems must NOT spawn admin
 /// notifications: a delivery failure there would otherwise feed back into a new
 /// notification and loop. Their events still reach `app_logs` and stdout.
+///
+/// The email queue worker is the one subsystem whose failures admins must
+/// hear about anyway. It raises that alert explicitly instead
+/// (`background::email_queue::report_failed_delivery`), which lets it skip the
+/// alert mails themselves; do not drop `zerf::email` from this list to get the
+/// same result automatically, or a failing alert mail would spawn another.
 fn target_is_notification_subsystem(target: &str) -> bool {
     target == WRITER_TARGET
         || target.starts_with("zerf::notifications")
