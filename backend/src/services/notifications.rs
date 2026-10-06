@@ -52,6 +52,7 @@ pub struct Outgoing<'a> {
     dedupe_key: Option<&'a str>,
     pinned: bool,
     append_email_footer: bool,
+    reply_to_user_id: Option<i64>,
 }
 
 impl<'a> Outgoing<'a> {
@@ -75,6 +76,7 @@ impl<'a> Outgoing<'a> {
             dedupe_key: None,
             pinned: false,
             append_email_footer: true,
+            reply_to_user_id: None,
         }
     }
 
@@ -119,6 +121,15 @@ impl<'a> Outgoing<'a> {
         self.append_email_footer = append;
         self
     }
+
+    /// Send replies to the email sidecar to this user instead of the system
+    /// sender. For mail that follows directly from a person's action — an
+    /// approver deciding a request — so the employee's answer reaches the
+    /// approver. Has no effect on the in-app notification.
+    pub fn reply_to_user(mut self, user_id: i64) -> Self {
+        self.reply_to_user_id = Some(user_id);
+        self
+    }
 }
 
 /// Deliver one notification across its configured channels.
@@ -136,17 +147,7 @@ pub async fn deliver(state: &AppState, msg: &Outgoing<'_>) -> bool {
     };
 
     if msg.channels != Channels::InAppOnly && created {
-        let email_body = msg.email_body.unwrap_or(msg.body);
-        send_notification_email(
-            state,
-            &msg.language,
-            msg.user_id,
-            msg.kind,
-            msg.title.to_string(),
-            email_body,
-            msg.append_email_footer,
-        )
-        .await;
+        send_notification_email(state, msg).await;
     }
 
     created
@@ -222,26 +223,22 @@ async fn write_in_app(state: &AppState, msg: &Outgoing<'_>) -> bool {
 }
 
 /// Queue a notification email for delivery (non-fatal: enqueue failures are
-/// only logged). When `append_footer` is true the configured timestamp and
+/// only logged). Unless the message opts out, the configured timestamp and
 /// public app URL are appended. No-op when SMTP is not enabled/configured
 /// (the whole email feature is opt-in) — nothing is queued in that case.
 /// `kind` is stored with the queued row so the delivery worker can recognise
 /// admin alerts ([`SYSTEM_ERROR_KIND`]) among the mail it fails to send.
-async fn send_notification_email(
-    state: &AppState,
-    language: &Language,
-    user_id: i64,
-    kind: &str,
-    subject: String,
-    body: &str,
-    append_footer: bool,
-) {
+async fn send_notification_email(state: &AppState, msg: &Outgoing<'_>) {
+    let language = &msg.language;
+    let subject = msg.title;
+    let body = msg.email_body.unwrap_or(msg.body);
     if let Some((email, first_name, last_name)) =
-        state.db.notifications.get_user_email(user_id).await
+        state.db.notifications.get_user_email(msg.user_id).await
     {
         let recipient_name = format!("{} {}", first_name, last_name);
+        let reply_to = load_reply_to(state, msg.reply_to_user_id).await;
         let smtp_configured = state.db.settings.load_smtp_config().await.is_some();
-        let email_body = if append_footer {
+        let email_body = if msg.append_email_footer {
             let timezone = crate::services::settings::load_setting(
                 &state.pool,
                 crate::services::settings::TIMEZONE_KEY,
@@ -265,12 +262,31 @@ async fn send_notification_email(
             smtp_configured,
             &email,
             &recipient_name,
-            kind,
-            &subject,
+            msg.kind,
+            subject,
             &email_body,
+            reply_to.as_ref(),
         )
         .await;
     }
+}
+
+/// Resolve the person whose answers a mail should receive. `None` when the
+/// message has no such person, or when the person can no longer be found
+/// (deactivated since acting) — the mail then simply carries no Reply-To.
+async fn load_reply_to(
+    state: &AppState,
+    reply_to_user_id: Option<i64>,
+) -> Option<crate::repository::EmailContact> {
+    let (address, first_name, last_name) = state
+        .db
+        .notifications
+        .get_user_email(reply_to_user_id?)
+        .await?;
+    Some(crate::repository::EmailContact {
+        address,
+        name: format!("{} {}", first_name, last_name),
+    })
 }
 
 /// Clear pending approval notifications for an item once it has been decided

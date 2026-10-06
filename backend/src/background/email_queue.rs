@@ -74,15 +74,7 @@ pub async fn process_pending(state: &AppState) {
     };
 
     for entry in entries {
-        match crate::email::send_queued(
-            &state.email_circuit_breaker,
-            &smtp,
-            &entry.to_address,
-            &entry.to_name,
-            &entry.subject,
-            &entry.body_text,
-        )
-        .await {
+        match crate::email::send_queued(&state.email_circuit_breaker, &smtp, &entry).await {
             Ok(()) => {
                 // SMTP already confirmed delivery — a failure here must not
                 // leave the row looking untouched, or the next poll would

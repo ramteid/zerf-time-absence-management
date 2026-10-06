@@ -630,6 +630,18 @@ through the same breaker-guarded sender. The admin's SMTP "test connection"
 probe also bypasses both the queue and the breaker deliberately — it never
 sends a real message and must not be blocked by unrelated breaker state.
 
+**Reply-To on decision mail**: mail that follows directly from one person's
+action — an approver's or admin's decision on a week, an absence, an absence
+cancellation or a reopen request — names that person as `Reply-To`, so the
+employee's answer reaches them instead of the system sender's mailbox.
+Producers opt in with `Outgoing::reply_to_user(actor_id)`;
+`send_notification_email` resolves the actor's address when it queues the mail
+and stores it in `email_queue.reply_to_address` / `reply_to_name` (empty = no
+header). Requests *to* approvers, reminders and auth mails (password reset,
+account created) deliberately carry none. An unparseable stored address is
+dropped with a warning instead of failing the send, because a failing row is
+retried forever.
+
 ### Configuration (environment variables)
 
 | Variable | Required | Default | Purpose |
