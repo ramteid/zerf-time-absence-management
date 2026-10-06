@@ -343,6 +343,8 @@ pub async fn submit(
                         &text.body,
                     )
                     .email_body(&email_body)
+                    // The submitter is the one an approver would ask about it.
+                    .reply_to_user(requester.id)
                     .reference(&reference_type, Some(requester.id)),
                 )
                 .await;

@@ -513,7 +513,8 @@ async fn a_failed_alert_mail_is_not_reported_again() {
 }
 
 // ---------------------------------------------------------------------------
-// Reply-To: mail that follows an approver's decision is answered by them
+// Reply-To: mail that follows a person's action is answered by that person;
+// every other mail ends with the "do not reply" notice
 // ---------------------------------------------------------------------------
 
 /// Everything queued for `address` with the given kind.
@@ -552,27 +553,44 @@ fn mentions_no_reply_notice(mail: &zerf::repository::EmailQueueEntry) -> bool {
         .any(|notice| mail.body_text.contains(notice))
 }
 
-/// A team (lead approving one employee) with both logged in, set up *before*
-/// SMTP is configured so the onboarding mails of the new accounts stay out of
-/// the queue.
-async fn team_with_smtp(app: &TestApp) -> (TestClient, TestClient, String, i64) {
+/// The mail is answered by `address`: it names that Reply-To and does not tell
+/// the reader not to reply.
+fn assert_answered_by(mail: &zerf::repository::EmailQueueEntry, address: &str) {
+    assert_eq!(mail.reply_to_address, address, "kind {}", mail.kind);
+    assert!(
+        !mentions_no_reply_notice(mail),
+        "a mail with a Reply-To must not tell the reader not to reply: {}",
+        mail.body_text
+    );
+}
+
+/// The mail has no Reply-To and ends with the do-not-reply notice.
+fn assert_do_not_reply(mail: &zerf::repository::EmailQueueEntry) {
+    assert_eq!(mail.reply_to_address, "", "kind {}", mail.kind);
+    assert!(
+        ends_with_no_reply_notice(mail),
+        "a mail nobody can answer must end with the do-not-reply notice: {}",
+        mail.body_text
+    );
+}
+
+/// An admin, a lead approving one employee, and the employee, all logged in.
+/// Set up *before* SMTP is configured so the onboarding mails of the new
+/// accounts stay out of the queue.
+async fn team_with_smtp(app: &TestApp) -> (TestClient, TestClient, TestClient, String, i64) {
     let admin = admin_login(app).await;
     let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
         bootstrap_team(app, &admin, false).await;
     let lead = login_change_pw(app, "lead-r@example.com", &lead_pw).await;
     let emp = login_change_pw(app, "emp-r@example.com", &emp_pw).await;
     configure_unreachable_smtp(app).await;
-    (lead, emp, monday_iso, cat_id)
+    (admin, lead, emp, monday_iso, cat_id)
 }
 
-/// The lead's decision on an absence reaches the employee with the lead as
-/// Reply-To, while the employee's own request to the lead carries none.
-#[tokio::test]
-async fn rejected_absence_email_is_answered_by_the_approver() {
-    let app = TestApp::spawn().await;
-    let (lead, emp, _monday_iso, _cat_id) = team_with_smtp(&app).await;
-
-    let day = next_monday(21).format("%Y-%m-%d").to_string();
+/// The employee asks for one vacation day: the first Monday `offset_days` or
+/// more after the reference date. Returns the absence id.
+async fn request_vacation(emp: &TestClient, offset_days: i64) -> i64 {
+    let day = next_monday(offset_days).format("%Y-%m-%d").to_string();
     let (st, body) = emp
         .post(
             "/api/v1/absences",
@@ -580,18 +598,21 @@ async fn rejected_absence_email_is_answered_by_the_approver() {
         )
         .await;
     assert_eq!(st, StatusCode::OK, "request vacation: {body}");
-    let absence_id = id(&body);
+    id(&body)
+}
 
+/// The employee's request reaches the lead with the employee as Reply-To; the
+/// lead's decision reaches the employee with the lead as Reply-To.
+#[tokio::test]
+async fn absence_request_and_rejection_are_answered_by_whoever_acted() {
+    let app = TestApp::spawn().await;
+    let (_admin, lead, emp, _monday_iso, _cat_id) = team_with_smtp(&app).await;
+
+    let absence_id = request_vacation(&emp, 21).await;
     let requested = queued_mail(&app, "lead-r@example.com", "absence_requested").await;
     assert_eq!(requested.len(), 1, "the lead is told about the request");
-    assert_eq!(
-        requested[0].reply_to_address, "",
-        "a request is not an approver's decision: no Reply-To"
-    );
-    assert!(
-        ends_with_no_reply_notice(&to_lead[0]),
-        "a mail nobody can answer ends with the do-not-reply notice"
-    );
+    assert_answered_by(&requested[0], "emp-r@example.com");
+    assert_eq!(requested[0].reply_to_name, "Emil Emp");
 
     let (st, body) = lead
         .post(
@@ -603,119 +624,198 @@ async fn rejected_absence_email_is_answered_by_the_approver() {
 
     let rejected = queued_mail(&app, "emp-r@example.com", "absence_rejected").await;
     assert_eq!(rejected.len(), 1, "the employee is told about the decision");
-    assert_eq!(rejected[0].reply_to_address, "lead-r@example.com");
+    assert_answered_by(&rejected[0], "lead-r@example.com");
     assert_eq!(rejected[0].reply_to_name, "Lara Lead");
 
     app.cleanup().await;
 }
 
+/// Approval, both outcomes of a cancellation request, the employee's
+/// cancellation request itself, and an admin's revoke: each mail is answered by
+/// the person whose action it reports.
 #[tokio::test]
-async fn rejected_timesheet_email_is_answered_by_the_approver() {
+async fn absence_approval_cancellation_and_revoke_are_answered_by_whoever_acted() {
     let app = TestApp::spawn().await;
-    let (lead, emp, monday_iso, cat_id) = team_with_smtp(&app).await;
+    let (admin, lead, emp, _monday_iso, _cat_id) = team_with_smtp(&app).await;
 
-    let entry_id = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+    let cancelled_id = request_vacation(&emp, 28).await;
+    let kept_id = request_vacation(&emp, 35).await;
+    let revoked_id = request_vacation(&emp, 42).await;
+    for absence_id in [cancelled_id, kept_id, revoked_id] {
+        let (st, _) = lead
+            .post(&format!("/api/v1/absences/{absence_id}/approve"), &json!({}))
+            .await;
+        assert_eq!(st, StatusCode::OK, "approve vacation");
+    }
+
+    // The employee asks to cancel two approved absences; the lead grants one
+    // and refuses the other.
+    for absence_id in [cancelled_id, kept_id] {
+        let (st, _) = emp.delete(&format!("/api/v1/absences/{absence_id}")).await;
+        assert_eq!(st, StatusCode::OK, "request cancellation");
+    }
+    let (st, _) = lead
+        .post(
+            &format!("/api/v1/absences/{cancelled_id}/approve-cancellation"),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "approve cancellation");
+    let (st, _) = lead
+        .post(
+            &format!("/api/v1/absences/{kept_id}/reject-cancellation"),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "reject cancellation");
+
+    // An admin withdraws the third, approved absence.
+    let (st, _) = admin
+        .post(&format!("/api/v1/absences/{revoked_id}/revoke"), &json!({}))
+        .await;
+    assert_eq!(st, StatusCode::OK, "revoke vacation");
+
+    for (kind, expected_count, answered_by) in [
+        ("absence_approved", 3, "lead-r@example.com"),
+        ("absence_cancellation_approved", 1, "lead-r@example.com"),
+        ("absence_cancellation_rejected", 1, "lead-r@example.com"),
+        ("absence_revoked", 1, "admin@example.com"),
+    ] {
+        let mails = queued_mail(&app, "emp-r@example.com", kind).await;
+        assert_eq!(mails.len(), expected_count, "{kind} mails to the employee");
+        for mail in &mails {
+            assert_answered_by(mail, answered_by);
+        }
+    }
+    let cancellation_requests =
+        queued_mail(&app, "lead-r@example.com", "absence_cancellation_requested").await;
+    assert_eq!(cancellation_requests.len(), 2, "one per cancellation request");
+    for mail in &cancellation_requests {
+        assert_answered_by(mail, "emp-r@example.com");
+    }
+
+    app.cleanup().await;
+}
+
+/// Handing in a week reaches the lead with the employee as Reply-To; the
+/// lead's decision reaches the employee with the lead as Reply-To.
+#[tokio::test]
+async fn timesheet_submission_and_decisions_are_answered_by_whoever_acted() {
+    let app = TestApp::spawn().await;
+    let (_admin, lead, emp, monday_iso, cat_id) = team_with_smtp(&app).await;
+
+    let rejected_entry = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
     let submitted = queued_mail(&app, "lead-r@example.com", "timesheet_submitted").await;
     assert_eq!(submitted.len(), 1, "the lead is told about the submission");
-    assert_eq!(submitted[0].reply_to_address, "");
+    assert_answered_by(&submitted[0], "emp-r@example.com");
 
     let (st, _) = lead
         .post(
             "/api/v1/time-entries/batch-reject",
-            &json!({"ids": [entry_id], "reason": "wrong category"}),
+            &json!({"ids": [rejected_entry], "reason": "wrong category"}),
         )
         .await;
     assert_eq!(st, StatusCode::OK, "reject week");
-
     let rejected = queued_mail(&app, "emp-r@example.com", "timesheet_rejected").await;
     assert_eq!(rejected.len(), 1, "the employee is told about the decision");
-    assert_eq!(rejected[0].reply_to_address, "lead-r@example.com");
+    assert_answered_by(&rejected[0], "lead-r@example.com");
     assert_eq!(rejected[0].reply_to_name, "Lara Lead");
 
-    app.cleanup().await;
-}
-
-#[tokio::test]
-async fn approved_timesheet_email_is_answered_by_the_approver() {
-    let app = TestApp::spawn().await;
-    let (lead, emp, monday_iso, cat_id) = team_with_smtp(&app).await;
-
-    let entry_id = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+    // Hand in another week and approve it.
+    let other_monday = next_monday(-21).format("%Y-%m-%d").to_string();
+    let approved_entry = create_and_submit_entry(&emp, &other_monday, cat_id).await;
     let (st, _) = lead
         .post(
             "/api/v1/time-entries/batch-approve",
-            &json!({"ids": [entry_id]}),
+            &json!({"ids": [approved_entry]}),
         )
         .await;
     assert_eq!(st, StatusCode::OK, "approve week");
-
     let approved = queued_mail(&app, "emp-r@example.com", "timesheet_approved").await;
     assert_eq!(approved.len(), 1);
-    assert_eq!(approved[0].reply_to_address, "lead-r@example.com");
+    assert_answered_by(&approved[0], "lead-r@example.com");
 
     app.cleanup().await;
 }
 
+/// An employee's reopen request, the lead rejecting one, and an admin approving
+/// another: the admin's decision also reaches the lead, who is assigned to the
+/// employee, and replies to that notice go to the admin.
 #[tokio::test]
-async fn reopen_decision_email_is_answered_by_the_approver() {
+async fn reopen_request_and_decisions_are_answered_by_whoever_acted() {
     let app = TestApp::spawn().await;
-    let (lead, emp, monday_iso, cat_id) = team_with_smtp(&app).await;
+    let (admin, lead, emp, monday_iso, cat_id) = team_with_smtp(&app).await;
 
-    let entry_id = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+    // Two approved weeks, one reopen request for each.
+    let other_monday = next_monday(-21).format("%Y-%m-%d").to_string();
+    let first_entry = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+    let second_entry = create_and_submit_entry(&emp, &other_monday, cat_id).await;
     let (st, _) = lead
         .post(
             "/api/v1/time-entries/batch-approve",
-            &json!({"ids": [entry_id]}),
+            &json!({"ids": [first_entry, second_entry]}),
         )
         .await;
-    assert_eq!(st, StatusCode::OK, "approve week");
+    assert_eq!(st, StatusCode::OK, "approve both weeks");
 
-    let (st, body) = emp
-        .post(
-            "/api/v1/reopen-requests",
-            &json!({"week_start": monday_iso, "reason": "Need to fix an entry"}),
-        )
-        .await;
-    assert_eq!(st, StatusCode::OK, "request reopen: {body}");
-    let request_id = id(&body);
+    let mut request_ids = Vec::new();
+    for week in [&monday_iso, &other_monday] {
+        let (st, body) = emp
+            .post(
+                "/api/v1/reopen-requests",
+                &json!({"week_start": week, "reason": "Need to fix an entry"}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "request reopen: {body}");
+        request_ids.push(id(&body));
+    }
 
     let created = queued_mail(&app, "lead-r@example.com", "reopen_request_created").await;
-    assert_eq!(created.len(), 1, "the lead is told about the request");
-    assert_eq!(created[0].reply_to_address, "");
-    assert!(
-        ends_with_no_reply_notice(&created[0]),
-        "a request to the lead ends with the do-not-reply notice"
-    );
+    assert_eq!(created.len(), 2, "the lead is told about both requests");
+    for mail in &created {
+        assert_answered_by(mail, "emp-r@example.com");
+    }
 
+    // The lead rejects the first request, the admin approves the second.
     let (st, _) = lead
         .post(
-            &format!("/api/v1/reopen-requests/{request_id}/approve"),
+            &format!("/api/v1/reopen-requests/{}/reject", request_ids[0]),
+            &json!({"reason": "week is closed"}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "lead rejects reopen");
+    let (st, _) = admin
+        .post(
+            &format!("/api/v1/reopen-requests/{}/approve", request_ids[1]),
             &json!({}),
         )
         .await;
-    assert_eq!(st, StatusCode::OK, "approve reopen");
+    assert_eq!(st, StatusCode::OK, "admin approves reopen");
+
+    let rejected = queued_mail(&app, "emp-r@example.com", "reopen_rejected").await;
+    assert_eq!(rejected.len(), 1);
+    assert_answered_by(&rejected[0], "lead-r@example.com");
 
     let approved = queued_mail(&app, "emp-r@example.com", "reopen_approved").await;
     assert_eq!(approved.len(), 1);
-    assert_eq!(approved[0].reply_to_address, "lead-r@example.com");
-    assert_eq!(approved[0].reply_to_name, "Lara Lead");
-    assert!(
-        !mentions_no_reply_notice(&approved[0]),
-        "a mail with a Reply-To must not tell the reader not to reply"
-    );
+    assert_answered_by(&approved[0], "admin@example.com");
+
+    let told_by_admin = queued_mail(&app, "lead-r@example.com", "reopen_approved_by_admin").await;
+    assert_eq!(told_by_admin.len(), 1, "the assigned lead hears about it");
+    assert_answered_by(&told_by_admin[0], "admin@example.com");
 
     app.cleanup().await;
 }
 
-/// System mail that is nobody's decision (here: the account-created mail an
-/// admin's action triggers) keeps coming from the system sender only.
+/// Setting up an account and resetting a password are an admin's actions: the
+/// person who receives the temporary password answers to that admin.
 #[tokio::test]
-async fn system_mail_has_no_reply_to() {
+async fn account_mails_are_answered_by_the_admin_who_sent_them() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
     configure_unreachable_smtp(&app).await;
 
-    let (status, _body) = admin
+    let (status, body) = admin
         .post(
             "/api/v1/users",
             &json!({"email":"onboard@example.com","first_name":"On","last_name":"Board",
@@ -723,17 +823,75 @@ async fn system_mail_has_no_reply_to() {
         )
         .await;
     assert_eq!(status, StatusCode::OK, "create user");
+    let new_user_id = id(&body);
 
-    let onboarding = queued_mail(&app, "onboard@example.com", "account_created").await;
-    assert_eq!(onboarding.len(), 1);
-    assert_eq!(onboarding[0].reply_to_address, "");
-    // The account mail builds its own complete body and switches the footer
-    // off, but it still cannot be answered.
-    assert!(
-        ends_with_no_reply_notice(&onboarding[0]),
-        "even a mail without footer ends with the do-not-reply notice: {}",
-        onboarding[0].body_text
-    );
+    let (status, _) = admin
+        .post(
+            &format!("/api/v1/users/{new_user_id}/reset-password"),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "reset password");
+
+    for kind in ["account_created", "admin_password_reset"] {
+        let mails = queued_mail(&app, "onboard@example.com", kind).await;
+        assert_eq!(mails.len(), 1, "{kind}");
+        assert_answered_by(&mails[0], "admin@example.com");
+    }
+
+    app.cleanup().await;
+}
+
+/// Mail the system sends on its own — here the alert to an admin about a
+/// technical error — has no Reply-To and ends with the notice.
+#[tokio::test]
+async fn automatic_mail_ends_with_the_do_not_reply_notice() {
+    let app = TestApp::spawn().await;
+    let admin_id = opt_in_admin(&app).await;
+    configure_unreachable_smtp(&app).await;
+    app.state
+        .db
+        .error_queue
+        .enqueue(Some("reply_to_test"), "Boom", Some("something broke"), "app")
+        .await
+        .expect("enqueue error");
+    zerf::background::error_notifications::process_pending(&app.state).await;
+
+    let admin_email: String = sqlx::query_scalar("SELECT email FROM users WHERE id = $1")
+        .bind(admin_id)
+        .fetch_one(&app.state.pool)
+        .await
+        .expect("admin email");
+    let alerts = queued_mail(&app, &admin_email, "system_error").await;
+    assert_eq!(alerts.len(), 1, "the opted-in admin gets the alert by mail");
+    assert_do_not_reply(&alerts[0]);
+
+    app.cleanup().await;
+}
+
+/// A deciding person whose address cannot be used in a header must not leave
+/// the mail with neither a Reply-To nor the notice.
+#[tokio::test]
+async fn unusable_reply_to_address_falls_back_to_the_do_not_reply_notice() {
+    let app = TestApp::spawn().await;
+    let (_admin, lead, emp, _monday_iso, _cat_id) = team_with_smtp(&app).await;
+    sqlx::query("UPDATE users SET email = 'not an address' WHERE email = 'lead-r@example.com'")
+        .execute(&app.state.pool)
+        .await
+        .expect("break the lead's address");
+
+    let absence_id = request_vacation(&emp, 21).await;
+    let (st, body) = lead
+        .post(
+            &format!("/api/v1/absences/{absence_id}/reject"),
+            &json!({"reason": "no"}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "reject vacation: {body}");
+
+    let rejected = queued_mail(&app, "emp-r@example.com", "absence_rejected").await;
+    assert_eq!(rejected.len(), 1);
+    assert_do_not_reply(&rejected[0]);
 
     app.cleanup().await;
 }

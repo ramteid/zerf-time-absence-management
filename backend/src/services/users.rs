@@ -1010,7 +1010,10 @@ pub async fn create(
             &text.body,
         )
         .channels(crate::services::notifications::Channels::EmailOnly)
-        .append_email_footer(false),
+        .append_email_footer(false)
+        // The admin who set the account up is who the new user asks when the
+        // sign-in does not work.
+        .reply_to_user(requester.id),
     )
     .await;
     Ok(CreateResponse {

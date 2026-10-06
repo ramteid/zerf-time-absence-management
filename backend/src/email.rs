@@ -350,6 +350,14 @@ fn build_queued_message(
     finish_message(builder, &entry.body_text, attachment)
 }
 
+/// Whether `address` can be used as a mailbox address in a header. Checked
+/// when a mail is queued, so that "has a Reply-To" is decided on the same facts
+/// as the header that is later written: an address that fails here would be
+/// dropped at send time (see `reply_to_mailbox`).
+pub fn is_valid_address(address: &str) -> bool {
+    address.parse::<lettre::Address>().is_ok()
+}
+
 /// Build a header mailbox via lettre's structured constructor rather than
 /// hand-quoting a "Name" <addr> string: Mailbox::new takes the display name as
 /// a plain String next to an already-parsed Address, so it never re-parses the
@@ -539,6 +547,17 @@ mod tests {
         assert!(header_lines(&message)
             .iter()
             .all(|line| !line.starts_with("Bcc:")));
+    }
+
+    /// Addresses the header builder cannot use must be recognised when the mail
+    /// is queued, so such a mail gets the "do not reply" notice instead of
+    /// ending up with neither a Reply-To nor the notice.
+    #[test]
+    fn is_valid_address_rejects_what_the_header_cannot_carry() {
+        assert!(is_valid_address("lara@example.com"));
+        assert!(!is_valid_address("not an address"));
+        assert!(!is_valid_address(""));
+        assert!(!is_valid_address("lara@"));
     }
 
     /// Guards the assumption `send_now_multi` relies on: repeated `.to()`

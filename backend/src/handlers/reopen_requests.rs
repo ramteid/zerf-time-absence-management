@@ -21,9 +21,9 @@ use serde::Deserialize;
 /// Follows the `{event}_title` / `{event}_body` i18n key convention. The
 /// centrally translated body is stored in-app, while the matching professional
 /// email body is used for email delivery. `email = false` keeps the
-/// notification in-app only for self-actions. `reply_to` is the approver whose
-/// decision is reported, so the employee's answer reaches them; `None` for
-/// notices that are not a decision.
+/// notification in-app only for self-actions. `actor_id` is the person whose
+/// action is reported (the approver who decided, or the employee who asked), so
+/// a reply to the email reaches them.
 #[allow(clippy::too_many_arguments)]
 async fn notify_reopen(
     app_state: &AppState,
@@ -33,7 +33,7 @@ async fn notify_reopen(
     params: Vec<(&'static str, String)>,
     email: bool,
     request_id: i64,
-    reply_to: Option<i64>,
+    actor_id: i64,
 ) {
     let text = i18n::notification_event_text(language, event, &params);
     let email_body = i18n::notification_email_body(language, event, &params);
@@ -42,14 +42,15 @@ async fn notify_reopen(
     } else {
         notifications::Channels::InAppOnly
     };
-    let mut message = notifications::Outgoing::new(user_id, language, event, &text.title, &text.body)
-        .email_body(&email_body)
-        .channels(channels)
-        .reference("reopen_request", Some(request_id));
-    if let Some(approver_id) = reply_to {
-        message = message.reply_to_user(approver_id);
-    }
-    notifications::deliver(app_state, &message).await;
+    notifications::deliver(
+        app_state,
+        &notifications::Outgoing::new(user_id, language, event, &text.title, &text.body)
+            .email_body(&email_body)
+            .channels(channels)
+            .reply_to_user(actor_id)
+            .reference("reopen_request", Some(request_id)),
+    )
+    .await;
 }
 
 #[derive(Deserialize)]
@@ -236,7 +237,7 @@ pub async fn create(
             ],
             true,
             new_request_id,
-            None,
+            requester.id,
         )
         .await;
     }
@@ -325,7 +326,7 @@ pub async fn approve(
         // Email the employee, unless an admin approved their own request.
         reopen_request.user_id != requester.id,
         request_id,
-        Some(requester.id),
+        requester.id,
     )
     .await;
     // If an admin acted, notify all other explicitly assigned approvers for
@@ -423,7 +424,7 @@ pub async fn reject(
         // Email the employee, unless an admin rejected their own request.
         before.user_id != requester.id,
         request_id,
-        Some(requester.id),
+        requester.id,
     )
     .await;
     // Symmetric with approve: if an admin rejected a request, notify all other

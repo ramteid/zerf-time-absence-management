@@ -635,24 +635,20 @@ async fn process_period(
         return Ok(SendOutcome::Skipped(SkipReason::EmailUnavailable));
     };
 
-    let text = email_text(
+    let text = email_for_sending(
         language,
         &data.period_label,
         &organization_label(state, language).await,
         mode.is_manual(),
         data.provisional.as_ref(),
     );
-    // The report goes out without a Reply-To, so — like every such email — it
-    // ends with the "do not reply" notice. Added here rather than in
-    // `email_text` because it must come after the manual/provisional notes.
-    let body = crate::i18n::email_with_no_reply_notice(language, &text.body);
 
     crate::email::send_with_attachment(
         &state.email_circuit_breaker,
         &smtp,
         &config.recipients,
         &text.title,
-        &body,
+        &text.body,
         crate::email::EmailAttachment {
             // The creation date is part of the name because the same month
             // can legitimately be sent more than once — an interim snapshot
@@ -903,6 +899,22 @@ fn email_text(
     text
 }
 
+/// The payroll email exactly as it is mailed: [`email_text`] closed with the
+/// "do not reply" notice, because the report goes out without a Reply-To like
+/// every other email nobody can answer. Kept apart from `email_text` so that
+/// the notice always comes after the manual and provisional notes.
+fn email_for_sending(
+    language: &Language,
+    period_label: &str,
+    organization: &str,
+    manual: bool,
+    provisional: Option<&ProvisionalNotice>,
+) -> crate::i18n::NotificationText {
+    let mut text = email_text(language, period_label, organization, manual, provisional);
+    text.body = crate::i18n::email_with_no_reply_notice(language, &text.body);
+    text
+}
+
 /// Organization name for the email copy, falling back to the product name when
 /// none is configured.
 async fn organization_label(state: &AppState, language: &Language) -> String {
@@ -956,6 +968,35 @@ mod tests {
             );
             assert!(partial.body.contains("Jane Doe"), "{code}: names the gap");
             assert!(partial.body.contains('8') && partial.body.contains("12"));
+        }
+    }
+
+    /// Whatever else the mail says, it ends with the "do not reply" notice —
+    /// after the manual and provisional notes, and only once.
+    #[test]
+    fn mailed_email_ends_with_the_no_reply_notice() {
+        for (code, closing) in [
+            ("en", "Please do not reply! This email was sent automatically by the system."),
+            ("de", "Bitte nicht antworten! Diese E-Mail wurde automatisch vom System versendet."),
+        ] {
+            let language = crate::i18n::Language::from_setting(code);
+            let plain = email_for_sending(&language, "May 2026", "Example GmbH", false, None);
+            let manual_partial = email_for_sending(
+                &language,
+                "May 2026",
+                "Example GmbH",
+                true,
+                Some(&notice(1, 2, &["Jane Doe"])),
+            );
+
+            for text in [&plain, &manual_partial] {
+                assert!(text.body.ends_with(closing), "{code}: {}", text.body);
+                assert_eq!(text.body.matches(closing).count(), 1, "{code}: exactly once");
+            }
+            assert!(
+                manual_partial.body.contains("Jane Doe"),
+                "{code}: the provisional note stays above the notice"
+            );
         }
     }
 

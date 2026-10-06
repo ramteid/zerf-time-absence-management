@@ -821,18 +821,26 @@ a booking they have not handed in.
 If an admin approves or rejects their own item, Zerf records the audit event
 and sends an in-app-only notification (no email) back to the same user.
 
-### Replying to an email about a decision
+### Replying to an email
 
-Emails about a decision are sent from Zerf's sender address. If you reply to
-such an email, your reply goes to the person who made the decision. That
-covers approved or rejected weeks, absences, absence cancellations, and reopen
-requests. The same applies to approvers: when an admin decides a reopen
-request of their team, a reply to the email they receive goes to that admin.
-All other emails have no reply address. That includes requests to approvers,
-reminders, account emails, and the payroll report. These emails end with the
-note "Please do not reply! This email was sent automatically by the system."
-In German it reads "Bitte nicht antworten! Diese E-Mail wurde automatisch vom
-System versendet."
+Some emails are the direct result of something a person did in Zerf. Zerf sends
+them from its own sender address. If you reply, your reply goes to that person:
+
+- An email about a decision on a week, an absence, an absence cancellation, or
+  a reopen request: your reply goes to the approver or admin who decided.
+- An email about a request to the approvers (a week handed in, an absence
+  request, a reopen request): your reply goes to the employee who made it.
+- The email with a temporary password after an admin set up your account or
+  reset your password: your reply goes to that admin.
+
+When an admin decides a reopen request, the approvers assigned to the employee
+are told about it. A reply to that email goes to the admin.
+
+All other emails come from Zerf itself. These are reminders, the payroll report,
+technical alerts, and the password reset that you start yourself. They have no
+reply address. They end with the note "Please do not reply! This email was sent
+automatically by the system." In German it reads "Bitte nicht antworten! Diese
+E-Mail wurde automatisch vom System versendet."
 
 ### Approver receives notifications when
 
