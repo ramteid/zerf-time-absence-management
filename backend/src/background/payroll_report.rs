@@ -642,13 +642,17 @@ async fn process_period(
         mode.is_manual(),
         data.provisional.as_ref(),
     );
+    // The report goes out without a Reply-To, so — like every such email — it
+    // ends with the "do not reply" notice. Added here rather than in
+    // `email_text` because it must come after the manual/provisional notes.
+    let body = crate::i18n::email_with_no_reply_notice(language, &text.body);
 
     crate::email::send_with_attachment(
         &state.email_circuit_breaker,
         &smtp,
         &config.recipients,
         &text.title,
-        &text.body,
+        &body,
         crate::email::EmailAttachment {
             // The creation date is part of the name because the same month
             // can legitimately be sent more than once — an interim snapshot

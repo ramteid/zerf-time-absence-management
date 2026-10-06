@@ -642,6 +642,16 @@ account created) deliberately carry none. An unparseable stored address is
 dropped with a warning instead of failing the send, because a failing row is
 retried forever.
 
+**Every mail without a Reply-To ends with the "do not reply" notice**
+(`i18n::email_with_no_reply_notice`, key `email_no_reply_notice`, rendered in
+the mail's own language). `send_notification_email` appends it after the footer
+whenever the *resolved* Reply-To is `None` — so also for mail with
+`append_email_footer(false)`, and for a decision mail whose deciding person is
+gone. The payroll report bypasses the queue, so `background/payroll_report.rs`
+appends it at the send site, after the manual/provisional notes (not inside
+`email_text`, whose tests require the manual body to extend the scheduled one).
+The admin's SMTP test sends no message and needs none.
+
 ### Configuration (environment variables)
 
 | Variable | Required | Default | Purpose |
