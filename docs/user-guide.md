@@ -2178,15 +2178,19 @@ Team leads and admins see two month cards next to **Who is absent** on their
 dashboard. Employees see neither.
 
 **Submissions** answers "who has closed their month". It shows a ring split into
-three colours and the summary **"X of Y done"**, counting everybody the month
-concerns — administrators aside, and assistants who booked nothing at all, who
-have nothing to close:
+three colours and the summary **"X of Y done"**. It counts everybody who tracks
+time and had started by the end of the month. Administrators are not counted,
+and neither are assistants who booked nothing at all — they have nothing to
+close. People who have left are not on it.
 
 | Colour | Meaning |
 | --- | --- |
 | Green | Everything submitted and approved — this person is done. |
-| Amber | Everything submitted, but an approval or an absence decision is still missing. |
-| Red | Weeks are still missing, or the data needs an administrator's attention. |
+| Amber | Everything that is due is submitted, but an approval or an absence decision is still missing. |
+| Red | A week or a booked day that is due has not been submitted yet. |
+
+Team leads see their own team — themselves and the people they approve. Admins
+see everybody.
 
 Clicking it opens the full list, with the people who are still missing at the
 top. The list is re-read every time you open it, so approvals you just granted
@@ -2196,7 +2200,8 @@ reported as waiting for approval — nobody has handed them in yet.
 
 This card says nothing about the payroll report. An outstanding week is worth
 chasing, but it does not hold a report back (see [When it is
-sent](#when-it-is-sent)).
+sent](#when-it-is-sent)). Leaving somebody out of the payroll report does not
+remove them from this card either.
 
 **Payroll Report** shows what that month's report holds — the sick notes and the
 assistants' working days and hours — or, while the month is still running, what
@@ -2204,14 +2209,20 @@ it is shaping up to hold. Clicking it lists the entries the document contains.
 Once the report has been sent the card greys out; it is hidden entirely when the
 payroll report is switched off.
 
-Both cards track the previous month and carry a small **"Show [current month]"**
-link: a quick look at the month that is currently running. It is not a setting —
-it is not saved, and coming back to the dashboard shows the previous month
-again.
+Both cards show the previous month and carry a small **"Show [month]"** link
+that switches both of them to the month that is currently running, and back.
+It is not a setting — it is not saved, and coming back to the dashboard shows
+the previous month again.
 
-Team leads see the counts for **everyone**, so they can tell whether the month
-is complete. People outside their own team appear as *Not visible to you* — they
-still count towards the totals, but their names are not revealed.
+In the running month, the Submissions card only counts weeks that are already
+over as missing. The current week cannot be missing yet, so a draft in it does
+not turn anybody red. Something already handed in for it does show as waiting
+for approval, since you can decide on it right away.
+
+On the **Payroll Report** card, team leads see the whole report, so they can
+tell what it will contain. People outside their own team appear as *Not visible
+to you* — they still count towards the totals, but their names are not
+revealed.
 
 ### Managing categories
 

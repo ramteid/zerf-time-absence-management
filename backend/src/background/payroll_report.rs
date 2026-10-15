@@ -15,14 +15,14 @@
 //! for everybody whose *hours* are in the report, all time entries of the month
 //! must be approved. Payroll pays by those hours, so reporting a draft or
 //! not-yet-approved month would understate what is owed. This relaxation is
-//! specific to *what goes in the document* — the dashboard tile asks a
-//! stricter, unconditional question (everyone's own submitted+approved
-//! status) and must not reuse it; see `services::payroll_report::evaluate_members`.
+//! specific to *what goes in the document* — the dashboard's Submissions card
+//! asks a stricter, unconditional question (everyone's own submitted+approved
+//! status) and must not reuse it; see `services::submission_status`.
 //!
 //! A blocked scheduled period is **not** an error: people simply have not
-//! finished their month yet. It is logged and otherwise stays silent — the
-//! payroll dashboard tile (`services::payroll_report::build_status`) is where
-//! admins and team leads see who is still missing.
+//! finished their month yet. It is logged, the admins are told once on whom
+//! it waits, and the Submissions card (`services::submission_status`) shows
+//! who is still missing.
 //!
 //! `run_now` (admin "Send now" button) sends exactly one month immediately,
 //! skipping the day-of-month threshold, and never removes a period from the
@@ -441,8 +441,8 @@ async fn process_period(
         SendMode::Scheduled | SendMode::ManualPartial => {
             // Full approval is only required when this person's hours literally
             // end up in the PDF — an unapproved entry that never gets printed
-            // doesn't make the document wrong. (The dashboard tile asks a
-            // stricter, unconditional question; see `evaluate_members`.)
+            // doesn't make the document wrong. (The Submissions card asks a
+            // stricter, unconditional question; see `services::submission_status`.)
             // No week criterion: an unhanded-in week proves nothing about a
             // payroll month — see `reports::month_export_readiness`.
             let readiness = payroll_report::evaluate_members(

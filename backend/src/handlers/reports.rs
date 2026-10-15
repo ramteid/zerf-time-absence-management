@@ -643,27 +643,21 @@ pub struct MonthTileQuery {
     pub current: bool,
 }
 
-/// Submission status for the dashboard tile: how far each covered person is
-/// through the previous month — or, with `?current=true`, the current
-/// in-progress month instead. Leads only; a team lead sees the full counts but
-/// only their own team members by name.
+/// Submission status for the dashboard tile: who has closed the previous
+/// month — or, with `?current=true`, how far the running month is. Leads only;
+/// a team lead sees their own team, an admin everybody.
 pub async fn submission_status(
     State(app_state): State<AppState>,
     requester: User,
     Query(query): Query<MonthTileQuery>,
-) -> AppResult<Json<crate::services::payroll_report::SubmissionStatus>> {
+) -> AppResult<Json<crate::services::submission_status::SubmissionStatus>> {
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
     let language = crate::i18n::load_ui_language(&app_state.pool).await?;
     Ok(Json(
-        crate::services::payroll_report::build_submission_status(
-            &app_state,
-            &requester,
-            &language,
-            query.current,
-        )
-        .await?,
+        crate::services::submission_status::build(&app_state, &requester, &language, query.current)
+            .await?,
     ))
 }
 

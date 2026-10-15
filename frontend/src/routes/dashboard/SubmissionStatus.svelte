@@ -9,19 +9,21 @@
   export let activeHelp = null;
   export let onHelpToggle = () => {};
   export let onOpen = () => {};
-  // Transient peek at the current, in-progress month — see Dashboard.svelte.
+  // Switch between the previous month and the running one — see Dashboard.svelte.
   export let onShowCurrentMonth = () => {};
+  export let onShowPreviousMonth = () => {};
 
   const today = appTodayDate();
   const currentMonthName = fmtMonthName(today);
+  const previousMonthName = fmtMonthName(
+    new Date(today.getFullYear(), today.getMonth() - 1, 1),
+  );
   // The whole "YYYY-MM" is compared: matching on the month number alone would
   // also match the same month of another year.
   const currentPeriod = `${today.getFullYear()}-${String(
     today.getMonth() + 1,
   ).padStart(2, "0")}`;
-  // The peek is offered while the tile shows the previous month; asking for the
-  // current one is what removes the offer, so it cannot be clicked twice.
-  $: showingPreviousMonth = !!status?.period && status.period !== currentPeriod;
+  $: showingCurrentMonth = status?.period === currentPeriod;
 </script>
 
 <div class="zf-card submissions-card">
@@ -58,15 +60,23 @@
           .replace("{ready}", status?.ready ?? 0)
           .replace("{total}", status?.total ?? 0)}
       </div>
-      <div class="submissions-sub">{status?.period_label ?? ""}</div>
+      <div class="submissions-sub">
+        {status?.period_label ?? ""}
+        {#if showingCurrentMonth}
+          · {$t("still running")}
+        {/if}
+      </div>
     </div>
   </button>
-  {#if showingPreviousMonth}
+  {#if status}
     <button
       class="zf-btn zf-btn-ghost zf-btn-sm submissions-peek-btn"
-      on:click={onShowCurrentMonth}
+      on:click={showingCurrentMonth ? onShowPreviousMonth : onShowCurrentMonth}
     >
-      {$t("Show {month}").replace("{month}", currentMonthName)}
+      {$t("Show {month}").replace(
+        "{month}",
+        showingCurrentMonth ? previousMonthName : currentMonthName,
+      )}
     </button>
   {/if}
 </div>

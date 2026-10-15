@@ -373,6 +373,11 @@ error rather than as the edge case it is.
 `reports::weeks_in_month_to_judge` decides *which* weeks a completeness check
 sees: every week that overlaps the period and has already started, the one being
 worked included. A week belongs to a month as soon as any of its days do.
+The dashboard's Submissions card is the one deliberate exception, and only for
+the *running* month: there it judges weeks only up to the last Sunday that has
+passed (`submission_status::due_until`), because the card is a lead's view of
+what is overdue and the week being worked painted nearly everybody red on any
+day before Friday. A finished month is judged in full, as everywhere else.
 `reports::JudgedDays` decides which *days* of those weeks may be looked at.
 Month-scoped checks (Submissions tile, month report, timesheet export gate,
 month-end reminders) clamp to the month, so a draft booked in the new month
@@ -560,9 +565,7 @@ an older changed day has no row in the month now being reported and may since
 have been deactivated. The live member set uses only nonzero calculated deltas,
 so an unchanged rebook cannot create a permanent phantom member. A delivered
 report gets its historic users from that period's declaration ledger, with the
-old entry-marker lookup only as the migration-047 fallback. The Submissions tile
-passes `None`: an older correction says nothing about whether this month is
-closed. A carried *absence* widens the member set only for non-assistants,
+old entry-marker lookup only as the migration-047 fallback. A carried *absence* widens the member set only for non-assistants,
 mirroring the rule that an assistant's absence never appears in the report.
 
 `require_week_submission` is `false` for payroll and `true` for the archive. An
@@ -978,15 +981,26 @@ a *different* member filter and window from the dashboard tile; the two agree
 only for a finished month. Enabling the report at all requires
 `load_smtp_config()` to be `Some`, and disabling SMTP switches it back off
 (`update_smtp_settings`). Two lead-only endpoints back the dashboard's month cards.
-`GET /reports/submission-status` (`build_submission_status`) is the **Submissions**
-card: who has closed their month, judged with the week criterion and full
-approval for everyone. It no longer mirrors the payroll gate — the report does
-not wait on unhanded-in weeks — so it is independent of whether the payroll
-report is enabled at all. `GET /reports/payroll-content` (`build_content`) is the
+`GET /reports/submission-status` (`services::submission_status::build`) is the
+**Submissions** card: who has closed their month, judged with the week criterion
+and full approval for everyone. It shares nothing with the payroll report — not
+`payroll_members`, not the exclusion list, not the `month_export_readiness`
+gate — because "what may this document contain" is a different question from
+"has this person handed everything in". It asks its own questions in its own
+order (red: a due week or a draft/uncorrected rejection on a due day; amber: a
+submitted entry or an absence request awaiting a decision; red wins), with one
+query per question for everybody at once and only the week check per person.
+Rows before somebody's start date are hidden everywhere, so for a person who
+started inside the month those questions are asked again from their first day.
+A team lead sees their own team (`active_team_members`), an admin everybody;
+there are no anonymous rows. People who have left or stopped tracking time are
+not on it: their rows are immutable and hidden from every team and approval
+view (`TimeEntryDb::list_all`), so nothing shown for them could be acted on.
+`GET /reports/payroll-content` (`build_content`) is the
 **Payroll Report** card: it runs the very code that assembles the document
 (`build_report_data`) on the same member set and window the matching send mode
 would use, so the card cannot claim something the PDF would not print; names of people
-outside a team lead's own team are stripped server-side. "Already delivered" is derived from the queue (period reached `payroll_report_queue_period` **and** no longer in `payroll_report_queue`) rather than a stored marker, so it is correct on installations that predate the card. The tile's amber/red split cannot be read off `MonthExportReadiness` alone: the gate returns `PendingAbsenceRequests` before it checks week submission, so `status_for_member` re-checks `all_weeks_submitted_for_month` to keep "still owes weeks" red. The dashboard re-fetches the status when the detail dialog is opened (`Dashboard.svelte`'s `openPayrollDetail`), because approvals granted on that page are exactly what the reader opens the list to verify.
+outside a team lead's own team are stripped server-side. "Already delivered" is derived from the queue (period reached `payroll_report_queue_period` **and** no longer in `payroll_report_queue`) rather than a stored marker, so it is correct on installations that predate the card. Both cards follow one shared month toggle on the dashboard (previous month by default, the running month on request, and back). The dashboard re-fetches the status when the detail dialog is opened (`Dashboard.svelte`'s `openPayrollDetail`), because approvals granted on that page are exactly what the reader opens the list to verify.
 
 ### Integration tests
 

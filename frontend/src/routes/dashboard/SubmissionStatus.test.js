@@ -1,8 +1,6 @@
 // Tests for the Submissions dashboard tile and its detail dialog. They
-// cover the states the tile switches between, the
-// "X of Y done" summary, the traffic-light breakdown, and — most importantly —
-// that a team lead sees anonymized rows for people they may not see while the
-// counts still cover everyone.
+// cover the "X of Y done" summary, the traffic-light breakdown, the switch
+// between the previous and the running month, and the detail list.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount, unmount } from "svelte";
@@ -41,25 +39,9 @@ function status(overrides = {}) {
     awaiting_approval: 1,
     not_submitted: 1,
     members: [
-      {
-        user_id: 2,
-        name: "Erin Employee",
-        status: "ready",
-        reason_key: null,
-      },
-      {
-        user_id: 3,
-        name: "Alex Assistant",
-        status: "awaiting_approval",
-        reason_key: "payroll_report_reason_unapproved_entries",
-      },
-      // Somebody outside this team lead's scope: counted, never named.
-      {
-        user_id: null,
-        name: null,
-        status: "not_submitted",
-        reason_key: null,
-      },
+      { user_id: 2, name: "Erin Employee", status: "ready" },
+      { user_id: 3, name: "Alex Assistant", status: "awaiting_approval" },
+      { user_id: 4, name: "Nora Newcomer", status: "not_submitted" },
     ],
     ...overrides,
   };
@@ -136,17 +118,28 @@ describe("SubmissionStatus tile", () => {
     expect(onShowCurrentMonth).toHaveBeenCalled();
   });
 
-  it("drops the peek offer while it is already showing that month", async () => {
+  it("offers the way back while it shows the running month", async () => {
     const now = appTodayDate();
     const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const onShowPreviousMonth = vi.fn();
     component = mount(SubmissionStatus, {
       target,
-      props: { status: status({ period: currentPeriod }) },
+      props: { status: status({ period: currentPeriod }), onShowPreviousMonth },
     });
     await settle();
 
-    const label = `Show ${fmtMonthName(appTodayDate())}`;
-    expect(target.textContent).not.toContain(label);
+    expect(target.textContent).not.toContain(`Show ${fmtMonthName(now)}`);
+    expect(target.textContent).toContain("still running");
+    const label = `Show ${fmtMonthName(
+      new Date(now.getFullYear(), now.getMonth() - 1, 1),
+    )}`;
+    const backButton = [...target.querySelectorAll("button")].find(
+      (button) => button.textContent.trim() === label,
+    );
+    expect(backButton).toBeTruthy();
+
+    backButton.click();
+    expect(onShowPreviousMonth).toHaveBeenCalled();
   });
 
   it("explains itself, and says it is not the payroll report", async () => {
@@ -193,7 +186,7 @@ describe("SubmissionStatusDialog", () => {
     target.remove();
   });
 
-  it("anonymizes people the viewer may not see but still lists them", async () => {
+  it("lists every person by name, each one linking to their report", async () => {
     component = mount(SubmissionStatusDialog, {
       target,
       props: { status: status(), onClose: () => {} },
@@ -201,15 +194,11 @@ describe("SubmissionStatusDialog", () => {
     await settle();
 
     const rows = document.querySelectorAll(".payroll-row");
-    // All three people are represented, so the counts add up for the viewer.
     expect(rows.length).toBe(3);
-    expect(document.body.textContent).toContain("Erin Employee");
-    expect(document.body.textContent).toContain("Not visible to you");
-    // The hidden person's row must not be a link to their report.
-    const hidden = [...rows].find((row) =>
-      row.textContent.includes("Not visible to you"),
-    );
-    expect(hidden.classList.contains("payroll-row-link")).toBe(false);
+    expect(
+      [...rows].every((row) => row.classList.contains("payroll-row-link")),
+    ).toBe(true);
+    expect(document.body.textContent).not.toContain("Not visible to you");
   });
 
   it("deep-links a named row into that person's report for the month", async () => {

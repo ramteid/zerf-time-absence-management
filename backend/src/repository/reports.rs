@@ -384,7 +384,7 @@ impl ReportDb {
     /// [`Self::has_unresolved_time_entries_in_range`] this deliberately
     /// excludes `submitted` — those *are* waiting for an approver, and telling
     /// the two apart is what keeps "not submitted" from being reported as
-    /// "waiting for approval" on the payroll dashboard card.
+    /// "waiting for approval" on the dashboard's Submissions card.
     pub async fn has_unsubmitted_time_entries_in_range(
         &self,
         user_id: i64,

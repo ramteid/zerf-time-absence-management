@@ -104,7 +104,7 @@ const TRANSLATIONS = {
     "All submitted (approvals pending)": "All submitted (approvals pending)",
     "Weeks missing": "Weeks missing",
     help_submissions_card:
-      "How far each person is through the tracked month: everything submitted and approved, submitted and waiting for a decision, or still missing. It says nothing about the payroll report — that has its own card.",
+      "Who has closed the month: everything submitted and approved, submitted and waiting for a decision, or still missing. In the running month only weeks that are already over count as missing. Team leads see their own team. It says nothing about the payroll report — that has its own card.",
     "{absences} absences · {people} people with hours":
       "{absences} absences · {people} people with hours",
     "still running": "still running",
@@ -1325,7 +1325,7 @@ const TRANSLATIONS = {
       "Alles eingereicht (Genehmigungen ausstehend)",
     "Weeks missing": "Wochen fehlen",
     help_submissions_card:
-      "Wie weit jede Person im betrachteten Monat ist: alles eingereicht und genehmigt, eingereicht und auf Entscheidung wartend, oder noch offen. \u00dcber die Lohnmeldung sagt die Kachel nichts \u2014 daf\u00fcr gibt es eine eigene.",
+      "Wer den Monat abgeschlossen hat: alles eingereicht und genehmigt, eingereicht und auf Entscheidung wartend, oder noch offen. Im laufenden Monat gelten nur Wochen als offen, die schon vorbei sind. Teamleitungen sehen ihr eigenes Team. \u00dcber die Lohnmeldung sagt die Kachel nichts \u2014 daf\u00fcr gibt es eine eigene.",
     "{absences} absences · {people} people with hours":
       "{absences} Abwesenheiten · {people} Personen mit Stunden",
     "still running": "l\u00e4uft noch",

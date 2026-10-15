@@ -14,6 +14,7 @@ pub mod payroll_report;
 pub mod reopen_requests;
 pub mod reports;
 pub mod settings;
+pub mod submission_status;
 pub mod time_entries;
 pub mod users;
 pub mod work_schedules;
