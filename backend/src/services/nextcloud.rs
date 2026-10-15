@@ -160,12 +160,32 @@ pub async fn create_folder(
         // 201 Created or 405 Method Not Allowed (folder already exists).
         return Ok(());
     }
-    // Any other status (e.g. 403 on strict file-drop shares) is logged as a
-    // warning, not an error.  The subsequent PUT is the authoritative signal:
-    // if the folder was missing, the PUT will fail with its own clear error.
+    // Any other status (e.g. 403 on strict file-drop shares) does not stop the
+    // upload by itself. The subsequent PUT is the authoritative signal: if the
+    // folder really is missing, the PUT fails with its own error, which the
+    // caller logs as an error and raises to the admins. Info level only, so a
+    // refused MKCOL followed by a successful PUT leaves no misleading entry in
+    // the System Log.
     let body = response.text().await.unwrap_or_default();
-    tracing::warn!("Nextcloud MKCOL returned {status} for {url} — attempting PUT anyway: {body}");
+    tracing::info!("Nextcloud MKCOL returned {status} for {url} — attempting PUT anyway: {body}");
     Ok(())
+}
+
+/// Error text for an upload the share refused. Nextcloud answers 403 when the
+/// file already exists and the share link does not allow editing — which is
+/// what happens when a corrected month is uploaded again — so the text says
+/// how to fix that instead of only quoting the server.
+fn upload_failed_message(status: reqwest::StatusCode, body: &str) -> String {
+    let body = body.trim();
+    if status == reqwest::StatusCode::FORBIDDEN {
+        format!(
+            "Nextcloud upload failed (HTTP {status}): the share refused the file. \
+             If the file already exists, the share link must allow editing so a \
+             corrected PDF can replace it. Server response: {body}"
+        )
+    } else {
+        format!("Nextcloud upload failed (HTTP {status}): {body}")
+    }
 }
 
 /// Upload bytes to a Nextcloud public share via WebDAV PUT.
@@ -200,9 +220,7 @@ pub async fn upload_file(
     let status = response.status();
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
-        return Err(AppError::Internal(format!(
-            "Nextcloud upload failed (HTTP {status}): {body}"
-        )));
+        return Err(AppError::Internal(upload_failed_message(status, &body)));
     }
 
     Ok(())
@@ -246,6 +264,29 @@ mod tests {
     #[test]
     fn parse_share_url_rejects_empty_token() {
         assert!(parse_share_url("https://cloud.example.com/s/").is_err());
+    }
+
+    #[test]
+    fn refused_upload_explains_the_missing_edit_permission() {
+        let message = upload_failed_message(
+            reqwest::StatusCode::FORBIDDEN,
+            "<s:exception>Sabre\\DAV\\Exception\\Forbidden</s:exception>\n",
+        );
+        assert!(message.starts_with("Nextcloud upload failed (HTTP 403 Forbidden)"));
+        assert!(message.contains("must allow editing"));
+        assert!(message.ends_with(
+            "Server response: <s:exception>Sabre\\DAV\\Exception\\Forbidden</s:exception>"
+        ));
+    }
+
+    #[test]
+    fn other_upload_failures_quote_the_server_only() {
+        let message =
+            upload_failed_message(reqwest::StatusCode::INSUFFICIENT_STORAGE, "quota exceeded");
+        assert_eq!(
+            message,
+            "Nextcloud upload failed (HTTP 507 Insufficient Storage): quota exceeded"
+        );
     }
 
     #[test]

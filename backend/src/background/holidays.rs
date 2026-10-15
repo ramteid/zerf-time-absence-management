@@ -11,7 +11,7 @@ pub async fn run_loop(pool: DatabasePool) {
 
         let next_year = crate::services::settings::app_current_year(&pool).await + 1;
         if let Err(error) = crate::services::holidays::ensure_holidays(&pool, next_year).await {
-            tracing::warn!(
+            tracing::error!(
                 "Holiday scheduler: failed to ensure holidays for {next_year}: {error:?}"
             );
         } else {

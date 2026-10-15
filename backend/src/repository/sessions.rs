@@ -171,7 +171,7 @@ impl SessionDb {
         .execute(&self.pool)
         .await;
         if let Err(e) = result {
-            tracing::warn!(target: "zerf::cleanup", "session cleanup failed: {e}");
+            tracing::error!(target: "zerf::cleanup", "session cleanup failed: {e}");
         }
     }
 
@@ -183,7 +183,7 @@ impl SessionDb {
         .execute(&self.pool)
         .await
         {
-            tracing::warn!(target: "zerf::cleanup", "login_attempts cleanup failed: {e}");
+            tracing::error!(target: "zerf::cleanup", "login_attempts cleanup failed: {e}");
         }
     }
 
@@ -193,7 +193,7 @@ impl SessionDb {
                 .execute(&self.pool)
                 .await
         {
-            tracing::warn!(target: "zerf::cleanup", "password_reset_tokens cleanup failed: {e}");
+            tracing::error!(target: "zerf::cleanup", "password_reset_tokens cleanup failed: {e}");
         }
     }
 

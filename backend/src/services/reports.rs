@@ -2635,7 +2635,7 @@ async fn requeue_export_for_dates_with_start_date_review(
             Ok(Some(_user)) => {}
             Ok(None) => continue,
             Err(e) => {
-                tracing::warn!(
+                tracing::error!(
                     target: "zerf::reports",
                     "requeue_export_for_dates: failed to load user {user_id}: {e}"
                 );
@@ -2652,7 +2652,8 @@ async fn requeue_export_for_dates_with_start_date_review(
                 export_queue_db.populate(&period, &[user_id]).await
             };
             if let Err(e) = result {
-                tracing::warn!(
+                // The corrected month would never reach the archive: an error.
+                tracing::error!(
                     target: "zerf::reports",
                     "requeue_export_for_dates: failed to re-queue user {} period {}: {e}",
                     user_id,

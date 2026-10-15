@@ -186,7 +186,10 @@ pub async fn queue_email(
         .enqueue(to, to_name, kind, subject, body_text, reply_to)
         .await
     {
-        tracing::warn!(target: "zerf::email", "failed to queue email to {to}: {e}");
+        // The mail is lost. `zerf::email` is on the log capture's loop-guard
+        // list, so this line raises no alert of its own; the database error
+        // behind it already did when it was converted (`From<sqlx::Error>`).
+        tracing::error!(target: "zerf::email", "failed to queue email to {to}: {e}");
     }
 }
 

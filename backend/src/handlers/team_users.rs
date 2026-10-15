@@ -18,7 +18,7 @@ use crate::roles::{is_assistant_role, ROLE_ASSISTANT};
 use crate::services::users::{
     assert_team_lead_assistant_list_access, assert_team_lead_can_manage_assistant,
     ensure_email_available, ensure_user_name_available, normalize_optional_user_name,
-    repo_user_to_auth_user, update_basic_tx, user_unique_conflict, LeaveAccountInput,
+    repo_user_to_auth_user, update_basic_tx, user_write_error, LeaveAccountInput,
 };
 use crate::AppState;
 use axum::{
@@ -223,11 +223,7 @@ pub async fn update(
         None, // tracks_time: locked to true for assistants
     )
     .await
-    .map_err(|e| {
-        tracing::warn!(target: "zerf::team_users", "update assistant failed: {e}");
-        user_unique_conflict(&e)
-            .unwrap_or_else(|| AppError::Conflict("Could not update user.".into()))
-    })?;
+    .map_err(|e| user_write_error("update assistant", &e, "Could not update user."))?;
     crate::services::users::seed_leave_accounts_for_user_tx(
         &mut transaction,
         user_id,

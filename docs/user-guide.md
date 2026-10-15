@@ -954,6 +954,7 @@ notifications/emails.
 When a technical failure occurs — such as a database backup failure, a Nextcloud upload error, an email that cannot be delivered, or any error logged by the application — admins can be alerted. This is **opt-in per admin**: only admins whose profile has **"Receives notifications about technical system errors"** enabled are notified. The option is off by default and is set when creating or editing an admin user (it appears only for the Admin role).
 
 - Opted-in admins receive both a **pinned** in-app notification (highlighted at the top of the notification panel) **and an email**.
+- Every error in the System Log is reported this way, except problems with delivering these notifications themselves. Warnings are not reported: anything that keeps Zerf from doing its job is recorded as an error.
 - If no admin has opted in, technical errors are still recorded in the System Log but no one is notified — enable the option for at least one admin to receive alerts.
 - Each failure class produces **at most one active notification** per admin. If the notification is dismissed and the failure recurs, it is raised again.
 - **Undeliverable emails are reported.** If the email server cannot be reached or refuses a message, the notification names the recipient, the subject and the reason the server gave. It appears when the first attempt fails, again if a later attempt fails for a different reason, and once more if the message is still undelivered after 100 attempts (several hours later). Zerf keeps trying in between without further notices.
@@ -1609,6 +1610,12 @@ unreachable holiday service. It helps admins understand why something did not
 work without needing access to the server.
 
 - Only warnings and errors are collected; routine activity is not logged here.
+- An **error** means that something did not work, for example an upload, a
+  reminder run or an email. Admins who opted in to technical error
+  notifications are alerted about errors (see
+  [System error notifications](#system-error-notifications-admin)).
+- A **warning** is a note where Zerf still did its job, for example a login
+  attempt while the account is locked. Warnings never send a notification.
 - Entries are listed newest first, 100 per page. Long messages are shortened
   in the list — click an entry to see the full message with its context in a
   popup.
@@ -1960,13 +1967,13 @@ If a past month is changed after the PDF was already uploaded - for example an e
 | Setting | Description |
 | --- | --- |
 | Enable report PDF upload | Activates the monthly automatic upload. |
-| Share link | A Nextcloud public share URL. Only `https` links are accepted. |
+| Share link | A Nextcloud public share URL. Only `https` links are accepted. The share must allow uploading **and editing**: when a past month is corrected, the new PDF replaces the one already stored there. |
 | Share password | Optional password protecting the share. |
 | Upload day of month (1–28) | The day of the month on which the previous month's PDFs are queued. Default: 5. Set this after your team's submission deadline to maximise how many employees are already submitted when the queue is first processed. |
 
 **Upload now** queues the previous month's PDFs for all employees immediately and uploads those whose month is already final. Employees who are not yet ready are uploaded on subsequent daily checks. This does not prevent the scheduled monthly run from processing remaining entries.
 
-If an upload fails or a queued PDF cannot be safely generated yet, admins who opted in to technical error notifications are alerted in the app and by email. The scheduled upload retries automatically on the next daily check.
+If an upload fails - for example because the share does not allow replacing a PDF that is already there - or a queued PDF cannot be safely generated yet, admins who opted in to technical error notifications are alerted in the app and by email. The scheduled upload retries automatically on the next daily check.
 
 ### Payroll Report
 

@@ -932,13 +932,13 @@ fn required_translation(language: &Language, key: &str, params: &[(&str, String)
         .find(|(translation_key, _)| *translation_key == key)
         .map(|(_, translation_value)| *translation_value)
     else {
-        tracing::warn!(target:"zerf::i18n", "missing required translation key: {key}");
+        tracing::error!(target:"zerf::i18n", "missing required translation key: {key}");
         return key.to_string();
     };
 
     for placeholder in template_placeholder_names(template) {
         if !params.iter().any(|(name, _)| *name == placeholder) {
-            tracing::warn!(target:"zerf::i18n", "missing template parameter {placeholder:?} for key {key:?}");
+            tracing::error!(target:"zerf::i18n", "missing template parameter {placeholder:?} for key {key:?}");
         }
     }
 
@@ -1577,6 +1577,32 @@ mod tests {
                 );
             }
             assert!(!text.body.contains('{'), "unresolved placeholder: {}", text.body);
+        }
+    }
+
+    /// The log capture renders these texts for every error it raises, and a
+    /// missing key or parameter is itself logged as an error. If they ever
+    /// failed to render, each alert would raise the next one, so they must
+    /// always resolve in every language.
+    #[test]
+    fn technical_error_alert_renders_in_both_languages() {
+        for (code, expected_title) in [
+            ("en", "Technical system error"),
+            ("de", "Technischer Systemfehler"),
+        ] {
+            let language = Language::from_setting(code);
+            let text = technical_error_text(&language, "upload failed".to_string());
+            assert_eq!(text.title, expected_title);
+            assert!(text.body.contains("upload failed"), "{code}: {}", text.body);
+            assert!(
+                !text.body.contains('{'),
+                "unresolved placeholder: {}",
+                text.body
+            );
+
+            let email = technical_error_email_body(&language, &text.title, &text.body);
+            assert!(email.contains(expected_title), "{code}: {email}");
+            assert!(!email.contains('{'), "unresolved placeholder: {email}");
         }
     }
 }
