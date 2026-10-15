@@ -300,6 +300,26 @@
     loadPayrollContent();
   }
 
+  // The approval list that holds a person's pending decision, if any. The
+  // Submissions card paints somebody amber for exactly these items.
+  function approvalSectionFor(userId) {
+    if (pendingWeeks.some((week) => week.user_id === userId))
+      return "timesheets";
+    if (pendingReopens.some((request) => request.user_id === userId))
+      return "reopen";
+    if (pendingAbsences.some((absence) => absence.user_id === userId))
+      return "absences";
+    return "";
+  }
+
+  function showApprovalsFor(member) {
+    const section = approvalSectionFor(member.user_id);
+    if (!section) return false;
+    submissionDetailOpen = false;
+    revealFocusSection(section);
+    return true;
+  }
+
   function showSubmissionsMonth(current) {
     submissionsShowCurrentMonth = current;
     loadSubmissionStatus();
@@ -643,6 +663,7 @@
   <SubmissionStatusDialog
     status={submissionStatus}
     onClose={() => (submissionDetailOpen = false)}
+    onShowApprovals={showApprovalsFor}
   />
 {/if}
 

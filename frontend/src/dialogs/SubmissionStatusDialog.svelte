@@ -6,10 +6,19 @@
   // Payload of GET /reports/submission-status.
   export let status;
   export let onClose;
+  // Takes the reader to the approval list holding this person's pending
+  // decision; returns false when the dashboard has nothing to show for them.
+  export let onShowApprovals = () => false;
 
-  // Opens the person's report in month mode, so it judges the month exactly
-  // as this list did.
-  function openReport(member) {
+  // Somebody waiting for approval is decided in the dashboard's approval
+  // lists — the report has no approve button, so sending the reader there
+  // would be a dead end. Everybody else opens their report in month mode, so
+  // it judges the month exactly as this list did.
+  function openMember(member) {
+    if (member.status === "awaiting_approval" && onShowApprovals(member)) {
+      onClose();
+      return;
+    }
     go(`/reports?user=${member.user_id}&month=${status.period}`);
     onClose();
   }
@@ -63,7 +72,12 @@
       {#each rows as member (member.user_id)}
         <button
           class="payroll-row payroll-row-link"
-          on:click={() => openReport(member)}
+          title={$t(
+            member.status === "awaiting_approval"
+              ? "Go to approvals"
+              : "View in report",
+          )}
+          on:click={() => openMember(member)}
         >
           <span class="payroll-name">{member.name}</span>
           <span class="zf-chip zf-chip-sm {CHIP_CLASS[member.status]}">

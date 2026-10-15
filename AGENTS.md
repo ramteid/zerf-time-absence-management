@@ -994,7 +994,9 @@ with one query per question for everybody at once
 (`ReportDb::user_ids_with_unsubmitted_entries_since_start`,
 `ReportDb::user_ids_awaiting_a_decision`) and only the week check per person.
 Both queries skip rows before a person's start date, which are hidden
-everywhere. Assistants count when the month holds a booking or a pending
+everywhere. Pending decisions count for the whole month even while it is
+running — a request for a later week is in the approval list and can be decided
+now — while *due* work stops at the last finished week. Assistants count when the month holds a booking or a pending
 decision of theirs, so the card never misses a request the approval list shows.
 A team lead sees the people they approve (`active_team_members` minus
 themselves — their own items wait for their approver, so an amber row of their
@@ -1006,7 +1008,7 @@ view (`TimeEntryDb::list_all`), so nothing shown for them could be acted on.
 **Payroll Report** card: it runs the very code that assembles the document
 (`build_report_data`) on the same member set and window the matching send mode
 would use, so the card cannot claim something the PDF would not print; names of people
-outside a team lead's own team are stripped server-side. "Already delivered" is derived from the queue (period reached `payroll_report_queue_period` **and** no longer in `payroll_report_queue`) rather than a stored marker, so it is correct on installations that predate the card. Each card has its own month toggle (previous month by default, the running month on request, and back); a card's link switches only that card, and only the newest response per card is applied. In the running month the Submissions card says "up to date" instead of "done" (`SubmissionStatus::in_progress`). Clicking a person opens their report in month mode (`/reports?user=…&month=YYYY-MM`), never as a custom range: a range judges its boundary weeks whole and could contradict the card. The dashboard re-fetches the status when the detail dialog is opened (`Dashboard.svelte`'s `openPayrollDetail`), because approvals granted on that page are exactly what the reader opens the list to verify.
+outside a team lead's own team are stripped server-side. "Already delivered" is derived from the queue (period reached `payroll_report_queue_period` **and** no longer in `payroll_report_queue`) rather than a stored marker, so it is correct on installations that predate the card. Each card has its own month toggle (previous month by default, the running month on request, and back); a card's link switches only that card, and only the newest response per card is applied. In the running month the Submissions card says "up to date" instead of "done" (`SubmissionStatus::in_progress`). Clicking an amber person takes the reader to the dashboard approval list holding their decision (`Dashboard.svelte`'s `approvalSectionFor`) — the report has no approve button, so it would be a dead end; anybody else opens their report in month mode (`/reports?user=…&month=YYYY-MM`), never as a custom range: a range judges its boundary weeks whole and could contradict the card. The card spells out the red and amber counts next to the ring, and the "My Team" stat cards paint pending weeks and absence requests amber, not red, because red on the Submissions card means the employee has to act. The dashboard re-fetches the status when the detail dialog is opened (`Dashboard.svelte`'s `openPayrollDetail`), because approvals granted on that page are exactly what the reader opens the list to verify.
 
 ### Integration tests
 

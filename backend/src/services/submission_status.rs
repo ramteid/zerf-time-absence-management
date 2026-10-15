@@ -191,14 +191,12 @@ impl OpenItems {
         } else {
             HashSet::new()
         };
-        // Decisions are judged up to the end of the week being worked, like
-        // every other month check: a request for a later week is not open
-        // business yet. Something handed in early counts, though — the
-        // approver can act on it right away.
-        let open_to = reports::judged_period_end(to, today);
-        let awaiting_decision = reports_db
-            .user_ids_awaiting_a_decision(from, open_to)
-            .await?;
+        // Decisions count for the whole month, also in the one still running:
+        // a request for a later week sits in the approval list right now and
+        // can be decided right now, just like something handed in early.
+        // Judging it only up to the week being worked made the card say "up
+        // to date" next to a list that still held a decision for that person.
+        let awaiting_decision = reports_db.user_ids_awaiting_a_decision(from, to).await?;
         Ok(Self {
             from,
             due_to,

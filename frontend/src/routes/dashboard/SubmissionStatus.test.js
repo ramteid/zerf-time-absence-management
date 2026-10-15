@@ -81,6 +81,18 @@ describe("SubmissionStatus tile", () => {
     expect(target.querySelector(".seg-awaiting")).toBeTruthy();
   });
 
+  it("spells out who has to act next to the ring", async () => {
+    component = mount(SubmissionStatus, {
+      target,
+      props: { status: status() },
+    });
+    await settle();
+
+    const breakdown = target.querySelector(".submissions-breakdown");
+    expect(breakdown.textContent).toContain("1 not submitted");
+    expect(breakdown.textContent).toContain("1 waiting for approval");
+  });
+
   it("omits arcs for states nobody is in", async () => {
     component = mount(SubmissionStatus, {
       target,
@@ -260,6 +272,49 @@ describe("SubmissionStatusDialog", () => {
     expect(readyRow.textContent).toContain("Up to date");
     expect(document.body.textContent).toContain("1 of 3 up to date");
     expect(document.body.textContent).toContain("still running");
+  });
+
+  it("sends somebody waiting for approval to the approval lists", async () => {
+    const onShowApprovals = vi.fn(() => true);
+    const onClose = vi.fn();
+    component = mount(SubmissionStatusDialog, {
+      target,
+      props: { status: status(), onClose, onShowApprovals },
+    });
+    await settle();
+
+    const awaitingRow = [...document.querySelectorAll(".payroll-row")].find(
+      (row) => row.textContent.includes("Alex Assistant"),
+    );
+    awaitingRow.click();
+    await settle();
+
+    expect(onShowApprovals).toHaveBeenCalledWith(
+      expect.objectContaining({ user_id: 3 }),
+    );
+    expect(onClose).toHaveBeenCalled();
+    // The report has no approve button, so it is not where this row leads.
+    expect(goMock).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the report when no approval list holds the person", async () => {
+    component = mount(SubmissionStatusDialog, {
+      target,
+      props: {
+        status: status(),
+        onClose: () => {},
+        onShowApprovals: () => false,
+      },
+    });
+    await settle();
+
+    const awaitingRow = [...document.querySelectorAll(".payroll-row")].find(
+      (row) => row.textContent.includes("Alex Assistant"),
+    );
+    awaitingRow.click();
+    await settle();
+
+    expect(goMock).toHaveBeenCalledWith("/reports?user=3&month=2026-07");
   });
 
   it("lists the people still missing before the ones already done", async () => {

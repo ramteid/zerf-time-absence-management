@@ -63,6 +63,29 @@
     />
     <div>
       <div class="submissions-headline">{headline}</div>
+      <!-- The ring's colours, spelled out: who has to act, not just who is done. -->
+      {#if status?.not_submitted || status?.awaiting_approval}
+        <div class="submissions-breakdown">
+          {#if status.not_submitted}
+            <span class="breakdown-item">
+              <span class="breakdown-dot dot-missing"></span>
+              {$t("{count} not submitted").replace(
+                "{count}",
+                status.not_submitted,
+              )}
+            </span>
+          {/if}
+          {#if status.awaiting_approval}
+            <span class="breakdown-item">
+              <span class="breakdown-dot dot-awaiting"></span>
+              {$t("{count} waiting for approval").replace(
+                "{count}",
+                status.awaiting_approval,
+              )}
+            </span>
+          {/if}
+        </div>
+      {/if}
       <div class="submissions-sub">
         {status?.period_label ?? ""}
         {#if showingCurrentMonth}
@@ -131,6 +154,36 @@
   .submissions-headline {
     font-size: 1.125rem;
     font-weight: 600;
+  }
+
+  .submissions-breakdown {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 12px;
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+  }
+
+  .breakdown-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .breakdown-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* Same colours as the ring's arcs (StatusDonut). */
+  .dot-missing {
+    background: var(--danger);
+  }
+
+  .dot-awaiting {
+    background: var(--warning);
   }
 
   .submissions-sub {

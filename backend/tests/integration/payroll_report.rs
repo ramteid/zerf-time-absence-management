@@ -6417,6 +6417,78 @@ async fn submissions_card_counts_every_pending_decision() {
     app.cleanup().await;
 }
 
+/// A request for a later week of the running month is in the approval list
+/// right now and can be decided right now, so it makes the person amber — the
+/// card must not say "up to date" next to a list that still holds it.
+#[tokio::test]
+async fn submissions_card_counts_a_request_for_a_later_week_of_the_running_month() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, _lead_pw, _emp_id, _emp_pw, _monday, _cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "later-week").await;
+
+    let today = zerf::services::settings::app_today(&app.state.pool).await;
+    let running_monday = zerf::time_calc::week_monday(today);
+    let later_day = running_monday + Duration::days(14);
+    assert_eq!(
+        later_day.month(),
+        today.month(),
+        "the reference date must leave a later week in the running month"
+    );
+    let iso = |day: NaiveDate| day.format("%Y-%m-%d").to_string();
+
+    let (status, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "fresh-later-week@example.com",
+                "first_name": "Lena",
+                "last_name": "Later",
+                "role": "employee",
+                "weekly_hours": 39,
+                "start_date": iso(running_monday),
+                "approver_ids": [lead_id],
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create employee: {body}");
+    let person_id = id(&body);
+    let person = login_change_pw(&app, "fresh-later-week@example.com", &temp_pw(&body)).await;
+    let running_month = "/api/v1/reports/submission-status?current=true";
+    assert_eq!(
+        submissions_card_status(&admin, running_month, person_id).await,
+        "ready"
+    );
+
+    let (status, categories) = person.get("/api/v1/absence-categories").await;
+    assert_eq!(status, StatusCode::OK);
+    let vacation_id = categories
+        .as_array()
+        .expect("categories")
+        .iter()
+        .find(|category| category["slug"].as_str() == Some("vacation"))
+        .and_then(|category| category["id"].as_i64())
+        .expect("vacation category");
+    let (status, body) = person
+        .post(
+            "/api/v1/absences",
+            &json!({
+                "category_id": vacation_id,
+                "start_date": iso(later_day),
+                "end_date": iso(later_day),
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "request a later day off: {body}");
+    assert_eq!(
+        submissions_card_status(&admin, running_month, person_id).await,
+        "awaiting_approval",
+        "the request is in the approval list and can be decided now"
+    );
+
+    app.cleanup().await;
+}
+
 /// Rows before somebody's start date are hidden everywhere in the app, so they
 /// must not colour the card either: nobody could hand them in or decide on
 /// them. They only arise when an admin moves a start date past existing data.

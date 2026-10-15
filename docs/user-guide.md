@@ -2193,12 +2193,16 @@ Team leads see the people they approve — the same people as in their approval
 lists. Their own month is not on it; it is on their personal dashboard. Admins
 see everybody.
 
+Below the summary the card says how many people have not submitted yet and how
+many are waiting for approval.
+
 Clicking it opens the full list, with the people who are still missing at the
 top. The list is re-read every time you open it, so approvals you just granted
-on the dashboard are already reflected. Clicking a person opens their report for
-that month — the month view, so it judges the weeks exactly as the card does —
-and you can go straight to what needs approving. Drafts are never reported as
-waiting for approval — nobody has handed them in yet.
+on the dashboard are already reflected. Clicking someone who is waiting for
+approval takes you to the approval list on the dashboard where their decision
+is waiting. Clicking anyone else opens their report for that month, in the month
+view, so it judges the weeks exactly as the card does. Drafts are never reported
+as waiting for approval — nobody has handed them in yet.
 
 This card says nothing about the payroll report. An outstanding week is worth
 chasing, but it does not hold a report back (see [When it is
@@ -2218,8 +2222,9 @@ coming back to the dashboard shows the previous month again.
 
 In the running month, the Submissions card only counts weeks that are already
 over as missing. The current week cannot be missing yet, so a draft in it does
-not turn anybody red. Something already handed in for it does show as waiting
-for approval, since you can decide on it right away. Because nobody can be done
+not turn anybody red. Anything waiting for a decision does count, though —
+something already handed in for this week, or a request for a later week of the
+month — since you can decide on it right away. Because nobody can be done
 with a month that is still running, the card says **"X of Y up to date"**
 there, and green means *Up to date* instead of *Done*.
 
