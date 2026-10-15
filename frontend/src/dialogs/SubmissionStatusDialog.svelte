@@ -7,10 +7,7 @@
   export let status;
   export let onClose;
 
-  // Rows the requester may not see arrive without an id or name — a team lead
-  // still learns that somebody is holding the month up, just not who.
   function openReport(member) {
-    if (!member.user_id) return;
     go(`/reports?user=${member.user_id}&from=${status.from}&to=${status.to}`);
     onClose();
   }
@@ -30,9 +27,7 @@
   // Missing people first — that is what the reader opened this list for.
   const ORDER = { not_submitted: 0, awaiting_approval: 1, ready: 2 };
   $: rows = [...(status?.members ?? [])].sort(
-    (a, b) =>
-      ORDER[a.status] - ORDER[b.status] ||
-      (a.name ?? "").localeCompare(b.name ?? ""),
+    (a, b) => ORDER[a.status] - ORDER[b.status] || a.name.localeCompare(b.name),
   );
 </script>
 
@@ -53,27 +48,16 @@
     <div class="payroll-empty">{$t("No people in this month.")}</div>
   {:else}
     <div class="payroll-rows">
-      {#each rows as member, index (member.user_id ?? `hidden-${index}`)}
-        {#if member.user_id}
-          <button
-            class="payroll-row payroll-row-link"
-            on:click={() => openReport(member)}
-          >
-            <span class="payroll-name">{member.name}</span>
-            <span class="zf-chip zf-chip-sm {CHIP_CLASS[member.status]}">
-              {$t(STATUS_LABEL[member.status])}
-            </span>
-          </button>
-        {:else}
-          <div class="payroll-row">
-            <span class="payroll-name payroll-hidden">
-              {$t("Not visible to you")}
-            </span>
-            <span class="zf-chip zf-chip-sm {CHIP_CLASS[member.status]}">
-              {$t(STATUS_LABEL[member.status])}
-            </span>
-          </div>
-        {/if}
+      {#each rows as member (member.user_id)}
+        <button
+          class="payroll-row payroll-row-link"
+          on:click={() => openReport(member)}
+        >
+          <span class="payroll-name">{member.name}</span>
+          <span class="zf-chip zf-chip-sm {CHIP_CLASS[member.status]}">
+            {$t(STATUS_LABEL[member.status])}
+          </span>
+        </button>
       {/each}
     </div>
   {/if}
@@ -120,11 +104,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .payroll-hidden {
-    color: var(--text-tertiary);
-    font-style: italic;
   }
 
   .payroll-empty {

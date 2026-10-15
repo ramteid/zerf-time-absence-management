@@ -8,10 +8,15 @@
   export let activeHelp = null;
   export let onHelpToggle = () => {};
   export let onOpen = () => {};
-  // Transient peek at the current, in-progress month — see Dashboard.svelte.
+  // Switch between the previous month and the running one — see Dashboard.svelte.
   export let onShowCurrentMonth = () => {};
+  export let onShowPreviousMonth = () => {};
 
-  const currentMonthName = fmtMonthName(appTodayDate());
+  const today = appTodayDate();
+  const currentMonthName = fmtMonthName(today);
+  const previousMonthName = fmtMonthName(
+    new Date(today.getFullYear(), today.getMonth() - 1, 1),
+  );
   // Once the month has been delivered the card steps back: the figures are
   // history, not something anybody still has to act on.
   $: done = !!content?.sent;
@@ -61,14 +66,15 @@
       </div>
     </div>
   </button>
-  {#if !content?.in_progress}
-    <button
-      class="zf-btn zf-btn-ghost zf-btn-sm payroll-peek-btn"
-      on:click={onShowCurrentMonth}
-    >
-      {$t("Show {month}").replace("{month}", currentMonthName)}
-    </button>
-  {/if}
+  <button
+    class="zf-btn zf-btn-ghost zf-btn-sm payroll-peek-btn"
+    on:click={content?.in_progress ? onShowPreviousMonth : onShowCurrentMonth}
+  >
+    {$t("Show {month}").replace(
+      "{month}",
+      content?.in_progress ? previousMonthName : currentMonthName,
+    )}
+  </button>
 </div>
 
 <style>

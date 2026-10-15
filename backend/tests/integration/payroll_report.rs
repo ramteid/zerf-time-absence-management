@@ -920,11 +920,12 @@ async fn payroll_report_settings_persist_the_exclusion_list() {
     app.cleanup().await;
 }
 
-/// The dashboard tile must give a team lead the true company-wide picture —
-/// otherwise they cannot tell whether the report is ready to go — while never
-/// leaking the names of people outside their team.
+/// A team lead sees their own team on the Submissions card — themselves and
+/// their direct reports, every one of them by name. People outside the team
+/// are not on the card at all: the lead cannot act on them, so anonymous rows
+/// only added noise. An admin sees everybody.
 #[tokio::test]
-async fn payroll_status_counts_everyone_but_anonymizes_outside_a_leads_team() {
+async fn submissions_card_shows_a_lead_only_their_own_team() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
     // The report cannot be switched on before email is set up.
@@ -1006,36 +1007,43 @@ async fn payroll_status_counts_everyone_but_anonymizes_outside_a_leads_team() {
         !admin_members
             .iter()
             .any(|member| member["user_id"].as_i64() == Some(1)),
-        "the admin account itself is not part of the payroll report"
+        "the admin account itself is not on the card"
     );
 
     let (status, lead_view) = lead.get("/api/v1/reports/submission-status").await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(
-        lead_view["total"].as_u64().unwrap(),
-        total,
-        "a team lead sees the true company-wide count"
-    );
     let lead_members = lead_view["members"].as_array().expect("members");
     let named: Vec<i64> = lead_members
         .iter()
         .filter_map(|member| member["user_id"].as_i64())
         .collect();
+    assert_eq!(
+        named.len(),
+        lead_members.len(),
+        "every row a lead gets carries a person: {lead_view}"
+    );
     assert!(named.contains(&lead_id), "a lead sees themselves");
     assert!(named.contains(&emp_id), "a lead sees their own report");
     assert!(
         !named.contains(&other_lead_id),
-        "a lead must not see people outside their team"
+        "people outside the team are not on a lead's card"
     );
-    // The hidden person is still counted, just stripped of any identity.
-    let hidden: Vec<&serde_json::Value> = lead_members
-        .iter()
-        .filter(|member| member["user_id"].is_null())
-        .collect();
-    assert!(!hidden.is_empty(), "the outside person is still listed");
+    assert_eq!(
+        lead_view["total"].as_u64().unwrap(),
+        lead_members.len() as u64,
+        "the counts cover exactly the people listed"
+    );
     assert!(
-        hidden.iter().all(|member| member["name"].is_null()),
-        "no name leaks for people the lead may not see"
+        lead_view["total"].as_u64().unwrap() < total,
+        "the admin's card covers more people than the lead's"
+    );
+    let admin_ids: Vec<i64> = admin_members
+        .iter()
+        .filter_map(|member| member["user_id"].as_i64())
+        .collect();
+    assert!(
+        admin_ids.contains(&other_lead_id),
+        "an admin sees everybody"
     );
 
     // The tile is a lead-only feature.
@@ -1043,7 +1051,7 @@ async fn payroll_status_counts_everyone_but_anonymizes_outside_a_leads_team() {
     assert_eq!(
         status,
         StatusCode::FORBIDDEN,
-        "employees have no payroll tile"
+        "employees have no Submissions card"
     );
 
     app.cleanup().await;
@@ -1107,12 +1115,22 @@ async fn payroll_report_settles_a_month_that_covers_nobody() {
         "a month with nobody in it must not stay queued forever: {pending:?}"
     );
 
-    // With the period gone from the queue (and recorded as reached), the
-    // dashboard card reports the month as done rather than staying live
-    // forever on a delivery that can never happen.
+    // Leaving people out of the report does not mean they closed their month:
+    // the Submissions card still counts them.
     let (status, card) = admin.get("/api/v1/reports/submission-status").await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(card["total"], json!(0), "nobody is covered");
+    assert!(
+        card["members"]
+            .as_array()
+            .expect("members")
+            .iter()
+            .any(|member| member["user_id"].as_i64() == Some(emp_id)),
+        "the payroll exclusion list must not hide anybody from the Submissions card: {card}"
+    );
+
+    // With the period gone from the queue (and recorded as reached), the
+    // payroll card reports the month as done rather than staying live
+    // forever on a delivery that can never happen.
     let (status, content) = admin.get("/api/v1/reports/payroll-content").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
@@ -6166,6 +6184,182 @@ async fn submissions_tile_requires_the_straddling_weeks_in_month_day_too() {
     assert_ne!(
         member["status"], "ready",
         "the straddling week's unbooked in-month day must keep the month open: {card}"
+    );
+
+    app.cleanup().await;
+}
+
+/// The status one person has on the Submissions card, as `viewer` sees it.
+async fn submissions_card_status(viewer: &TestClient, path: &str, user_id: i64) -> String {
+    let (status, card) = viewer.get(path).await;
+    assert_eq!(status, StatusCode::OK, "fetch {path}: {card}");
+    card["members"]
+        .as_array()
+        .expect("members")
+        .iter()
+        .find(|member| member["user_id"].as_i64() == Some(user_id))
+        .map(|member| member["status"].as_str().unwrap_or_default().to_string())
+        .unwrap_or_else(|| panic!("user {user_id} missing from {path}: {card}"))
+}
+
+/// In the running month only weeks that are already over are due. The week
+/// being worked cannot be missing yet, so a draft in it leaves the person
+/// green; handing it in early makes them amber, since the approver can act on
+/// it right away.
+#[tokio::test]
+async fn submissions_card_does_not_count_the_running_week_as_missing() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, _lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "running-week").await;
+
+    let today = zerf::services::settings::app_today(&app.state.pool).await;
+    let running_monday = zerf::time_calc::week_monday(today);
+    let month_start = NaiveDate::from_ymd_opt(today.year(), today.month(), 1).unwrap();
+    // A day of the week being worked that belongs to the running month.
+    let booked_day = running_monday.max(month_start);
+
+    // Starting this very week leaves no earlier week that could be missing.
+    let (status, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "fresh-running-week@example.com",
+                "first_name": "Fred",
+                "last_name": "Fresh",
+                "role": "employee",
+                "weekly_hours": 39,
+                "start_date": running_monday.format("%Y-%m-%d").to_string(),
+                "approver_ids": [lead_id],
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create employee: {body}");
+    let fresh_id = id(&body);
+    let fresh = login_change_pw(&app, "fresh-running-week@example.com", &temp_pw(&body)).await;
+
+    let (status, body) = fresh
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": booked_day.format("%Y-%m-%d").to_string(),
+                "start_time": "08:00",
+                "end_time": "12:00",
+                "category_id": cat_id,
+                "comment": "work",
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "book a draft: {body}");
+    let entry_id = id(&body);
+
+    let running_month = "/api/v1/reports/submission-status?current=true";
+    assert_eq!(
+        submissions_card_status(&admin, running_month, fresh_id).await,
+        "ready",
+        "a draft in the week being worked is not missing yet"
+    );
+
+    let (status, _) = fresh
+        .post("/api/v1/time-entries/submit", &json!({"ids": [entry_id]}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "hand the day in early");
+    assert_eq!(
+        submissions_card_status(&admin, running_month, fresh_id).await,
+        "awaiting_approval",
+        "handed in early, the approver can act on it right away"
+    );
+
+    app.cleanup().await;
+}
+
+/// Rows before somebody's start date are hidden everywhere in the app, so they
+/// must not colour the card either: nobody could hand them in or decide on
+/// them. They only arise when an admin moves a start date past existing data.
+#[tokio::test]
+async fn submissions_card_ignores_rows_before_the_start_date() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, _lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "pre-start").await;
+
+    // No weekly hours, so no week can be missing and the handed-in entry is
+    // the only thing that could colour this person.
+    let (status, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "zero-hours-pre-start@example.com",
+                "first_name": "Paula",
+                "last_name": "PreStart",
+                "role": "employee",
+                "weekly_hours": 0,
+                "start_date": "2024-01-01",
+                "approver_ids": [lead_id],
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create employee: {body}");
+    let person_id = id(&body);
+    let person = login_change_pw(&app, "zero-hours-pre-start@example.com", &temp_pw(&body)).await;
+
+    let booked_day = anchor_monday();
+    create_and_submit_entry(&person, &booked_day.format("%Y-%m-%d").to_string(), cat_id).await;
+    let previous_month = "/api/v1/reports/submission-status";
+    assert_eq!(
+        submissions_card_status(&admin, previous_month, person_id).await,
+        "awaiting_approval",
+        "the handed-in entry waits for a decision"
+    );
+
+    // The start date moves past the entry: it is now hidden everywhere.
+    let new_start = (booked_day + Duration::days(1))
+        .format("%Y-%m-%d")
+        .to_string();
+    let (status, body) = admin
+        .put(
+            &format!("/api/v1/users/{person_id}"),
+            &json!({ "start_date": new_start }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "move the start date: {body}");
+    assert_eq!(
+        submissions_card_status(&admin, previous_month, person_id).await,
+        "ready",
+        "an entry before the start date cannot be waiting for anybody"
+    );
+
+    app.cleanup().await;
+}
+
+/// Somebody who has left is not on the Submissions card, even for a month they
+/// booked in. Their rows are kept unchanged and hidden from every team and
+/// approval view, so nobody could act on anything the card showed for them.
+#[tokio::test]
+async fn submissions_card_leaves_out_people_who_have_left() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, _lead_pw, emp_id, emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "left-out").await;
+    let employee = login_change_pw(&app, "emp-left-out@example.com", &emp_pw).await;
+
+    // One handed-in day of the previous month, then they leave.
+    let day = anchor_monday().format("%Y-%m-%d").to_string();
+    create_and_submit_entry(&employee, &day, cat_id).await;
+    let (status, body) = admin
+        .post(&format!("/api/v1/users/{emp_id}/archive"), &json!({}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "archive the employee: {body}");
+
+    let (status, card) = admin.get("/api/v1/reports/submission-status").await;
+    assert_eq!(status, StatusCode::OK, "fetch the card: {card}");
+    assert!(
+        !card["members"]
+            .as_array()
+            .expect("members")
+            .iter()
+            .any(|member| member["user_id"].as_i64() == Some(emp_id)),
+        "somebody who has left must not be on the card: {card}"
     );
 
     app.cleanup().await;

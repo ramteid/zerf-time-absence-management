@@ -243,14 +243,16 @@
   let payrollContent = null;
   let submissionDetailOpen = false;
   let payrollDetailOpen = false;
-  // The tile's "show this month" peek: a transient, in-memory choice (never
-  // persisted) that survives the reloads other dashboard actions trigger but
-  // resets to the tracked previous month on the next page load.
-  let payrollShowCurrentMonth = false;
+  // Which month both cards show: the previous one (default) or the running one.
+  // A transient, in-memory choice (never persisted) that survives the reloads
+  // other dashboard actions trigger but resets to the previous month on the
+  // next page load. Both cards follow it so they never talk about different
+  // months side by side.
+  let showCurrentMonth = false;
 
   async function loadMonthCards() {
     try {
-      submissionStatus = await getSubmissionStatus(payrollShowCurrentMonth);
+      submissionStatus = await getSubmissionStatus(showCurrentMonth);
     } catch {
       // A failed read must not break the rest of the dashboard — the tile
       // simply stays hidden. While its detail list is open, the last known
@@ -259,7 +261,7 @@
       if (!submissionDetailOpen) submissionStatus = null;
     }
     try {
-      const content = await getPayrollContent(payrollShowCurrentMonth);
+      const content = await getPayrollContent(showCurrentMonth);
       payrollContent = content?.enabled ? content : null;
     } catch {
       if (!payrollDetailOpen) payrollContent = null;
@@ -279,8 +281,8 @@
     loadMonthCards();
   }
 
-  function showCurrentPayrollMonth() {
-    payrollShowCurrentMonth = true;
+  function showMonth(current) {
+    showCurrentMonth = current;
     loadMonthCards();
   }
 
@@ -580,7 +582,8 @@
           {activeHelp}
           onHelpToggle={toggleHelp}
           onOpen={openSubmissionDetail}
-          onShowCurrentMonth={showCurrentPayrollMonth}
+          onShowCurrentMonth={() => showMonth(true)}
+          onShowPreviousMonth={() => showMonth(false)}
         />
       {/if}
       {#if payrollContent}
@@ -589,7 +592,8 @@
           {activeHelp}
           onHelpToggle={toggleHelp}
           onOpen={openPayrollDetail}
-          onShowCurrentMonth={showCurrentPayrollMonth}
+          onShowCurrentMonth={() => showMonth(true)}
+          onShowPreviousMonth={() => showMonth(false)}
         />
       {/if}
     </div>

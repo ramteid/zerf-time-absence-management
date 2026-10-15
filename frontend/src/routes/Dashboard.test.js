@@ -533,13 +533,18 @@ describe("Dashboard", () => {
       expect(payrollCalls()).toBe(queueCalls());
     });
 
+    function runningPeriod() {
+      const now = appTodayDate();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    }
+
     it("peeking at the current month sticks across later dashboard refreshes", async () => {
       api.mockImplementation(
         approverApi({
           submissionStatusCurrent: {
             ...mockState.submissionStatus,
-            period: "2026-08",
-            period_label: "August 2026",
+            period: runningPeriod(),
+            period_label: "Running month",
             ready: 0,
             awaiting_approval: 1,
             not_submitted: 1,
@@ -579,6 +584,61 @@ describe("Dashboard", () => {
       // The bare endpoint was only ever hit once, by the very first load —
       // every refresh since the peek keeps asking for the current month.
       expect(payrollCalls()).toBe(1);
+    });
+
+    it("switches both cards back to the previous month", async () => {
+      api.mockImplementation(
+        approverApi({
+          submissionStatusCurrent: {
+            ...mockState.submissionStatus,
+            period: runningPeriod(),
+            period_label: "Running month",
+            ready: 0,
+          },
+          payrollContentCurrent: {
+            ...mockState.payrollContent,
+            period: runningPeriod(),
+            in_progress: true,
+          },
+        }),
+      );
+
+      component = mount(Dashboard, { target });
+      await settle();
+      await settle();
+      await waitForText(target, "1 of 2 done");
+
+      const now = appTodayDate();
+      const findButton = (label) =>
+        [...target.querySelectorAll("button")].find(
+          (button) => button.textContent.trim() === label,
+        );
+      findButton(`Show ${fmtMonthName(now)}`).click();
+      await settle();
+      await settle();
+      await waitForText(target, "0 of 2 done");
+      expect(target.querySelector(".submissions-card").textContent).toContain(
+        "still running",
+      );
+
+      // Both cards now offer the way back, and either one takes both back.
+      const previousLabel = `Show ${fmtMonthName(
+        new Date(now.getFullYear(), now.getMonth() - 1, 1),
+      )}`;
+      const backButtons = [...target.querySelectorAll("button")].filter(
+        (button) => button.textContent.trim() === previousLabel,
+      );
+      expect(backButtons.length).toBe(2);
+      const bareCallsBefore = payrollCalls();
+      backButtons[0].click();
+      await settle();
+      await settle();
+
+      await waitForText(target, "1 of 2 done");
+      expect(payrollCalls()).toBe(bareCallsBefore + 1);
+      expect(
+        api.mock.calls.filter(([p]) => p === "/reports/payroll-content").length,
+      ).toBeGreaterThan(1);
     });
 
     it("re-reads the status when the detail list is opened", async () => {

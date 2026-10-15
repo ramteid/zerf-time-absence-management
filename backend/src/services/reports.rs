@@ -2025,6 +2025,30 @@ pub async fn all_weeks_submitted_for_month(
     submission_exempt: bool,
 ) -> AppResult<bool> {
     let today = crate::services::settings::app_today(pool).await;
+    all_weeks_submitted_for_month_as_of(
+        pool,
+        user_id,
+        month_start,
+        month_end,
+        user_start_date,
+        submission_exempt,
+        today,
+    )
+    .await
+}
+
+/// [`all_weeks_submitted_for_month`] for a caller that already knows today's
+/// date — one that judges many people in a row and should not read it again
+/// for each of them.
+pub async fn all_weeks_submitted_for_month_as_of(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    month_start: NaiveDate,
+    month_end: NaiveDate,
+    user_start_date: NaiveDate,
+    submission_exempt: bool,
+    today: NaiveDate,
+) -> AppResult<bool> {
     let complete_week_mondays = weeks_in_month_to_judge(month_start, month_end, today);
     if complete_week_mondays.is_empty() {
         return Ok(true);

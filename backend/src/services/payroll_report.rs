@@ -157,12 +157,13 @@ pub async fn load_config(pool: &crate::db::DatabasePool) -> AppResult<PayrollRep
 ///
 /// `carried` additionally admits people who booked a day of an already-reported
 /// month too late for that month's report (see [`CarriedDays`]). `None` asks
-/// the plain question "who does this period concern" — which is what the
-/// Submissions tile wants, since a late booking from a closed month says
-/// nothing about whether this month is closed.
+/// the plain question "who does this period concern".
 ///
-/// Report content, the readiness gate and the dashboard tile all go through
-/// this one filter, so what the tile counts is exactly what the PDF contains.
+/// Report content, the readiness gate and the Payroll Report card all go
+/// through this one filter, so what the card counts is exactly what the PDF
+/// contains. The Submissions card does not: it asks who has closed their month,
+/// which the report's exclusion list must not change (see
+/// `services::submission_status`).
 pub async fn payroll_members(
     app_state: &AppState,
     from: NaiveDate,
@@ -535,48 +536,6 @@ pub async fn manual_send_target(pool: &crate::db::DatabasePool) -> AppResult<Man
     })
 }
 
-/// Traffic-light status of one person's month, as shown on the dashboard tile.
-pub mod status_value {
-    /// Everything submitted and approved — this person is done.
-    pub const READY: &str = "ready";
-    /// Everything submitted, but an approval or absence decision is missing.
-    pub const AWAITING_APPROVAL: &str = "awaiting_approval";
-    /// Weeks are still missing, or the data needs an admin's attention.
-    pub const NOT_SUBMITTED: &str = "not_submitted";
-}
-
-/// One row of the payroll status tile's detail list.
-///
-/// `user_id` and `name` are `None` for people the requesting team lead is not
-/// allowed to see. Their status still counts towards the totals — a lead needs
-/// to know whether the month is complete even when the outstanding person is
-/// not on their team — but the identity never leaves the server.
-#[derive(serde::Serialize)]
-pub struct SubmissionStatusMember {
-    pub user_id: Option<i64>,
-    pub name: Option<String>,
-    pub status: &'static str,
-    pub reason_key: Option<&'static str>,
-}
-
-/// Everything the Submissions dashboard tile renders for the tracked month.
-#[derive(serde::Serialize)]
-pub struct SubmissionStatus {
-    /// Tracked period, "YYYY-MM" — the previous month by default, or the
-    /// current in-progress month when the tile's transient "show this month"
-    /// peek was requested (see `build_submission_status`).
-    pub period: String,
-    /// Localized month name, e.g. "Juli 2026".
-    pub period_label: String,
-    pub from: NaiveDate,
-    pub to: NaiveDate,
-    pub total: usize,
-    pub ready: usize,
-    pub awaiting_approval: usize,
-    pub not_submitted: usize,
-    pub members: Vec<SubmissionStatusMember>,
-}
-
 /// One line of what the payroll report holds for one person: either an absence
 /// period or a person's working days and hours.
 ///
@@ -898,184 +857,6 @@ pub async fn build_content(
     })
 }
 
-/// Build the Submissions status for the dashboard tile.
-///
-/// This tile answers "who has closed their month" and nothing else. It used to
-/// double as the payroll report's readiness display, but the report no longer
-/// waits on unhanded-in weeks (see `reports::month_export_readiness`), so the
-/// two questions came apart: an outstanding week is worth chasing, and is not
-/// a reason to hold a document. What the report will actually contain is a
-/// separate tile, [`build_content`].
-///
-/// It still covers the people [`payroll_members`] tracks — everybody the month
-/// concerns, minus administrators, minus anyone explicitly excluded, minus
-/// assistants who booked nothing at all and therefore have nothing to close.
-///
-/// `show_current_month` switches the tracked period from the previous month to
-/// the current, still-running one. It is the tile's transient "show this month"
-/// peek: a client-side, non-persistent choice, not a stored setting.
-pub async fn build_submission_status(
-    app_state: &AppState,
-    requester: &crate::middleware::auth::User,
-    language: &Language,
-    show_current_month: bool,
-) -> AppResult<SubmissionStatus> {
-    let config = load_config(&app_state.pool).await?;
-    let today = settings::app_today(&app_state.pool).await;
-    let period = if show_current_month {
-        crate::background::schedule::current_period(today)
-    } else {
-        crate::background::schedule::previous_period(today)
-    };
-    let (from, to) = crate::background::schedule::period_bounds(&period)?;
-
-    let period_label = crate::i18n::format_month(language, from.year(), from.month());
-
-    // The tile counts everybody the month covers, including people who have
-    // not booked anything yet — showing who still owes something is the whole
-    // point of the card, so it never uses the snapshot's narrower filter.
-    // No carried days: this tile asks who has closed *this* month, and a late
-    // booking from a month already reported cannot answer that.
-    let members =
-        payroll_members(app_state, from, to, &config.excluded_user_ids, false, None).await?;
-    // The tile's colours always require full approval, for every person — see
-    // the doc comment on `evaluate_members` — and, unlike the payroll gate, a
-    // week nobody handed in is exactly what this tile is here to show.
-    let evaluated = evaluate_members(
-        app_state,
-        &members,
-        from,
-        to,
-        // Closing a month means nothing of it is left open, drafts included.
-        |_role| crate::services::reports::UnapprovedEntries::AnyUnsettled,
-        true,
-        crate::services::reports::PendingAbsences::Any,
-    )
-    .await?;
-
-    // Team leads only see the names of their own people; everybody else on the
-    // tile is counted but anonymized.
-    let visible_ids: Option<std::collections::HashSet<i64>> = if requester.is_admin() {
-        None
-    } else {
-        Some(
-            app_state
-                .db
-                .reports
-                .active_team_members(requester.id, false)
-                .await?
-                .into_iter()
-                .map(|member| member.id)
-                .collect(),
-        )
-    };
-
-    let mut status = SubmissionStatus {
-        period,
-        period_label,
-        from,
-        to,
-        total: evaluated.len(),
-        ready: 0,
-        awaiting_approval: 0,
-        not_submitted: 0,
-        members: Vec::with_capacity(evaluated.len()),
-    };
-    for member in evaluated {
-        let value = status_for_member(app_state, &member.user, member.readiness, from, to).await?;
-        match value {
-            status_value::READY => status.ready += 1,
-            status_value::AWAITING_APPROVAL => status.awaiting_approval += 1,
-            _ => status.not_submitted += 1,
-        }
-        let visible = visible_ids
-            .as_ref()
-            .is_none_or(|ids| ids.contains(&member.user.id));
-        status.members.push(SubmissionStatusMember {
-            user_id: visible.then_some(member.user.id),
-            name: visible.then(|| format!("{} {}", member.user.first_name, member.user.last_name)),
-            status: value,
-            reason_key: member.reason_key,
-        });
-    }
-    Ok(status)
-}
-
-/// Colour for the readiness values that decide themselves.
-///
-/// Two variants are deliberately missing, because neither can be coloured
-/// without asking a second question, which [`status_for_member`] does:
-///
-/// * `PendingAbsenceRequests` — the shared gate reports it *before* it ever
-///   looks at week submission, so on its own it cannot tell "handed everything
-///   in, waiting for a decision" (amber) from "also still owes weeks" (red).
-/// * `UnapprovedTimeEntries` — it covers drafts and submitted rows alike. A
-///   draft is not waiting for anybody: nobody handed it in. Painting it amber
-///   sent approvers looking for work that was never submitted to them.
-fn unambiguous_status(readiness: MonthExportReadiness) -> Option<&'static str> {
-    match readiness {
-        MonthExportReadiness::Ready => Some(status_value::READY),
-        MonthExportReadiness::WeeksNotSubmitted
-        | MonthExportReadiness::UnresolvedTimeEntries
-        | MonthExportReadiness::PreStartContent => Some(status_value::NOT_SUBMITTED),
-        MonthExportReadiness::UnapprovedTimeEntries
-        | MonthExportReadiness::PendingAbsenceRequests => None,
-    }
-}
-
-/// Traffic-light colour for one person on the dashboard card.
-///
-/// Red always wins over amber: the card's whole purpose is to show who still
-/// has to hand something in, so somebody who owes weeks must not be painted
-/// amber merely because they *also* have an absence request awaiting a
-/// decision.
-async fn status_for_member(
-    app_state: &AppState,
-    user: &User,
-    readiness: MonthExportReadiness,
-    from: NaiveDate,
-    to: NaiveDate,
-) -> AppResult<&'static str> {
-    if let Some(status) = unambiguous_status(readiness) {
-        return Ok(status);
-    }
-    if readiness == MonthExportReadiness::UnapprovedTimeEntries {
-        // Drafts and rejected leftovers are the employee's move, not an
-        // approver's: report them as not submitted. Only genuinely submitted
-        // rows are "waiting for approval".
-        let today = crate::services::settings::app_today(&app_state.pool).await;
-        let judged_to = crate::services::reports::judged_period_end(to, today);
-        let unsubmitted = app_state
-            .db
-            .reports
-            .has_unsubmitted_time_entries_in_range(user.id, from, judged_to)
-            .await?;
-        return Ok(if unsubmitted {
-            status_value::NOT_SUBMITTED
-        } else {
-            status_value::AWAITING_APPROVAL
-        });
-    }
-    // Only `PendingAbsenceRequests` reaches here. Ask the week question the
-    // gate skipped: an open request is "submitted, awaiting approval" (amber),
-    // but missing weeks outrank it (red).
-    let submission_exempt = !crate::roles::has_submission_obligation(&user.role, user.weekly_hours);
-    let weeks_in = crate::services::reports::all_weeks_submitted_for_month(
-        &app_state.pool,
-        user.id,
-        from,
-        to,
-        user.start_date,
-        submission_exempt,
-    )
-    .await?;
-    Ok(if weeks_in {
-        status_value::AWAITING_APPROVAL
-    } else {
-        status_value::NOT_SUBMITTED
-    })
-}
-
 /// One covered person plus why their month is not final yet. `reason_key` is
 /// `None` when they are ready to be reported.
 pub struct MemberReadiness {
@@ -1086,26 +867,12 @@ pub struct MemberReadiness {
 
 /// Evaluate the month-finality gate for everyone the report covers.
 ///
-/// `require_full_approval` decides, per person, whether an approved-but-open
-/// month blocks them or not. The two callers need different answers to that
-/// question, which is why it is a parameter instead of being derived from
-/// [`PayrollReportConfig`] here:
-///
-/// * the **send path** only needs a person's entries approved when their
-///   hours literally end up in the PDF (`config.includes_hours_for`) — if
-///   their working time isn't printed, an unapproved entry doesn't make the
-///   document wrong;
-/// * the **dashboard tile** always requires full approval for everyone. Its
-///   green/amber/red split ("submitted and approved" / "submitted, not yet
-///   approved" / "not submitted") is a per-person status the admin asked for
-///   unconditionally — whether this person's hours happen to be toggled into
-///   the report is a business decision about document *content*, not about
-///   whether they personally finished their month.
-///
-/// Reusing the send path's relaxed rule for the tile was the bug this
-/// parameter fixes: with `payroll_report_include_employee_hours` off by
-/// default, a regular employee's submitted-but-unapproved month used to read
-/// as `Ready` — green — on the dashboard.
+/// `unapproved` decides, per role, which unfinished entries block a person:
+/// the send path only needs a person's entries approved when their hours
+/// literally end up in the PDF (`config.includes_hours_for`) — if their
+/// working time isn't printed, an unapproved entry doesn't make the document
+/// wrong. The dashboard's Submissions card asks a stricter question for
+/// everybody and has its own rule (`services::submission_status`).
 pub async fn evaluate_members(
     app_state: &AppState,
     members: &[User],
@@ -2535,48 +2302,9 @@ mod tests {
         );
     }
 
-    /// The three-colour scale the dashboard tile paints: everything that only
-    /// waits for a decision is amber, everything still missing is red.
-    #[test]
-    fn readiness_maps_onto_the_traffic_light_scale() {
-        use status_value::*;
-        assert_eq!(unambiguous_status(MonthExportReadiness::Ready), Some(READY));
-        assert_eq!(
-            unambiguous_status(MonthExportReadiness::WeeksNotSubmitted),
-            Some(NOT_SUBMITTED)
-        );
-        assert_eq!(
-            unambiguous_status(MonthExportReadiness::UnresolvedTimeEntries),
-            Some(NOT_SUBMITTED)
-        );
-        assert_eq!(
-            unambiguous_status(MonthExportReadiness::PreStartContent),
-            Some(NOT_SUBMITTED)
-        );
-    }
-
-    /// Two readiness values cannot pick their own colour and must stay in
-    /// `status_for_member`'s hands:
-    ///
-    /// * a pending absence request is returned before week submission is
-    ///   checked, so somebody who *also* owes weeks would be painted amber
-    ///   instead of red;
-    /// * unapproved entries cover drafts as well as submitted rows, and a
-    ///   draft was never handed to an approver.
-    #[test]
-    fn ambiguous_readiness_needs_the_extra_lookup() {
-        assert_eq!(
-            unambiguous_status(MonthExportReadiness::PendingAbsenceRequests),
-            None
-        );
-        assert_eq!(
-            unambiguous_status(MonthExportReadiness::UnapprovedTimeEntries),
-            None
-        );
-    }
-
     /// Every `MonthExportReadiness` variant must have a reason key, so a new
-    /// variant cannot silently show up as "ready" on the tile.
+    /// variant cannot silently count as "ready" when the report names who is
+    /// still missing.
     #[test]
     fn every_non_ready_readiness_has_a_reason() {
         for readiness in [
