@@ -132,8 +132,11 @@ export function rejectReopen(id, reason) {
 // Submission progress for the dashboard tile (team leads and admins).
 // `current` is the tile's transient, non-persistent "show this month" peek —
 // it reports the in-progress month instead of the tracked previous period.
-export function getSubmissionStatus(current = false) {
-  return api(`/reports/submission-status${current ? "?current=true" : ""}`);
+// `current` null lets the server open on the month that needs attention;
+// true or false asks for the running or the previous month explicitly.
+export function getSubmissionStatus(current = null) {
+  const query = current === null ? "" : `?current=${current}`;
+  return api(`/reports/submission-status${query}`);
 }
 
 // What the payroll report for the tracked month holds — or, while the month is

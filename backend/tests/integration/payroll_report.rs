@@ -1050,6 +1050,15 @@ async fn submissions_card_shows_a_lead_only_their_own_team() {
         "an admin sees everybody"
     );
 
+    // The payroll card is the admins' alone: they run and send the report,
+    // and a lead could only have been shown other teams' rows anonymously.
+    let (status, _) = lead.get("/api/v1/reports/payroll-content").await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "team leads have no payroll card"
+    );
+
     // The tile is a lead-only feature.
     let (status, _) = employee.get("/api/v1/reports/submission-status").await;
     assert_eq!(
@@ -1057,6 +1066,38 @@ async fn submissions_card_shows_a_lead_only_their_own_team() {
         StatusCode::FORBIDDEN,
         "employees have no Submissions card"
     );
+
+    app.cleanup().await;
+}
+
+/// Left without a choice, the Team submissions card opens on the month that
+/// needs attention: the previous one while anybody still has something open
+/// there, otherwise the running one. An explicit choice always wins.
+#[tokio::test]
+async fn submissions_card_opens_on_the_month_that_needs_attention() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let today = zerf::services::settings::app_today(&app.state.pool).await;
+    let previous = zerf::background::schedule::previous_period(today);
+    let current = zerf::background::schedule::current_period(today);
+    let card = "/api/v1/reports/submission-status";
+
+    // A fresh installation: last month concerns nobody, so there is nothing to
+    // chase in it and the card opens on the running month.
+    let (status, body) = admin.get(card).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["period"], json!(current), "{body}");
+    assert_eq!(body["in_progress"], json!(true));
+    let (_, body) = admin.get(&format!("{card}?current=false")).await;
+    assert_eq!(body["period"], json!(previous), "an explicit choice wins");
+
+    // Somebody who still owes weeks of last month brings it back.
+    bootstrap_team_with_suffix(&app, &admin, false, "attention").await;
+    let (_, body) = admin.get(card).await;
+    assert_eq!(body["period"], json!(previous), "{body}");
+    assert_eq!(body["in_progress"], json!(false));
+    let (_, body) = admin.get(&format!("{card}?current=true")).await;
+    assert_eq!(body["period"], json!(current), "an explicit choice wins");
 
     app.cleanup().await;
 }
@@ -3023,9 +3064,8 @@ async fn a_sent_month_shows_the_days_it_carried_and_not_the_ones_since() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
     configure_unreachable_smtp(&app).await;
-    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+    let (lead_id, _lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
         bootstrap_team_with_suffix(&app, &admin, false, "payroll-history").await;
-    let lead = login_change_pw(&app, "lead-payroll-history@example.com", &lead_pw).await;
     let (_assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "history").await;
     let assistant = login_change_pw(&app, "aushilfe-history@example.com", &assistant_pw).await;
 
@@ -3109,7 +3149,7 @@ async fn a_sent_month_shows_the_days_it_carried_and_not_the_ones_since() {
         .await;
     assert_eq!(status, StatusCode::OK, "approve the day booked since");
 
-    let (status, body) = lead.get("/api/v1/reports/payroll-content").await;
+    let (status, body) = admin.get("/api/v1/reports/payroll-content").await;
     assert_eq!(status, StatusCode::OK, "payroll content: {body}");
     assert_eq!(body["sent"], true, "the month has been delivered");
     let carried_dates: Vec<String> = body["rows"]
@@ -3138,9 +3178,8 @@ async fn a_sent_months_hours_do_not_grow_after_the_fact() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
     configure_unreachable_smtp(&app).await;
-    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+    let (lead_id, _lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
         bootstrap_team_with_suffix(&app, &admin, false, "sent-stable").await;
-    let lead = login_change_pw(&app, "lead-sent-stable@example.com", &lead_pw).await;
     let (_assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "sent-stable").await;
     let assistant = login_change_pw(&app, "aushilfe-sent-stable@example.com", &assistant_pw).await;
 
@@ -3187,7 +3226,7 @@ async fn a_sent_months_hours_do_not_grow_after_the_fact() {
         .await
         .expect("record the queued period");
 
-    let (status, body) = lead.get("/api/v1/reports/payroll-content").await;
+    let (status, body) = admin.get("/api/v1/reports/payroll-content").await;
     assert_eq!(status, StatusCode::OK, "payroll content: {body}");
     assert_eq!(body["sent"], true, "the month has been delivered");
     assert_eq!(
@@ -3209,7 +3248,7 @@ async fn a_sent_months_hours_do_not_grow_after_the_fact() {
         "approve the day booked after the send"
     );
 
-    let (status, body) = lead.get("/api/v1/reports/payroll-content").await;
+    let (status, body) = admin.get("/api/v1/reports/payroll-content").await;
     assert_eq!(
         status,
         StatusCode::OK,
@@ -3245,9 +3284,8 @@ async fn a_sent_months_employee_zero_row_survives_the_marker_based_read() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
     configure_unreachable_smtp(&app).await;
-    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+    let (lead_id, _lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
         bootstrap_team_with_suffix(&app, &admin, false, "sent-zero").await;
-    let lead = login_change_pw(&app, "lead-sent-zero@example.com", &lead_pw).await;
     let (_assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "sent-zero").await;
     let assistant = login_change_pw(&app, "aushilfe-sent-zero@example.com", &assistant_pw).await;
 
@@ -3295,7 +3333,7 @@ async fn a_sent_months_employee_zero_row_survives_the_marker_based_read() {
         .await
         .expect("record the queued period");
 
-    let (status, body) = lead.get("/api/v1/reports/payroll-content").await;
+    let (status, body) = admin.get("/api/v1/reports/payroll-content").await;
     assert_eq!(status, StatusCode::OK, "payroll content: {body}");
     assert_eq!(body["sent"], true);
     let hours_rows: Vec<&serde_json::Value> = body["rows"]
@@ -3717,9 +3755,8 @@ async fn a_sent_months_figures_match_what_the_live_path_produced() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
     configure_unreachable_smtp(&app).await;
-    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+    let (lead_id, _lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
         bootstrap_team_with_suffix(&app, &admin, false, "same-figs").await;
-    let lead = login_change_pw(&app, "lead-same-figs@example.com", &lead_pw).await;
     let (_assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "same-figs").await;
     let assistant = login_change_pw(&app, "aushilfe-same-figs@example.com", &assistant_pw).await;
 
@@ -3797,7 +3834,7 @@ async fn a_sent_months_figures_match_what_the_live_path_produced() {
     assert_eq!(status, StatusCode::OK, "approve");
 
     // The card as the live path builds it, before anything is marked.
-    let (status, before_send) = lead.get("/api/v1/reports/payroll-content").await;
+    let (status, before_send) = admin.get("/api/v1/reports/payroll-content").await;
     assert_eq!(status, StatusCode::OK, "payroll content: {before_send}");
     assert_eq!(before_send["sent"], false, "not delivered yet");
     assert!(
@@ -3822,7 +3859,7 @@ async fn a_sent_months_figures_match_what_the_live_path_produced() {
         .await
         .expect("record the queued period");
 
-    let (status, after_send) = lead.get("/api/v1/reports/payroll-content").await;
+    let (status, after_send) = admin.get("/api/v1/reports/payroll-content").await;
     assert_eq!(status, StatusCode::OK, "payroll content: {after_send}");
     assert_eq!(after_send["sent"], true, "now delivered");
 
@@ -4044,9 +4081,8 @@ async fn a_sent_months_absences_do_not_grow_after_the_fact() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
     configure_unreachable_smtp(&app).await;
-    let (lead_id, lead_pw, emp_id, _emp_pw, _monday, _cat_id) =
+    let (lead_id, _lead_pw, emp_id, _emp_pw, _monday, _cat_id) =
         bootstrap_team_with_suffix(&app, &admin, false, "sent-abs").await;
-    let lead = login_change_pw(&app, "lead-sent-abs@example.com", &lead_pw).await;
     let _ = lead_id;
 
     let (status, _) = admin
@@ -4100,7 +4136,7 @@ async fn a_sent_months_absences_do_not_grow_after_the_fact() {
         .await
         .expect("record the queued period");
 
-    let (status, before) = lead.get("/api/v1/reports/payroll-content").await;
+    let (status, before) = admin.get("/api/v1/reports/payroll-content").await;
     assert_eq!(status, StatusCode::OK, "payroll content: {before}");
     assert_eq!(before["sent"], true, "the month has been delivered");
     assert_eq!(
@@ -4125,7 +4161,7 @@ async fn a_sent_months_absences_do_not_grow_after_the_fact() {
         .await
         .expect("late sick note");
 
-    let (status, after) = lead.get("/api/v1/reports/payroll-content").await;
+    let (status, after) = admin.get("/api/v1/reports/payroll-content").await;
     assert_eq!(status, StatusCode::OK, "payroll content: {after}");
     assert_eq!(
         after["absence_count"], before["absence_count"],

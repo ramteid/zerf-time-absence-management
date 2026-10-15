@@ -243,11 +243,12 @@
   let payrollContent = null;
   let submissionDetailOpen = false;
   let payrollDetailOpen = false;
-  // Which month each card shows: the previous one (default) or the running
-  // one. Each card's own link switches only that card. A transient, in-memory
-  // choice (never persisted) that survives the reloads other dashboard actions
-  // trigger but resets to the previous month on the next page load.
-  let submissionsShowCurrentMonth = false;
+  // Which month each card shows. Each card's own link switches only that card.
+  // A transient, in-memory choice (never persisted) that survives the reloads
+  // other dashboard actions trigger. Until the reader picks one, the Team
+  // submissions card lets the server open on the month that needs attention
+  // (null); the payroll card starts on the previous month.
+  let submissionsShowCurrentMonth = null;
   let payrollShowCurrentMonth = false;
 
   // Only the newest request of each card may land: switching months while an
@@ -272,6 +273,12 @@
 
   async function loadPayrollContent() {
     const request = ++latestPayrollContentRequest;
+    // The payroll card is the admins' alone: they configure and send the
+    // report, and the server refuses everybody else.
+    if (!$currentUser?.permissions?.can_manage_settings) {
+      payrollContent = null;
+      return;
+    }
     try {
       const content = await getPayrollContent(payrollShowCurrentMonth);
       if (request === latestPayrollContentRequest)

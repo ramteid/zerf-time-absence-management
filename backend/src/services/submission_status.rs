@@ -45,8 +45,8 @@ pub struct SubmissionStatusMember {
 /// Everything the Submissions card renders for the month it shows.
 #[derive(Serialize)]
 pub struct SubmissionStatus {
-    /// "YYYY-MM" — the previous month by default, or the running month when
-    /// the card's "show this month" toggle asked for it.
+    /// "YYYY-MM" — the month the card shows: the one asked for, or by default
+    /// the one that needs attention (see [`build`]).
     pub period: String,
     /// Localized month name, e.g. "Juli 2026".
     pub period_label: String,
@@ -62,15 +62,44 @@ pub struct SubmissionStatus {
     pub members: Vec<SubmissionStatusMember>,
 }
 
-/// Build the Submissions card for the previous month, or for the running one
-/// when `show_current_month` is set (a transient view choice, never stored).
+/// Build the Team submissions card.
+///
+/// `show_current_month` picks the month: `Some(true)` the running one,
+/// `Some(false)` the previous one. `None` — a dashboard opening without a
+/// choice of its own — shows the month that needs attention: the previous one
+/// while anybody on the card still has something open there, otherwise the
+/// running one. Always opening on the previous month left a closed month on
+/// the card for most of every month, and the reader had to switch over again
+/// on every visit.
 pub async fn build(
     app_state: &AppState,
     requester: &crate::middleware::auth::User,
     language: &Language,
-    show_current_month: bool,
+    show_current_month: Option<bool>,
 ) -> AppResult<SubmissionStatus> {
     let today = settings::app_today(&app_state.pool).await;
+    match show_current_month {
+        Some(current) => build_for_month(app_state, requester, language, today, current).await,
+        None => {
+            let previous = build_for_month(app_state, requester, language, today, false).await?;
+            if previous.ready < previous.total {
+                Ok(previous)
+            } else {
+                build_for_month(app_state, requester, language, today, true).await
+            }
+        }
+    }
+}
+
+/// The card for the previous month, or for the running one when
+/// `show_current_month` is set.
+async fn build_for_month(
+    app_state: &AppState,
+    requester: &crate::middleware::auth::User,
+    language: &Language,
+    today: NaiveDate,
+    show_current_month: bool,
+) -> AppResult<SubmissionStatus> {
     let period = if show_current_month {
         schedule::current_period(today)
     } else {

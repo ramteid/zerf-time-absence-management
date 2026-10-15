@@ -538,13 +538,9 @@ pub async fn manual_send_target(pool: &crate::db::DatabasePool) -> AppResult<Man
 
 /// One line of what the payroll report holds for one person: either an absence
 /// period or a person's working days and hours.
-///
-/// `name` is `None` for somebody a team lead may not see — the line still
-/// counts towards the totals, because a lead has to be able to tell whether the
-/// month looks complete, but the identity never leaves the server.
 #[derive(serde::Serialize)]
 pub struct PayrollContentRow {
-    pub name: Option<String>,
+    pub name: String,
     /// `absence`, `hours`, `late_hours` for a day carried over from an
     /// already-reported month, or `late_absence` for absence days no report
     /// ever showed.
@@ -644,25 +640,6 @@ pub fn reported_content_rows(data: &PayrollReportData) -> Vec<PayrollReportedCon
     rows
 }
 
-async fn visible_payroll_user_ids(
-    app_state: &AppState,
-    requester: &crate::middleware::auth::User,
-) -> AppResult<Option<std::collections::HashSet<i64>>> {
-    if requester.is_admin() {
-        return Ok(None);
-    }
-    Ok(Some(
-        app_state
-            .db
-            .reports
-            .active_team_members(requester.id, false)
-            .await?
-            .into_iter()
-            .map(|member| member.id)
-            .collect(),
-    ))
-}
-
 fn content_kind(kind: &str) -> AppResult<&'static str> {
     match kind {
         "absence" => Ok("absence"),
@@ -677,7 +654,6 @@ fn content_kind(kind: &str) -> AppResult<&'static str> {
 
 fn payroll_content_rows(
     stored_rows: Vec<PayrollReportedContentRow>,
-    visible_user_ids: Option<&std::collections::HashSet<i64>>,
 ) -> AppResult<(Vec<PayrollContentRow>, usize, usize, i64)> {
     let mut rows = Vec::with_capacity(stored_rows.len());
     let mut absence_count = 0;
@@ -693,13 +669,8 @@ fn payroll_content_rows(
             people_with_hours.insert(stored.user_id);
             minutes += stored.minutes.unwrap_or(0);
         }
-        let name = match visible_user_ids {
-            None => Some(stored.employee),
-            Some(ids) if ids.contains(&stored.user_id) => Some(stored.employee),
-            Some(_) => None,
-        };
         rows.push(PayrollContentRow {
-            name,
+            name: stored.employee,
             kind,
             category: stored.category,
             from: stored.from_date,
@@ -723,7 +694,6 @@ fn payroll_content_rows(
 /// something once a month is over.
 pub async fn build_content(
     app_state: &AppState,
-    requester: &crate::middleware::auth::User,
     language: &Language,
     show_current_month: bool,
 ) -> AppResult<PayrollContent> {
@@ -761,7 +731,6 @@ pub async fn build_content(
     }
 
     let sent = period_delivered(&app_state.pool, &period).await?;
-    let visible_user_ids = visible_payroll_user_ids(app_state, requester).await?;
     if sent
         && app_state
             .db
@@ -774,8 +743,7 @@ pub async fn build_content(
             .reports
             .payroll_reported_content(&period)
             .await?;
-        let (rows, absence_count, people_with_hours, minutes) =
-            payroll_content_rows(stored_rows, visible_user_ids.as_ref())?;
+        let (rows, absence_count, people_with_hours, minutes) = payroll_content_rows(stored_rows)?;
         return Ok(PayrollContent {
             enabled: true,
             period,
@@ -839,7 +807,7 @@ pub async fn build_content(
     )
     .await?;
     let (rows, absence_count, people_with_hours, minutes) =
-        payroll_content_rows(reported_content_rows(&data), visible_user_ids.as_ref())?;
+        payroll_content_rows(reported_content_rows(&data))?;
 
     Ok(PayrollContent {
         enabled: true,

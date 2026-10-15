@@ -635,17 +635,19 @@ pub async fn flextime(
 /// Query parameters for the two dashboard tiles.
 #[derive(Deserialize)]
 pub struct MonthTileQuery {
-    /// Dashboard tile's transient "show this month" peek: report the current,
-    /// in-progress month instead of the previous (default) period. Never
-    /// stored and never affects what actually gets delivered, which always
-    /// tracks the previous month regardless of this flag.
+    /// Which month a card shows: `true` the running one, `false` the previous
+    /// one. Never stored and never affects what actually gets delivered, which
+    /// always tracks the previous month. Left out, the Team submissions card
+    /// picks the month that needs attention (see
+    /// `services::submission_status::build`) and the payroll card the previous
+    /// month.
     #[serde(default)]
-    pub current: bool,
+    pub current: Option<bool>,
 }
 
-/// Submission status for the dashboard tile: who has closed the previous
-/// month — or, with `?current=true`, how far the running month is. Leads only;
-/// a team lead sees their own team, an admin everybody.
+/// Submission status for the Team submissions card: who has closed the
+/// previous month, or how far the running month is. Leads only; a team lead
+/// sees the people they approve, an admin everybody.
 pub async fn submission_status(
     State(app_state): State<AppState>,
     requester: User,
@@ -663,22 +665,22 @@ pub async fn submission_status(
 
 /// What the payroll report for the tracked month holds — sick notes and the
 /// assistants' hours — or, with `?current=true`, what the running month is
-/// shaping up to hold. Leads only, with the same name masking.
+/// shaping up to hold. Admins only: they run and send the report, while a team
+/// lead could only have been shown other teams' rows as anonymous lines.
 pub async fn payroll_content(
     State(app_state): State<AppState>,
     requester: User,
     Query(query): Query<MonthTileQuery>,
 ) -> AppResult<Json<crate::services::payroll_report::PayrollContent>> {
-    if !requester.is_lead() {
+    if !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
     let language = crate::i18n::load_ui_language(&app_state.pool).await?;
     Ok(Json(
         crate::services::payroll_report::build_content(
             &app_state,
-            &requester,
             &language,
-            query.current,
+            query.current.unwrap_or(false),
         )
         .await?,
     ))

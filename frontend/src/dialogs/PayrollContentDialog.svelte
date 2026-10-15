@@ -49,9 +49,7 @@
       <div class="payroll-rows">
         {#each absences as row, index (`absence-${index}`)}
           <div class="payroll-row">
-            <span class="payroll-name" class:payroll-hidden={!row.name}>
-              {row.name ?? $t("Not visible to you")}
-            </span>
+            <span class="payroll-name">{row.name}</span>
             <span class="payroll-detail">
               {row.category} · {fmtDate(row.from)} – {fmtDate(row.to)}
             </span>
@@ -68,9 +66,7 @@
       <div class="payroll-rows">
         {#each hours as row, index (`hours-${index}`)}
           <div class="payroll-row">
-            <span class="payroll-name" class:payroll-hidden={!row.name}>
-              {row.name ?? $t("Not visible to you")}
-            </span>
+            <span class="payroll-name">{row.name}</span>
             <span class="payroll-detail">
               {$t("{days} days").replace("{days}", row.days)}
             </span>
@@ -90,9 +86,7 @@
       <div class="payroll-rows">
         {#each lateAbsences as row, index (`late-absence-${index}`)}
           <div class="payroll-row">
-            <span class="payroll-name" class:payroll-hidden={!row.name}>
-              {row.name ?? $t("Not visible to you")}
-            </span>
+            <span class="payroll-name">{row.name}</span>
             <span class="payroll-detail">
               {row.category} · {fmtDate(row.from)} – {fmtDate(row.to)}
             </span>
@@ -114,9 +108,7 @@
       <div class="payroll-rows">
         {#each lateHours as row, index (`late-${index}`)}
           <div class="payroll-row">
-            <span class="payroll-name" class:payroll-hidden={!row.name}>
-              {row.name ?? $t("Not visible to you")}
-            </span>
+            <span class="payroll-name">{row.name}</span>
             <span class="payroll-detail">{fmtDate(row.from)}</span>
             <span class="payroll-amount">{signedMinutes(row.minutes)}</span>
           </div>
@@ -163,11 +155,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .payroll-hidden {
-    color: var(--text-tertiary);
-    font-style: italic;
   }
 
   .payroll-detail {

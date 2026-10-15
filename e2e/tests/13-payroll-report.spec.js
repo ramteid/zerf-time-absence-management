@@ -130,8 +130,10 @@ test.describe("month dashboard cards", () => {
 
     const card = page.locator(".submissions-card");
     await expect(card).toBeVisible();
-    // "X of Y done" — the actual numbers depend on the calendar day.
-    await expect(card).toContainText(/\d+ of \d+ done/);
+    // "X of Y done" for the previous month, or "X of Y up to date" for the
+    // running one — the card opens on whichever still needs attention, and
+    // both that choice and the numbers depend on the calendar day.
+    await expect(card).toContainText(/\d+ of \d+ (done|up to date)/);
     // Pia's contract started in the previous month, so somebody is always
     // covered and the ring is never empty.
     await expect(page.locator(".donut-segment").first()).toBeVisible();
@@ -197,7 +199,11 @@ test.describe("month dashboard cards", () => {
 });
 
 test.describe("month card visibility", () => {
-  test("team lead: sees the card", async ({ browser }) => {
+  // The payroll card is the admins' alone: they run and send the report, and
+  // a lead could only have been shown other teams' rows anonymously.
+  test("team lead: sees the team card but not the payroll card", async ({
+    browser,
+  }) => {
     const context = await browser.newContext({
       storageState: storageStatePath("team_lead"),
     });
@@ -205,7 +211,7 @@ test.describe("month card visibility", () => {
     await page.goto("/dashboard");
 
     await expect(page.locator(".submissions-card")).toBeVisible();
-    await expect(page.locator(".payroll-card")).toBeVisible();
+    await expect(page.locator(".payroll-card")).toHaveCount(0);
     await context.close();
   });
 

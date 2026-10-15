@@ -240,7 +240,6 @@ describe("SubmissionStatusDialog", () => {
     expect(
       [...rows].every((row) => row.classList.contains("payroll-row-link")),
     ).toBe(true);
-    expect(document.body.textContent).not.toContain("Not visible to you");
   });
 
   it("opens that person's report in month mode for the same month", async () => {
