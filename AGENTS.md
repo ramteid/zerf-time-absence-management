@@ -988,7 +988,7 @@ otherwise mail an empty document. `ManualSnapshot` therefore deliberately uses
 a *different* member filter and window from the dashboard tile; the two agree
 only for a finished month. Enabling the report at all requires
 `load_smtp_config()` to be `Some`, and disabling SMTP switches it back off
-(`update_smtp_settings`). Two lead-only endpoints back the dashboard's month cards.
+(`update_smtp_settings`). Two endpoints back the dashboard's month cards.
 `GET /reports/submission-status` (`services::submission_status::build`) is the
 **Team submissions** card: who has closed their month, judged with the week criterion
 and full approval for everyone. It shares nothing with the payroll report — not
@@ -1015,8 +1015,10 @@ view (`TimeEntryDb::list_all`), so nothing shown for them could be acted on.
 `GET /reports/payroll-content` (`build_content`) is the
 **Payroll Report** card: it runs the very code that assembles the document
 (`build_report_data`) on the same member set and window the matching send mode
-would use, so the card cannot claim something the PDF would not print; names of people
-outside a team lead's own team are stripped server-side. "Already delivered" is derived from the queue (period reached `payroll_report_queue_period` **and** no longer in `payroll_report_queue`) rather than a stored marker, so it is correct on installations that predate the card. Each card has its own month toggle (previous month by default, the running month on request, and back); a card's link switches only that card, and only the newest response per card is applied. In the running month the Submissions card says "up to date" instead of "done" (`SubmissionStatus::in_progress`). Clicking an amber person takes the reader to the dashboard approval list holding their decision (`Dashboard.svelte`'s `approvalSectionFor`) — the report has no approve button, so it would be a dead end; anybody else opens their report in month mode (`/reports?user=…&month=YYYY-MM`), never as a custom range: a range judges its boundary weeks whole and could contradict the card. The card spells out the red and amber counts next to the ring, and the "My Team" stat cards paint pending weeks and absence requests amber, not red, because red on the Submissions card means the employee has to act. The dashboard re-fetches the status when the detail dialog is opened (`Dashboard.svelte`'s `openPayrollDetail`), because approvals granted on that page are exactly what the reader opens the list to verify.
+would use, so the card cannot claim something the PDF would not print. It is
+admin-only: admins run and send the report, and a team lead could only have been
+shown other teams' rows as anonymous lines, so the masking those rows needed is
+gone too. "Already delivered" is derived from the queue (period reached `payroll_report_queue_period` **and** no longer in `payroll_report_queue`) rather than a stored marker, so it is correct on installations that predate the card. Each card has its own month toggle; a card's link switches only that card, and only the newest response per card is applied. The payroll card starts on the previous month. The Team submissions card starts without a choice (`current` omitted): the server shows the previous month while anybody on it is not green, otherwise the running one (`submission_status::build`), so a settled month does not sit on the card for most of every month. In the running month the Submissions card says "up to date" instead of "done" (`SubmissionStatus::in_progress`). Clicking an amber person takes the reader to the dashboard approval list holding their decision (`Dashboard.svelte`'s `approvalSectionFor`) — the report has no approve button, so it would be a dead end; anybody else opens their report in month mode (`/reports?user=…&month=YYYY-MM`), never as a custom range: a range judges its boundary weeks whole and could contradict the card. The card spells out the red and amber counts next to the ring, and the "My Team" stat cards paint pending weeks and absence requests amber, not red, because red on the Submissions card means the employee has to act. The dashboard re-fetches the status when the detail dialog is opened (`Dashboard.svelte`'s `openPayrollDetail`), because approvals granted on that page are exactly what the reader opens the list to verify.
 
 ### Integration tests
 

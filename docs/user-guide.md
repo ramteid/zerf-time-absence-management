@@ -2180,8 +2180,9 @@ configured day.
 
 #### The two dashboard cards
 
-Team leads and admins see two month cards next to **Who is absent** on their
-dashboard. Employees see neither.
+Team leads and admins see the **Team submissions** card next to **Who is
+absent** on their dashboard. Admins also see the **Payroll Report** card.
+Employees see neither.
 
 **Team submissions** answers "who has closed their month". It shows a ring split into
 three colours and the summary **"X of Y done"**. It counts everybody who tracks
@@ -2219,12 +2220,15 @@ remove them from this card either.
 assistants' working days and hours — or, while the month is still running, what
 it is shaping up to hold. Clicking it lists the entries the document contains.
 Once the report has been sent the card greys out; it is hidden entirely when the
-payroll report is switched off.
+payroll report is switched off. Only admins see it, since they run and send the
+report.
 
-Both cards show the previous month and carry a small **"Show [month]"** link
-that switches that card to the month that is currently running, and back. Each
-link only changes its own card. It is not a setting — it is not saved, and
-coming back to the dashboard shows the previous month again.
+When you open the dashboard, the Team submissions card shows the previous
+month as long as anybody still has something open there, and the running month
+once the previous one is settled. The Payroll Report card starts on the previous
+month. Each card has a small **"Show [month]"** link that switches it between
+the previous and the running month. Each link only changes its own card. The
+choice is not saved — coming back to the dashboard starts over.
 
 A week counts as missing from its Friday on, as everywhere else in Zerf.
 Before that it is still being worked, so a draft in it does not turn anybody
@@ -2234,11 +2238,6 @@ something already handed in for this week, or a request for a later week of the
 month — since you can decide on it right away. Because nobody can be done
 with a month that is still running, the card says **"X of Y up to date"**
 there, and green means *Up to date* instead of *Done*.
-
-On the **Payroll Report** card, team leads see the whole report, so they can
-tell what it will contain. People outside their own team appear as *Not visible
-to you* — they still count towards the totals, but their names are not
-revealed.
 
 ### Managing categories
 

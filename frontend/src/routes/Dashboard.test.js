@@ -431,7 +431,10 @@ describe("Dashboard", () => {
 
     function approverApi(overrides = {}) {
       return async (urlPath, opts = {}) => {
-        if (urlPath === "/reports/submission-status")
+        if (
+          urlPath === "/reports/submission-status" ||
+          urlPath === "/reports/submission-status?current=false"
+        )
           return overrides.submissionStatus ?? mockState.submissionStatus;
         if (urlPath === "/reports/submission-status?current=true")
           return (
@@ -477,15 +480,18 @@ describe("Dashboard", () => {
       ).length;
     }
 
+    // An admin who approves sees both month cards; the payroll card is the
+    // admins' alone (see the team lead test below).
     beforeEach(() => {
       currentUser.set({
         id: 1,
-        role: "team_lead",
+        role: "admin",
         tracks_time: true,
         weekly_hours: 40,
         start_date: "2026-01-01",
         permissions: {
           can_approve: true,
+          can_manage_settings: true,
           can_view_dashboard: true,
           can_view_team_reports: true,
         },
@@ -629,13 +635,14 @@ describe("Dashboard", () => {
       expect(payrollCurrentCalls()).toBe(0);
       expect(buttonIn(".payroll-card", currentLabel)).toBeTruthy();
 
-      const bareCallsBefore = payrollCalls();
+      const previousCallsBefore = payrollCalls("?current=false");
       buttonIn(".submissions-card", previousLabel).click();
       await settle();
       await settle();
 
       await waitForText(target, "1 of 2 done");
-      expect(payrollCalls()).toBe(bareCallsBefore + 1);
+      // Going back is an explicit choice of the previous month.
+      expect(payrollCalls("?current=false")).toBe(previousCallsBefore + 1);
       expect(payrollCurrentCalls()).toBe(0);
     });
 
@@ -708,6 +715,31 @@ describe("Dashboard", () => {
       await settle();
       expect(scrollIntoView).toHaveBeenCalled();
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    });
+
+    it("leaves the payroll card to admins", async () => {
+      currentUser.set({
+        id: 2,
+        role: "team_lead",
+        tracks_time: true,
+        weekly_hours: 40,
+        start_date: "2026-01-01",
+        permissions: {
+          can_approve: true,
+          can_view_dashboard: true,
+          can_view_team_reports: true,
+        },
+      });
+      component = mount(Dashboard, { target });
+      await settle();
+      await settle();
+      await waitForText(target, "1 of 2 done");
+
+      expect(target.querySelector(".submissions-card")).toBeTruthy();
+      expect(target.querySelector(".payroll-card")).toBeNull();
+      expect(
+        api.mock.calls.some(([p]) => p.startsWith("/reports/payroll-content")),
+      ).toBe(false);
     });
 
     it("is not requested at all for someone who cannot approve", async () => {
