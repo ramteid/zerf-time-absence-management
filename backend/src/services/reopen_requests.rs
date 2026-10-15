@@ -219,7 +219,7 @@ pub async fn cancel_zombie_reopen_requests(
             }
             Ok(None) => {}
             Err(e) => {
-                tracing::warn!(
+                tracing::error!(
                     target: "zerf::reopen_requests",
                     user_id,
                     week_start = %week_start,

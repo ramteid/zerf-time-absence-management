@@ -438,7 +438,9 @@ pub async fn forgot_password(
 ) -> AppResult<Json<serde_json::Value>> {
     let smtp = crate::services::settings::load_smtp_config(&app_state.pool).await;
     if smtp.is_none() {
-        tracing::warn!(target: "zerf::auth", "forgot_password called but SMTP is not configured");
+        // Somebody could not reset their password: an error, so the admins
+        // learn that the self-service reset is unusable without email.
+        tracing::error!(target: "zerf::auth", "forgot_password called but SMTP is not configured");
         return Err(crate::error::AppError::BadRequest(
             "password_reset_unavailable".into(),
         ));
@@ -453,7 +455,7 @@ pub async fn forgot_password(
     {
         Some(url) => url.to_string(),
         None => {
-            tracing::warn!(target: "zerf::auth", "forgot_password called but ZERF_PUBLIC_URL is not configured");
+            tracing::error!(target: "zerf::auth", "forgot_password called but ZERF_PUBLIC_URL is not configured");
             return Err(crate::error::AppError::BadRequest(
                 "password_reset_unavailable".into(),
             ));

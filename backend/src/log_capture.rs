@@ -11,6 +11,22 @@
 //! The channel is bounded and uses `try_send`, so logging never blocks and a
 //! stalled database cannot grow memory without limit (excess records are
 //! dropped, but still reach stdout via the fmt layer).
+//!
+//! The level is a promise to the admins, because only errors alert them:
+//!
+//! - `error!` — something the app was supposed to do did not happen or went
+//!   wrong (an upload, a reminder run, a cleanup, a mail, a holiday fetch…).
+//!   Every captured error is raised to the opted-in admins, in the app and by
+//!   email (see [`raises_admin_alert`]).
+//! - `warn!` — worth a line in the System Log, but the app still did its job:
+//!   a lockout working as intended, a fallback that took over, a conflict the
+//!   user was shown. Warnings never alert anybody, so anything that impairs
+//!   the app's regular function must not be logged as one.
+//!
+//! A call site that raises its own, more specific alert (through
+//! `services::notifications::enqueue_error`) still logs at error level, and
+//! marks the event with the field `admin_notified = true` so the admins are
+//! not told twice.
 
 use crate::db::DatabasePool;
 use crate::repository::AppLogDb;
@@ -163,6 +179,21 @@ fn target_is_notification_subsystem(target: &str) -> bool {
         || target.starts_with("zerf::error_notify")
 }
 
+/// Whether a captured event becomes an admin error notification: every error,
+/// except those from the delivery subsystems (loop guard, see above) and those
+/// whose call site already raised a dedicated alert (`admin_notified = true`).
+/// Warnings are logged but never notified.
+fn raises_admin_alert(record: &CapturedLogRecord) -> bool {
+    let already_notified = record
+        .fields
+        .as_ref()
+        .and_then(|fields| fields.get("admin_notified"))
+        .is_some_and(|value| value == "true");
+    record.level == "error"
+        && !target_is_notification_subsystem(&record.target)
+        && !already_notified
+}
+
 /// Stable dedupe key derived from an event's target + message, so repeat
 /// occurrences re-alert (pinned upsert) instead of piling up duplicate rows.
 fn error_notification_dedupe_key(target: &str, message: &str) -> String {
@@ -176,9 +207,9 @@ pub async fn run_writer(pool: DatabasePool, mut receiver: mpsc::Receiver<Capture
     let error_queue = crate::repository::ErrorNotificationQueueDb::new(pool.clone());
     while let Some(record) = receiver.recv().await {
         // Turn error-level events into admin error notifications by enqueueing
-        // them for the async worker — unless they originate from the delivery
-        // subsystems (loop guard). Warnings are logged but never notified.
-        if record.level == "error" && !target_is_notification_subsystem(&record.target) {
+        // them for the async worker (see `raises_admin_alert` for the
+        // exceptions). Warnings are logged but never notified.
+        if raises_admin_alert(&record) {
             let dedupe = error_notification_dedupe_key(&record.target, &record.message);
             // The queue stores fully-rendered text (matching every other
             // notification producer in the app), so the title is translated
@@ -280,6 +311,39 @@ mod tests {
             );
         });
         assert!(records.is_empty());
+    }
+
+    #[test]
+    fn only_errors_raise_an_admin_alert() {
+        let records = capture_events(|| {
+            tracing::warn!(target: "zerf::report_upload", "noted, nothing broke");
+            tracing::error!(target: "zerf::report_upload", "upload failed");
+        });
+        assert_eq!(records.len(), 2);
+        assert!(!raises_admin_alert(&records[0]), "warnings never alert");
+        assert!(raises_admin_alert(&records[1]), "errors alert the admins");
+    }
+
+    #[test]
+    fn errors_with_their_own_alert_are_not_raised_twice() {
+        let records = capture_events(|| {
+            tracing::error!(target: "zerf::report_upload", admin_notified = true, "upload blocked");
+            tracing::error!(target: "zerf::report_upload", admin_notified = false, "upload failed");
+        });
+        assert_eq!(records.len(), 2);
+        assert!(!raises_admin_alert(&records[0]));
+        assert!(raises_admin_alert(&records[1]));
+    }
+
+    #[test]
+    fn errors_from_the_delivery_subsystems_never_raise_an_alert() {
+        let records = capture_events(|| {
+            tracing::error!(target: "zerf::email_queue", "delivery failed");
+            tracing::error!(target: "zerf::notifications", "insert failed");
+            tracing::error!(target: "zerf::error_notify", "list pending failed");
+        });
+        assert_eq!(records.len(), 3);
+        assert!(records.iter().all(|record| !raises_admin_alert(record)));
     }
 
     #[test]

@@ -489,6 +489,24 @@ pub fn user_unique_conflict(error: &crate::db::SqlxError) -> Option<AppError> {
     }
 }
 
+/// Map a failed write of a user row. A unique violation is the admin's own
+/// input — an email or name that already exists — and comes back as a readable
+/// conflict; nothing is broken, so it is only a warning. Anything else is a
+/// database failure, logged as an error so the opted-in admins hear about it,
+/// while the client gets the plain `fallback` message.
+pub fn user_write_error(action: &str, error: &crate::db::SqlxError, fallback: &str) -> AppError {
+    match user_unique_conflict(error) {
+        Some(conflict) => {
+            tracing::warn!(target: "zerf::users", "{action} rejected: {error}");
+            conflict
+        }
+        None => {
+            tracing::error!(target: "zerf::users", "{action} failed: {error}");
+            AppError::Conflict(fallback.into())
+        }
+    }
+}
+
 pub async fn fetch_for_update(tx: &mut crate::db::PgConnection, user_id: i64) -> AppResult<User> {
     UserDb::fetch_for_update(tx, user_id)
         .await
@@ -893,11 +911,7 @@ pub async fn create(
         body.absence_category_ids.as_deref(),
     )
     .await
-    .map_err(|e| {
-        tracing::warn!(target:"zerf::users", "create user insert failed: {e}");
-        user_unique_conflict(&e)
-            .unwrap_or_else(|| AppError::Conflict("Could not create user.".into()))
-    })?;
+    .map_err(|e| user_write_error("create user insert", &e, "Could not create user."))?;
     // Record which weekdays this person works, in the same transaction as the
     // user row. Somebody with a work target but no recorded pattern would fall
     // back to the old spread over Monday to Friday without anyone noticing, so

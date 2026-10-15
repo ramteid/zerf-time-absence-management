@@ -280,9 +280,15 @@ async fn process_pending_periods(
             );
             continue;
         }
+        // A month that is merely not final yet comes back as `Ok(Skipped)`, so
+        // an `Err` means the report could not be produced or sent: an error,
+        // which alerts the admins (log_capture). The period stays queued and
+        // is retried on the next daily run.
         if let Err(e) = process_period(state, &period, config, &language, SendMode::Scheduled).await
         {
-            tracing::warn!("Payroll report: skipping period {period}: {e}");
+            tracing::error!(
+                "Payroll report: period {period} failed, retrying on the next daily run: {e}"
+            );
         }
     }
 }
@@ -360,7 +366,7 @@ async fn notify_admins_of_hold(
         .save_setting(settings::PAYROLL_REPORT_BLOCKED_NOTIFIED_KEY, period)
         .await
     {
-        tracing::warn!("Payroll report: failed to record the hold notice for {period}: {e}");
+        tracing::error!("Payroll report: failed to record the hold notice for {period}: {e}");
     }
 }
 
@@ -661,14 +667,16 @@ async fn process_period(
     )
     .await
     .map_err(|e| {
-        tracing::error!("Payroll report: sending period {period} failed: {e}");
         if mode.is_manual() {
+            tracing::error!("Payroll report: sending period {period} failed: {e}");
             // An admin is waiting on the button and has to be told what broke.
             // `Internal` deliberately hides its message from the client, so a
             // manual send reports the reason as a prefixed BadRequest instead
             // (the frontend splits the prefix off and translates the lead-in).
             AppError::BadRequest(format!("PAYROLL_SEND_FAILED:{e}"))
         } else {
+            // Not logged here: the scheduled loop logs every failed period as
+            // an error, and a second line would alert the admins twice.
             AppError::Internal(format!("Payroll report email failed: {e}"))
         }
     })?;

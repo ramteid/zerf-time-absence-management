@@ -219,7 +219,7 @@ pub async fn run_check(state: &crate::AppState) {
     let language = match crate::i18n::load_ui_language(pool).await {
         Ok(l) => l,
         Err(e) => {
-            tracing::warn!(target:"zerf::submission_reminders", "load language failed: {e}");
+            tracing::error!(target:"zerf::submission_reminders", "load language failed: {e}");
             crate::i18n::Language::default()
         }
     };
@@ -230,7 +230,7 @@ pub async fn run_check(state: &crate::AppState) {
         match state.db.users.get_active_non_assistant_users().await {
             Ok(r) => r,
             Err(e) => {
-                tracing::warn!(target:"zerf::submission_reminders", "fetch users failed: {e}");
+                tracing::error!(target:"zerf::submission_reminders", "fetch users failed: {e}");
                 return;
             }
         };
@@ -399,7 +399,7 @@ pub async fn run_month_end_check(
     {
         Ok(ids) => ids,
         Err(e) => {
-            tracing::warn!(target:"zerf::submission_reminders", "month-end query failed: {e}");
+            tracing::error!(target:"zerf::submission_reminders", "month-end query failed: {e}");
             return;
         }
     };
@@ -493,7 +493,7 @@ pub async fn run_month_weeks_reminder(
     let rows = match state.db.users.get_active_non_assistant_users().await {
         Ok(rows) => rows,
         Err(e) => {
-            tracing::warn!(target:"zerf::submission_reminders", "week reminder user query failed: {e}");
+            tracing::error!(target:"zerf::submission_reminders", "week reminder user query failed: {e}");
             return;
         }
     };

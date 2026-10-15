@@ -9,8 +9,8 @@ use crate::roles::{
 use crate::services::auth::lock_user_graph;
 use crate::services::users::{
     assert_can_access_user, ensure_email_available, ensure_user_name_available, generate_password,
-    normalize_optional_user_name, repo_user_to_auth_user, user_unique_conflict,
-    validate_approver_ids, ArchiveRequest, LeaveAccountInput, RestoreRequest,
+    normalize_optional_user_name, repo_user_to_auth_user, user_write_error, validate_approver_ids,
+    ArchiveRequest, LeaveAccountInput, RestoreRequest,
 };
 use crate::AppState;
 use axum::{
@@ -471,7 +471,10 @@ pub async fn update(
         normalized_role.unwrap_or_else(|| previous_user.role.trim().to_ascii_lowercase());
     let effective_weekly_hours = body.weekly_hours.unwrap_or(previous_user.weekly_hours);
     if is_assistant_role(&new_role) {
-        tracing::warn!(
+        // A trace of routine validation, not a problem: debug level keeps it
+        // out of the admins' System Log, where every line should mean
+        // something.
+        tracing::debug!(
             target: "zerf::assistant_role",
             user_id,
             previous_role = %previous_user.role,
@@ -642,11 +645,7 @@ pub async fn update(
         effective_tracks_time,
     )
     .await
-    .map_err(|e| {
-        tracing::warn!(target:"zerf::users", "update user failed: {e}");
-        user_unique_conflict(&e)
-            .unwrap_or_else(|| AppError::Conflict("Could not update user.".into()))
-    })?;
+    .map_err(|e| user_write_error("update user", &e, "Could not update user."))?;
 
     // Keep the record of which weekdays this person works in step with the
     // change just made. Two paths reach here with a work target and no pattern:

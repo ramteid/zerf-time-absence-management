@@ -85,7 +85,7 @@ pub async fn run_check(state: &crate::AppState) {
     let language = match crate::i18n::load_ui_language(pool).await {
         Ok(l) => l,
         Err(e) => {
-            tracing::warn!(target:"zerf::approval_reminders", "load language failed: {e}");
+            tracing::error!(target:"zerf::approval_reminders", "load language failed: {e}");
             crate::i18n::Language::default()
         }
     };
@@ -182,7 +182,7 @@ pub async fn run_month_end_check(state: &crate::AppState) {
     {
         Ok(ids) => ids,
         Err(e) => {
-            tracing::warn!(target:"zerf::approval_reminders", "month-end query failed: {e}");
+            tracing::error!(target:"zerf::approval_reminders", "month-end query failed: {e}");
             return;
         }
     };
@@ -199,7 +199,7 @@ pub async fn run_month_end_check(state: &crate::AppState) {
     {
         Ok(ids) => waiting.extend(ids),
         Err(e) => {
-            tracing::warn!(target:"zerf::approval_reminders", "month-end absence query failed: {e}");
+            tracing::error!(target:"zerf::approval_reminders", "month-end absence query failed: {e}");
             return;
         }
     }

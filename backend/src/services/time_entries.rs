@@ -119,7 +119,7 @@ pub async fn clear_submission_pending_for_weeks(
             }
             Ok(true) => {}
             Err(e) => {
-                tracing::warn!(
+                tracing::error!(
                     target: "zerf::time_entries",
                     "has_submitted_entries_in_week({}, {}) failed: {e}",
                     user_id,
@@ -145,7 +145,7 @@ pub async fn clear_submission_pending_for_weeks(
         }
         Ok(true) => {}
         Err(e) => {
-            tracing::warn!(
+            tracing::error!(
                 target: "zerf::time_entries",
                 "has_any_submitted_entries({}) failed: {e}",
                 user_id

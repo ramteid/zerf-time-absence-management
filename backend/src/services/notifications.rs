@@ -216,7 +216,10 @@ async fn write_in_app(state: &AppState, msg: &Outgoing<'_>) -> bool {
     match result {
         Ok(created) => created,
         Err(e) => {
-            tracing::warn!(target: "zerf::notifications", "insert failed for user {}: {e}", msg.user_id);
+            // The notification (and its email, which only follows a stored
+            // row) is lost: an error. The loop guard keeps this target from
+            // alerting; the database error behind it already did.
+            tracing::error!(target: "zerf::notifications", "insert failed for user {}: {e}", msg.user_id);
             false
         }
     }
@@ -319,7 +322,7 @@ pub async fn clear_pending_for_reference(
         .mark_read_by_reference(reference_type, reference_id)
         .await
     {
-        tracing::warn!(
+        tracing::error!(
             target: "zerf::notifications",
             "mark_read_by_reference({reference_type}, {reference_id}) failed: {e}"
         );
@@ -332,7 +335,7 @@ pub async fn load_language(pool: &crate::db::DatabasePool) -> crate::i18n::Langu
     match crate::i18n::load_ui_language(pool).await {
         Ok(language) => language,
         Err(e) => {
-            tracing::warn!(target: "zerf::notifications", "load notification language failed: {e}");
+            tracing::error!(target: "zerf::notifications", "load notification language failed: {e}");
             crate::i18n::Language::default()
         }
     }
@@ -364,7 +367,9 @@ pub async fn enqueue_error(
         .enqueue(Some(dedupe_key), title, Some(body), &source)
         .await
     {
-        tracing::warn!(target: "zerf::notifications", "enqueue_error failed: {e}");
+        // The admin alert itself is lost. Logged as an error for the System
+        // Log; it cannot alert anybody, which is exactly what just failed.
+        tracing::error!(target: "zerf::notifications", "enqueue_error failed: {e}");
     }
 }
 
@@ -388,7 +393,7 @@ pub async fn deliver_error_to_opted_in_admins(
     let recipient_ids = match state.db.users.error_notification_recipient_ids().await {
         Ok(ids) => ids,
         Err(e) => {
-            tracing::warn!(target: "zerf::notifications", "error recipients query failed: {e}");
+            tracing::error!(target: "zerf::notifications", "error recipients query failed: {e}");
             return false;
         }
     };
@@ -398,7 +403,7 @@ pub async fn deliver_error_to_opted_in_admins(
     // Surface a missing email configuration once per event: opted-in admins want
     // emails, but none can be sent. In-app notices are still posted below.
     if state.db.settings.load_smtp_config().await.is_none() {
-        tracing::warn!(
+        tracing::error!(
             target: "zerf::notifications",
             "SMTP not configured; error notification delivered in-app only: {title}"
         );

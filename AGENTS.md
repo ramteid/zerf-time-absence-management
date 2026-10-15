@@ -589,6 +589,25 @@ off `build_month` and `build_range_for_page` only, never the plain
 `build_range` the CSV and PDF paths use, so a team PDF does not pay for a week
 scan per person.
 
+**System Log and admin alerts** (`log_capture.rs`): every `warn!` and `error!`
+lands in `app_logs`, the admins' System Log, and every captured *error* is
+raised to the opted-in admins in the app and by email (`raises_admin_alert`).
+The level is therefore a promise. `error!` means something the app should have
+done did not happen: an upload, a payroll send, a reminder run, a cleanup, a
+holiday fetch, a queued mail. `warn!` means the app still did its job: a lockout
+working, a fallback taking over, a conflict shown to the user, a retry that may
+still succeed. Never log anything that impairs the app's function as a warning;
+nobody would hear about it. A call site that raises its own, more specific alert
+through `enqueue_error` still logs at error level and adds the field
+`admin_notified = true`, so the capture does not raise a second, generic alert.
+Targets on the loop-guard list (`zerf::notifications*`, `zerf::email*`,
+`zerf::error_notify`, the writer's own) are logged but never alerted, because
+their failure would feed back into the alert path. A database error is already
+logged as an error where `From<sqlx::Error>` converts it, so a context line on
+top of it may raise a second alert; that is accepted, because the context line
+names what stopped working. A refused Nextcloud MKCOL is logged at info only:
+the PUT that follows decides, and its failure is the error.
+
 **Email delivery** (`email.rs`, `background/email_queue.rs`): almost every
 outbound email (password resets, absence decisions, reminders, error alerts)
 goes through `services::notifications::deliver` → `email::queue_email`, which

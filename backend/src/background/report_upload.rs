@@ -163,9 +163,12 @@ async fn process_pending_entries(
             );
             continue;
         }
+        // A failure here means the archive is missing this PDF, so it is an
+        // error and alerts the admins (log_capture). The entry stays queued and
+        // is retried on the next daily run.
         if let Err(e) = process_one_entry(state, &entry, base, token, pw, &language).await {
-            tracing::warn!(
-                "Report upload: skipping user {} period {}: {e}",
+            tracing::error!(
+                "Report upload: failed for user {} period {}, retrying on the next daily run: {e}",
                 entry.user_id,
                 entry.period
             );
@@ -218,7 +221,10 @@ async fn process_one_entry(
             "report_upload_pre_start_review_body",
             &params,
         );
-        tracing::warn!(target: "zerf::report_upload", "{}", text.body);
+        // The upload is held back, so this is an error. The admins are alerted
+        // right below with the specific title; `admin_notified` keeps the log
+        // capture from raising a second, generic alert for the same event.
+        tracing::error!(target: "zerf::report_upload", admin_notified = true, "{}", text.body);
         crate::services::notifications::enqueue_error(
             state,
             language,
@@ -269,7 +275,7 @@ async fn process_one_entry(
                 "report_upload_pre_start_content_body",
                 &params,
             );
-            tracing::warn!(target: "zerf::report_upload", "{}", text.body);
+            tracing::error!(target: "zerf::report_upload", admin_notified = true, "{}", text.body);
             crate::services::notifications::enqueue_error(
                 state,
                 language,
@@ -293,7 +299,7 @@ async fn process_one_entry(
                 "report_upload_unsettled_time_body",
                 &params,
             );
-            tracing::warn!(target: "zerf::report_upload", "{}", text.body);
+            tracing::error!(target: "zerf::report_upload", admin_notified = true, "{}", text.body);
             crate::services::notifications::enqueue_error(
                 state,
                 language,
@@ -305,6 +311,8 @@ async fn process_one_entry(
             return Ok(());
         }
         MonthExportReadiness::PendingAbsenceRequests => {
+            // A warning, not an error: nothing is broken, the upload simply
+            // waits for a decision the approvers are already reminded of.
             tracing::warn!(
                 target: "zerf::report_upload",
                 "User {} ({} {}) has pending absence requests in period {}. \

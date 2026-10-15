@@ -410,7 +410,9 @@ pub async fn ensure_holidays(pool: &crate::db::DatabasePool, year: i32) -> AppRe
             }
         }
         Err(e) => {
-            tracing::warn!("Failed to fetch holidays for {}/{}: {:?}", country, year, e);
+            // The stored holidays stay as they were, so target hours for that
+            // year may be wrong until a later fetch succeeds: an error.
+            tracing::error!("Failed to fetch holidays for {}/{}: {:?}", country, year, e);
         }
     }
 
