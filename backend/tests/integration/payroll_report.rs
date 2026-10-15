@@ -3064,8 +3064,9 @@ async fn a_sent_month_shows_the_days_it_carried_and_not_the_ones_since() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
     configure_unreachable_smtp(&app).await;
-    let (lead_id, _lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
         bootstrap_team_with_suffix(&app, &admin, false, "payroll-history").await;
+    let lead = login_change_pw(&app, "lead-payroll-history@example.com", &lead_pw).await;
     let (_assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "history").await;
     let assistant = login_change_pw(&app, "aushilfe-history@example.com", &assistant_pw).await;
 
@@ -3178,8 +3179,9 @@ async fn a_sent_months_hours_do_not_grow_after_the_fact() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
     configure_unreachable_smtp(&app).await;
-    let (lead_id, _lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
         bootstrap_team_with_suffix(&app, &admin, false, "sent-stable").await;
+    let lead = login_change_pw(&app, "lead-sent-stable@example.com", &lead_pw).await;
     let (_assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "sent-stable").await;
     let assistant = login_change_pw(&app, "aushilfe-sent-stable@example.com", &assistant_pw).await;
 
@@ -3284,8 +3286,9 @@ async fn a_sent_months_employee_zero_row_survives_the_marker_based_read() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
     configure_unreachable_smtp(&app).await;
-    let (lead_id, _lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
         bootstrap_team_with_suffix(&app, &admin, false, "sent-zero").await;
+    let lead = login_change_pw(&app, "lead-sent-zero@example.com", &lead_pw).await;
     let (_assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "sent-zero").await;
     let assistant = login_change_pw(&app, "aushilfe-sent-zero@example.com", &assistant_pw).await;
 
@@ -3755,8 +3758,9 @@ async fn a_sent_months_figures_match_what_the_live_path_produced() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
     configure_unreachable_smtp(&app).await;
-    let (lead_id, _lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
         bootstrap_team_with_suffix(&app, &admin, false, "same-figs").await;
+    let lead = login_change_pw(&app, "lead-same-figs@example.com", &lead_pw).await;
     let (_assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "same-figs").await;
     let assistant = login_change_pw(&app, "aushilfe-same-figs@example.com", &assistant_pw).await;
 
