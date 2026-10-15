@@ -2180,23 +2180,25 @@ dashboard. Employees see neither.
 **Submissions** answers "who has closed their month". It shows a ring split into
 three colours and the summary **"X of Y done"**. It counts everybody who tracks
 time and had started by the end of the month. Administrators are not counted,
-and neither are assistants who booked nothing at all — they have nothing to
-close. People who have left are not on it.
+and neither are assistants with nothing in the month — no booking and no open
+request — since they have nothing to close. People who have left are not on it.
 
 | Colour | Meaning |
 | --- | --- |
 | Green | Everything submitted and approved — this person is done. |
-| Amber | Everything that is due is submitted, but an approval or an absence decision is still missing. |
+| Amber | Everything that is due is submitted, but something still waits for a decision: submitted time, an absence request, a request to cancel an absence, or a request to reopen a week. These are the same things the approval lists on the dashboard offer. |
 | Red | A week or a booked day that is due has not been submitted yet. |
 
-Team leads see their own team — themselves and the people they approve. Admins
+Team leads see the people they approve — the same people as in their approval
+lists. Their own month is not on it; it is on their personal dashboard. Admins
 see everybody.
 
 Clicking it opens the full list, with the people who are still missing at the
 top. The list is re-read every time you open it, so approvals you just granted
 on the dashboard are already reflected. Clicking a person opens their report for
-that month, so you can go straight to what needs approving. Drafts are never
-reported as waiting for approval — nobody has handed them in yet.
+that month — the month view, so it judges the weeks exactly as the card does —
+and you can go straight to what needs approving. Drafts are never reported as
+waiting for approval — nobody has handed them in yet.
 
 This card says nothing about the payroll report. An outstanding week is worth
 chasing, but it does not hold a report back (see [When it is
@@ -2210,14 +2212,16 @@ Once the report has been sent the card greys out; it is hidden entirely when the
 payroll report is switched off.
 
 Both cards show the previous month and carry a small **"Show [month]"** link
-that switches both of them to the month that is currently running, and back.
-It is not a setting — it is not saved, and coming back to the dashboard shows
-the previous month again.
+that switches that card to the month that is currently running, and back. Each
+link only changes its own card. It is not a setting — it is not saved, and
+coming back to the dashboard shows the previous month again.
 
 In the running month, the Submissions card only counts weeks that are already
 over as missing. The current week cannot be missing yet, so a draft in it does
 not turn anybody red. Something already handed in for it does show as waiting
-for approval, since you can decide on it right away.
+for approval, since you can decide on it right away. Because nobody can be done
+with a month that is still running, the card says **"X of Y up to date"**
+there, and green means *Up to date* instead of *Done*.
 
 On the **Payroll Report** card, team leads see the whole report, so they can
 tell what it will contain. People outside their own team appear as *Not visible

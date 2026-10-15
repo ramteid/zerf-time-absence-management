@@ -7,8 +7,10 @@
   export let status;
   export let onClose;
 
+  // Opens the person's report in month mode, so it judges the month exactly
+  // as this list did.
   function openReport(member) {
-    go(`/reports?user=${member.user_id}&from=${status.from}&to=${status.to}`);
+    go(`/reports?user=${member.user_id}&month=${status.period}`);
     onClose();
   }
 
@@ -18,8 +20,9 @@
     not_submitted: "zf-chip-rejected",
   };
 
-  const STATUS_LABEL = {
-    ready: "Done",
+  // Nobody is done with a month that is still running — only up to date.
+  $: statusLabel = {
+    ready: status?.in_progress ? "Up to date" : "Done",
     awaiting_approval: "Waiting for approval",
     not_submitted: "Not submitted",
   };
@@ -35,14 +38,23 @@
   <svelte:fragment slot="title">
     <span class="flex-1">
       {$t("Submissions")} · {status.period_label}
+      {#if status.in_progress}
+        · {$t("still running")}
+      {/if}
     </span>
   </svelte:fragment>
 
-  <div class="fs-13 text-secondary mb-12">
-    {$t("{ready} of {total} done")
-      .replace("{ready}", status.ready)
-      .replace("{total}", status.total)}
-  </div>
+  {#if status.total > 0}
+    <div class="fs-13 text-secondary mb-12">
+      {$t(
+        status.in_progress
+          ? "{ready} of {total} up to date"
+          : "{ready} of {total} done",
+      )
+        .replace("{ready}", status.ready)
+        .replace("{total}", status.total)}
+    </div>
+  {/if}
 
   {#if rows.length === 0}
     <div class="payroll-empty">{$t("No people in this month.")}</div>
@@ -55,7 +67,7 @@
         >
           <span class="payroll-name">{member.name}</span>
           <span class="zf-chip zf-chip-sm {CHIP_CLASS[member.status]}">
-            {$t(STATUS_LABEL[member.status])}
+            {$t(statusLabel[member.status])}
           </span>
         </button>
       {/each}

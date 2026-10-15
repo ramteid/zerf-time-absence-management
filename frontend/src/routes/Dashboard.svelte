@@ -243,29 +243,48 @@
   let payrollContent = null;
   let submissionDetailOpen = false;
   let payrollDetailOpen = false;
-  // Which month both cards show: the previous one (default) or the running one.
-  // A transient, in-memory choice (never persisted) that survives the reloads
-  // other dashboard actions trigger but resets to the previous month on the
-  // next page load. Both cards follow it so they never talk about different
-  // months side by side.
-  let showCurrentMonth = false;
+  // Which month each card shows: the previous one (default) or the running
+  // one. Each card's own link switches only that card. A transient, in-memory
+  // choice (never persisted) that survives the reloads other dashboard actions
+  // trigger but resets to the previous month on the next page load.
+  let submissionsShowCurrentMonth = false;
+  let payrollShowCurrentMonth = false;
 
-  async function loadMonthCards() {
+  // Only the newest request of each card may land: switching months while an
+  // approval reload is still in flight must not let the older answer win.
+  let latestSubmissionStatusRequest = 0;
+  let latestPayrollContentRequest = 0;
+
+  async function loadSubmissionStatus() {
+    const request = ++latestSubmissionStatusRequest;
     try {
-      submissionStatus = await getSubmissionStatus(showCurrentMonth);
+      const status = await getSubmissionStatus(submissionsShowCurrentMonth);
+      if (request === latestSubmissionStatusRequest) submissionStatus = status;
     } catch {
       // A failed read must not break the rest of the dashboard — the tile
       // simply stays hidden. While its detail list is open, the last known
       // data stays on screen instead of the popup vanishing under the reader's
       // hands.
-      if (!submissionDetailOpen) submissionStatus = null;
+      if (request === latestSubmissionStatusRequest && !submissionDetailOpen)
+        submissionStatus = null;
     }
+  }
+
+  async function loadPayrollContent() {
+    const request = ++latestPayrollContentRequest;
     try {
-      const content = await getPayrollContent(showCurrentMonth);
-      payrollContent = content?.enabled ? content : null;
+      const content = await getPayrollContent(payrollShowCurrentMonth);
+      if (request === latestPayrollContentRequest)
+        payrollContent = content?.enabled ? content : null;
     } catch {
-      if (!payrollDetailOpen) payrollContent = null;
+      if (request === latestPayrollContentRequest && !payrollDetailOpen)
+        payrollContent = null;
     }
+  }
+
+  function loadMonthCards() {
+    loadSubmissionStatus();
+    loadPayrollContent();
   }
 
   // Opening a detail list always re-reads it. Approvals granted on this page
@@ -273,17 +292,22 @@
   // that — it must never answer with what was loaded when the page opened.
   function openSubmissionDetail() {
     submissionDetailOpen = true;
-    loadMonthCards();
+    loadSubmissionStatus();
   }
 
   function openPayrollDetail() {
     payrollDetailOpen = true;
-    loadMonthCards();
+    loadPayrollContent();
   }
 
-  function showMonth(current) {
-    showCurrentMonth = current;
-    loadMonthCards();
+  function showSubmissionsMonth(current) {
+    submissionsShowCurrentMonth = current;
+    loadSubmissionStatus();
+  }
+
+  function showPayrollMonth(current) {
+    payrollShowCurrentMonth = current;
+    loadPayrollContent();
   }
 
   load();
@@ -582,8 +606,8 @@
           {activeHelp}
           onHelpToggle={toggleHelp}
           onOpen={openSubmissionDetail}
-          onShowCurrentMonth={() => showMonth(true)}
-          onShowPreviousMonth={() => showMonth(false)}
+          onShowCurrentMonth={() => showSubmissionsMonth(true)}
+          onShowPreviousMonth={() => showSubmissionsMonth(false)}
         />
       {/if}
       {#if payrollContent}
@@ -592,8 +616,8 @@
           {activeHelp}
           onHelpToggle={toggleHelp}
           onOpen={openPayrollDetail}
-          onShowCurrentMonth={() => showMonth(true)}
-          onShowPreviousMonth={() => showMonth(false)}
+          onShowCurrentMonth={() => showPayrollMonth(true)}
+          onShowPreviousMonth={() => showPayrollMonth(false)}
         />
       {/if}
     </div>

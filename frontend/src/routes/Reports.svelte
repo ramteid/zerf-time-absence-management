@@ -28,6 +28,8 @@
   import { timeQueryRange } from "../lib/domain/reportPeriod.js";
   import {
     isReportRangeTooLong,
+    monthEnd,
+    monthStart,
     REPORT_RANGE_MAX_DAY_DIFFERENCE,
   } from "../lib/domain/dates.js";
   import {
@@ -136,8 +138,12 @@
       : "";
     const params = new URLSearchParams(queryString);
     const userId = Number(params.get("user"));
-    const from = params.get("from");
-    const to = params.get("to");
+    // `month=YYYY-MM` (the dashboard's Submissions card) opens a whole month
+    // in month mode, so the report judges it exactly as the card did — a
+    // custom range judges its boundary weeks whole instead.
+    const month = params.get("month");
+    const from = month ? monthStart(month) : params.get("from");
+    const to = month ? monthEnd(month) : params.get("to");
     if (
       !Number.isSafeInteger(userId) ||
       userId < 1 ||
@@ -149,7 +155,7 @@
       isReportRangeTooLong(from, to)
     )
       return null;
-    return { userId, from, to };
+    return { userId, from, to, month };
   }
 
   function reportMaxDate(currentPath, todayDate) {
@@ -213,9 +219,14 @@
     if (!deepLink) return;
     dismissedUnavailableDeepLinkPath = "";
     selectedUserId = deepLink.userId;
-    periodMode = "range";
-    from = deepLink.from;
-    to = deepLink.to;
+    if (deepLink.month) {
+      periodMode = "month";
+      month = deepLink.month;
+    } else {
+      periodMode = "range";
+      from = deepLink.from;
+      to = deepLink.to;
+    }
     activeTab = "employee";
   }
 

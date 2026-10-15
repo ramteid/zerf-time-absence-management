@@ -759,6 +759,42 @@ describe("Reports", () => {
     expect(target.querySelector("#reports-user-select").value).toBe("8");
   }, 20000);
 
+  it("applies a ?user/month deep link in month mode", async () => {
+    // Simulates arriving from the dashboard's Submissions card, which judges
+    // a whole month and must open the report the same way.
+    currentUser.set({
+      id: 7,
+      role: "team_lead",
+      first_name: "Ada",
+      last_name: "Lead",
+      weekly_hours: 40,
+      start_date: "2020-01-01",
+      permissions: { can_view_team_reports: true },
+    });
+    mockState.users = [
+      { id: 7, first_name: "Ada", last_name: "Lead", role: "team_lead" },
+      { id: 8, first_name: "Ben", last_name: "Employee", role: "employee" },
+    ];
+    mockState.monthReport = monthReportFixture({ user_id: 8 });
+
+    path.set("/reports?user=8&month=2029-12");
+    component = mount(Reports, { target });
+
+    await waitFor(() =>
+      api.mock.calls.some(
+        ([p]) =>
+          p.startsWith("/reports/month?") &&
+          p.includes("user_id=8") &&
+          p.includes("month=2029-12"),
+      ),
+    );
+    expect(
+      api.mock.calls.some(
+        ([p]) => p.startsWith("/reports/range?") && p.includes("user_id=8"),
+      ),
+    ).toBe(false);
+  }, 20000);
+
   it("shows an unavailable linked employee after an empty user list finishes loading", async () => {
     currentUser.set({
       id: 7,
