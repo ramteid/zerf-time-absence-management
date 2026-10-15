@@ -36,7 +36,7 @@
 <div class="zf-card submissions-card">
   <div class="card-header">
     <Icon name="FileText" size={15} sw={1.5} />
-    <span class="card-header-title">{$t("Submissions")}</span>
+    <span class="card-header-title">{$t("Team submissions")}</span>
     <button
       class="zf-btn-icon-sm zf-btn-ghost zf-help-icon"
       title={$t("help_submissions_card")}

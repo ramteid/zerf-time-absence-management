@@ -625,10 +625,14 @@
                 : currentWeekStatus === "rejected"
                   ? $t("Current week: needs revision")
                   : ""}
+          <!-- Missing weeks outrank the note about the running week: the
+               count only holds weeks past their Friday, so anything missing
+               there is overdue and must not hide behind "Current week". -->
           <StatCard
             color={allWeeksIn ? "var(--success-text)" : "var(--warning-text)"}
-            sub={currentWeekSub ||
-              (allWeeksIn ? $t("All submitted") : $t("Weeks missing"))}
+            sub={allWeeksIn
+              ? currentWeekSub || $t("All submitted")
+              : $t("Weeks missing")}
           >
             <span slot="label" class="stat-card-label-help">
               <span>{$t("Submissions")}</span>

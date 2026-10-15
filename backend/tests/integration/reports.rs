@@ -2290,12 +2290,14 @@ async fn report_counts_submitted_weeks_of_the_shown_period() {
 }
 
 
-/// The employee's own month view counts the week they are working: it belongs
-/// to this month, and handing it in is what settles it. Before the change this
-/// week was invisible here, so a month could read as complete while its last
-/// days had never been handed in.
+/// The week being worked is not due before its Friday. The employee's own
+/// month view must not report weeks missing while they are still working the
+/// only one there is — the dashboard showed "weeks missing" every Monday to
+/// Thursday — and the "x of y" count leaves it out until then as well. Handing
+/// it in early is still possible and settles it ahead of time. (The last days
+/// of a *finished* month stay due, see the next test.)
 #[tokio::test]
-async fn the_month_report_counts_the_week_being_worked() {
+async fn the_month_report_asks_for_the_week_being_worked_from_its_friday() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
     let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
@@ -2303,8 +2305,12 @@ async fn the_month_report_counts_the_week_being_worked() {
     let lead = login_change_pw(&app, "lead-running-week@example.com", &lead_pw).await;
 
     let today = reference_date();
+    assert!(
+        today.weekday().num_days_from_monday() < 4,
+        "the reference date must fall before the Friday of its week"
+    );
     let month = today.format("%Y-%m").to_string();
-    // Starting today leaves exactly one week of this month to judge: this one.
+    // Starting today leaves exactly one week of this month: the one being worked.
     let (status, body) = admin
         .post(
             "/api/v1/users",
@@ -2328,8 +2334,18 @@ async fn the_month_report_counts_the_week_being_worked() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         report["weeks_all_submitted"],
-        json!(false),
-        "nothing has been handed in for the week being worked: {report}"
+        json!(true),
+        "the week being worked is not missing before its Friday: {report}"
+    );
+    assert_eq!(
+        report["weeks_total"],
+        json!(0),
+        "nor does it count towards x of y yet: {report}"
+    );
+    assert_eq!(
+        report["current_week_status"],
+        json!("draft"),
+        "the open week is still shown as open: {report}"
     );
 
     let entry_id =
@@ -2347,10 +2363,11 @@ async fn the_month_report_counts_the_week_being_worked() {
         .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        report["weeks_all_submitted"],
+        report["weeks_all_approved"],
         json!(true),
-        "handing the week in settles it, however many days it holds: {report}"
+        "handing the week in early settles it: {report}"
     );
+    assert_eq!(report["current_week_status"], json!("approved"));
 
     app.cleanup().await;
 }

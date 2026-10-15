@@ -427,6 +427,40 @@ describe("PersonReport", () => {
     await waitForText(target, "Weeks missing");
   });
 
+  it("does not let the running week hide weeks that are missing", async () => {
+    getMonthReport.mockResolvedValue(
+      monthReportFixture({
+        weeks_submitted: 2,
+        weeks_total: 3,
+        current_week_status: "draft",
+      }),
+    );
+    component = mount(PersonReport, {
+      target,
+      props: { userId: 1, users, periodMode: "month", month: "2026-06" },
+    });
+    await waitForText(target, "2 of 3 weeks");
+    expect(target.textContent).toContain("Weeks missing");
+    expect(target.textContent).not.toContain("Current week: draft");
+  });
+
+  it("names the running week once nothing due is missing", async () => {
+    getMonthReport.mockResolvedValue(
+      monthReportFixture({
+        weeks_submitted: 2,
+        weeks_total: 2,
+        current_week_status: "draft",
+      }),
+    );
+    component = mount(PersonReport, {
+      target,
+      props: { userId: 1, users, periodMode: "month", month: "2026-06" },
+    });
+    await waitForText(target, "2 of 2 weeks");
+    expect(target.textContent).toContain("Current week: draft");
+    expect(target.textContent).not.toContain("Weeks missing");
+  });
+
   it("hides the submissions tile when the person has no submission duty", async () => {
     // No week counts in the payload — the backend leaves them out for
     // assistants and zero-hour users.

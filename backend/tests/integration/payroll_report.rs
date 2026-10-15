@@ -6214,10 +6214,10 @@ async fn submissions_card_status(viewer: &TestClient, path: &str, user_id: i64) 
         .unwrap_or_else(|| panic!("user {user_id} missing from {path}: {card}"))
 }
 
-/// In the running month only weeks that are already over are due. The week
-/// being worked cannot be missing yet, so a draft in it leaves the person
-/// green; handing it in early makes them amber, since the approver can act on
-/// it right away.
+/// A week is due from its Friday. Before that the week being worked cannot be
+/// missing, so a draft in it leaves the person green; handing it in early
+/// makes them amber, since the approver can act on it right away. (The
+/// reference date is a Monday.)
 #[tokio::test]
 async fn submissions_card_does_not_count_the_running_week_as_missing() {
     let app = TestApp::spawn().await;
