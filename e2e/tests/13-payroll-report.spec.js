@@ -190,8 +190,9 @@ test.describe("month dashboard cards", () => {
     await expect(row).toBeVisible();
 
     await row.click();
-    // Lands on that person's report for the reported month.
-    await expect(page).toHaveURL(/\/reports\?user=\d+&from=[\d-]+&to=[\d-]+/);
+    // Lands on that person's report for the reported month, in month mode so
+    // the report judges the weeks exactly as the card did.
+    await expect(page).toHaveURL(/\/reports\?user=\d+&month=\d{4}-\d{2}$/);
   });
 });
 
