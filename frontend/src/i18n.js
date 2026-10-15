@@ -421,6 +421,9 @@ const TRANSLATIONS = {
     // --- Payroll report: dashboard tile ---
     "{ready} of {total} done": "{ready} of {total} done",
     "{ready} of {total} up to date": "{ready} of {total} up to date",
+    "{count} not submitted": "{count} not submitted",
+    "{count} waiting for approval": "{count} waiting for approval",
+    "Go to approvals": "Go to approvals",
     "{month} sent": "{month} sent",
     "Nothing left to do this month.": "Nothing left to do this month.",
     "Show {month}": "Show {month}",
@@ -1607,6 +1610,9 @@ const TRANSLATIONS = {
     // --- Lohnmeldung: Dashboard-Kachel ---
     "{ready} of {total} done": "{ready} von {total} fertig",
     "{ready} of {total} up to date": "{ready} von {total} ohne R\u00fcckstand",
+    "{count} not submitted": "{count} nicht eingereicht",
+    "{count} waiting for approval": "{count} warten auf Genehmigung",
+    "Go to approvals": "Zu den Genehmigungen",
     "{month} sent": "{month} versendet",
     "Nothing left to do this month.": "Diesen Monat ist nichts mehr zu tun.",
     "Show {month}": "{month} anzeigen",

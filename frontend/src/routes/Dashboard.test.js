@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount, unmount } from "svelte";
+import { get } from "svelte/store";
 import Dashboard from "./Dashboard.svelte";
 import { api } from "../api.js";
 import { categories, currentUser, path } from "../stores.js";
@@ -662,6 +663,51 @@ describe("Dashboard", () => {
 
       expect(payrollCalls()).toBe(before + 1);
       await waitForText(target, "2 of 2 done");
+    });
+
+    it("takes an amber person from the list to the approval queue", async () => {
+      api.mockImplementation(
+        approverApi({
+          submissionStatus: {
+            ...mockState.submissionStatus,
+            total: 1,
+            ready: 0,
+            awaiting_approval: 1,
+            not_submitted: 0,
+            members: [
+              { user_id: 3, name: "Eva E", status: "awaiting_approval" },
+            ],
+          },
+        }),
+      );
+      const pathBefore = get(path);
+      // jsdom has no layout, so scrolling to the queue is stubbed.
+      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+      const scrollIntoView = vi.fn();
+      HTMLElement.prototype.scrollIntoView = scrollIntoView;
+
+      component = mount(Dashboard, { target });
+      await settle();
+      await settle();
+      await waitForText(target, "1 waiting for approval");
+
+      target.querySelector(".submissions-card-button").click();
+      await settle();
+      await settle();
+      const row = [...document.querySelectorAll(".payroll-row")].find((el) =>
+        el.textContent.includes("Eva E"),
+      );
+      expect(row, "member row not found").toBeTruthy();
+      row.click();
+      await settle();
+
+      // Her submitted week is in the timesheet queue: the list closes and the
+      // reader stays on the dashboard instead of landing on a report.
+      expect(document.querySelector(".payroll-row")).toBeNull();
+      expect(get(path)).toBe(pathBefore);
+      await settle();
+      expect(scrollIntoView).toHaveBeenCalled();
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
     });
 
     it("is not requested at all for someone who cannot approve", async () => {
