@@ -373,11 +373,19 @@ error rather than as the edge case it is.
 `reports::weeks_in_month_to_judge` decides *which* weeks a completeness check
 sees: every week that overlaps the period and has already started, the one being
 worked included. A week belongs to a month as soon as any of its days do.
-The dashboard's Submissions card is the one deliberate exception, and only for
-the *running* month: there it judges weeks only up to the last Sunday that has
-passed (`submission_status::due_until`), because the card is a lead's view of
-what is overdue and the week being worked painted nearly everybody red on any
-day before Friday. A finished month is judged in full, as everywhere else.
+Whether a week is already *due* is `reports::due_through`: **from its Friday**,
+when the working week is effectively over and can be handed in — the rule the
+month-end reminder (`unsubmitted_weeks_in_month`) always applied to the week
+straddling a month's end. Every "is somebody behind?" verdict asks it: the
+Team submissions card, the employee's own Submissions tile (the month report's
+`weeks_all_submitted` pair), the team report's column and the "x of y weeks"
+count (`weeks_submission_counts`). They used to disagree — the card left the
+running week out while the others counted it from Monday — so one person read
+"up to date" on one screen and "weeks missing" on the next, and nearly everybody
+was behind on any day before Friday. A finished month is judged in full, except
+that its straddling week waits for its Friday. The export gates
+(`all_weeks_ready_for_timesheet_export`) do not use it: they only run on months
+whose documents must be final.
 `reports::JudgedDays` decides which *days* of those weeks may be looked at.
 Month-scoped checks (Submissions tile, month report, timesheet export gate,
 month-end reminders) clamp to the month, so a draft booked in the new month
@@ -982,7 +990,7 @@ only for a finished month. Enabling the report at all requires
 `load_smtp_config()` to be `Some`, and disabling SMTP switches it back off
 (`update_smtp_settings`). Two lead-only endpoints back the dashboard's month cards.
 `GET /reports/submission-status` (`services::submission_status::build`) is the
-**Submissions** card: who has closed their month, judged with the week criterion
+**Team submissions** card: who has closed their month, judged with the week criterion
 and full approval for everyone. It shares nothing with the payroll report — not
 `payroll_members`, not the exclusion list, not the `month_export_readiness`
 gate — because "what may this document contain" is a different question from

@@ -10,7 +10,7 @@
 
 use std::collections::HashSet;
 
-use chrono::{Datelike, Duration, NaiveDate};
+use chrono::{Datelike, NaiveDate};
 use serde::Serialize;
 
 use crate::background::schedule;
@@ -52,7 +52,7 @@ pub struct SubmissionStatus {
     pub period_label: String,
     pub from: NaiveDate,
     pub to: NaiveDate,
-    /// The month is still running: only weeks that are over are due, so a
+    /// The month is still running: only weeks past their Friday are due, so a
     /// person who is not behind is "up to date" rather than done.
     pub in_progress: bool,
     pub total: usize,
@@ -166,7 +166,7 @@ async fn members_for(
 /// are hidden everywhere in the app, so the queries leave them out.
 struct OpenItems {
     from: NaiveDate,
-    /// Last day that is due, see [`due_until`].
+    /// Last day that is due, see [`reports::due_through`].
     due_to: NaiveDate,
     today: NaiveDate,
     /// Drafts or uncorrected rejections on a day that is due.
@@ -183,7 +183,7 @@ impl OpenItems {
         today: NaiveDate,
     ) -> AppResult<Self> {
         let reports_db = &app_state.db.reports;
-        let due_to = due_until(to, today);
+        let due_to = reports::due_through(to, today);
         let not_handed_in = if due_to >= from {
             reports_db
                 .user_ids_with_unsubmitted_entries_since_start(from, due_to)
@@ -255,66 +255,9 @@ async fn month_status(
     })
 }
 
-/// Last day of the month `[.., to]` that is already due.
-///
-/// A finished month is due in full, including the days of its last week that
-/// reach into the new month — handing those in is what closes it. In the
-/// running month only the weeks that are already over are due: the week being
-/// worked cannot be missing yet. Counting it painted almost everybody red on
-/// any day before Friday, so the card could not tell "behind" from "Wednesday".
-///
-/// Returns a day before the month's start when no week of it is over yet.
-fn due_until(to: NaiveDate, today: NaiveDate) -> NaiveDate {
-    if to < today {
-        return to;
-    }
-    let last_finished_sunday = crate::time_calc::week_monday(today) - Duration::days(1);
-    to.min(last_finished_sunday)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn date(year: i32, month: u32, day: u32) -> NaiveDate {
-        NaiveDate::from_ymd_opt(year, month, day).unwrap()
-    }
-
-    #[test]
-    fn a_finished_month_is_due_in_full() {
-        // Thursday, 1 October: September's last week is still running, but
-        // the month is over, so its last days are due.
-        assert_eq!(
-            due_until(date(2026, 9, 30), date(2026, 10, 1)),
-            date(2026, 9, 30)
-        );
-    }
-
-    #[test]
-    fn the_running_month_is_due_up_to_the_last_finished_week() {
-        // Thursday, 15 October: the week of the 12th is still being worked.
-        assert_eq!(
-            due_until(date(2026, 10, 31), date(2026, 10, 15)),
-            date(2026, 10, 11)
-        );
-        // On a Monday the week that ended yesterday is due.
-        assert_eq!(
-            due_until(date(2026, 10, 31), date(2026, 10, 19)),
-            date(2026, 10, 18)
-        );
-        // The month's last day still belongs to the running month.
-        assert_eq!(
-            due_until(date(2026, 10, 31), date(2026, 10, 31)),
-            date(2026, 10, 25)
-        );
-    }
-
-    #[test]
-    fn nothing_is_due_before_the_running_months_first_week_ends() {
-        // Saturday, 3 October: no week of October is over yet.
-        let from = date(2026, 10, 1);
-        assert!(due_until(date(2026, 10, 31), date(2026, 10, 3)) < from);
-    }
 
     #[test]
     fn statuses_keep_their_wire_names() {

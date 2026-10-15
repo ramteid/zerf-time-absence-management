@@ -866,10 +866,10 @@ pub async fn build_range_for_page(
 /// Every week that overlaps the month and has already started.
 ///
 /// The week currently being worked is one of them as soon as any of its days
-/// belong to the month — those days are part of what the month is missing, and
-/// a week can be handed in the moment its owner knows they will book nothing
-/// more in it. Weeks that have not started at all are never judged: nobody can
-/// owe a week that has not happened.
+/// belong to the month. Whether it is already *due* is a separate question that
+/// the "is somebody behind?" checks answer with [`due_through`]: from its
+/// Friday. Weeks that have not started at all are never judged: nobody can owe
+/// a week that has not happened.
 ///
 /// Which *days* of those weeks a check may look at is a separate question, and
 /// the answer is always "the ones inside the period" — see [`JudgedDays`].
@@ -904,6 +904,32 @@ pub fn judged_period_end(to: NaiveDate, today: NaiveDate) -> NaiveDate {
     }
     let running_week_sunday = crate::time_calc::week_monday(today) + Duration::days(6);
     to.min(running_week_sunday)
+}
+
+/// Last day of `[.., to]` whose week can be asked for yet.
+///
+/// A week is due from its Friday: by then the working week is effectively over
+/// and can be handed in. Before that, nobody is behind with it — they are still
+/// working it. This is the one answer to "is somebody behind?" for every view
+/// that gives that verdict: the Submissions card, the employee's own
+/// Submissions tile (the month report's `weeks_all_submitted` pair), the team
+/// report's column and the "x of y weeks" count. They used to disagree: the
+/// card left the running week out while the others counted it from Monday, so
+/// the same person read "up to date" on one screen and "weeks missing" on the
+/// next, and almost everybody was behind on any day before Friday. The
+/// month-end reminder already worked this way for the week straddling a
+/// month's end (`unsubmitted_weeks_in_month`); now everything does.
+///
+/// A finished month is therefore judged in full — except, until its Friday, the
+/// week that reaches into the new month.
+pub fn due_through(to: NaiveDate, today: NaiveDate) -> NaiveDate {
+    let running_monday = crate::time_calc::week_monday(today);
+    let last_due_sunday = if today >= running_monday + Duration::days(4) {
+        running_monday + Duration::days(6)
+    } else {
+        running_monday - Duration::days(1)
+    };
+    to.min(last_due_sunday)
 }
 
 /// Fetches holidays, absent days, submitted dates, and incomplete dates for the
@@ -1284,34 +1310,39 @@ pub async fn submission_status_for_month(
         return Ok((true, true));
     }
     let today = crate::services::settings::app_today(pool).await;
-    // The week being worked counts as soon as any of its days belong to this
-    // month — the same rule the report's Submissions tile uses, so the two can
-    // never disagree about the same month.
-    let complete_week_mondays = weeks_in_month_to_judge(month_start, month_end, today);
-    if complete_week_mondays.is_empty() {
-        return Ok((true, true));
-    }
-    // Include requested absences: the employee cannot log entries on pending
-    // absence days, so those days must be excused to prevent an unsatisfiable
-    // completeness requirement in the user-facing Submissions tile.
-    let (holiday_set, absent_days, submitted_dates, incomplete_dates, schedule_history) =
-        load_week_check_data(pool, user_id, &complete_week_mondays, true).await?;
-    // A month is a closed period, so only its own days are judged — the same
-    // clamp `all_weeks_submitted_for_month` uses, so the dashboard and the team
-    // report can never disagree about the same month. Without it a draft booked
-    // on the 1st of the next month, or on the last days of the previous one,
-    // left this month permanently "not submitted".
-    if !check_weeks_all_submitted(
-        &complete_week_mondays,
-        &holiday_set,
-        &absent_days,
-        &submitted_dates,
-        &incomplete_dates,
-        user_start_date,
-        &schedule_history,
-        Some((month_start, month_end)),
-    ) {
-        return Ok((false, false));
+    // Only weeks that are due — from their Friday on, see [`due_through`] —
+    // so the employee is not told weeks are missing while they are still
+    // working the current one, and the dashboard, the team report and the
+    // Submissions card all give the same verdict about the same month.
+    let due_end = due_through(month_end, today);
+    let due_week_mondays = if due_end >= month_start {
+        weeks_in_month_to_judge(month_start, due_end, today)
+    } else {
+        Vec::new()
+    };
+    if !due_week_mondays.is_empty() {
+        // Include requested absences: the employee cannot log entries on pending
+        // absence days, so those days must be excused to prevent an unsatisfiable
+        // completeness requirement in the user-facing Submissions tile.
+        let (holiday_set, absent_days, submitted_dates, incomplete_dates, schedule_history) =
+            load_week_check_data(pool, user_id, &due_week_mondays, true).await?;
+        // A month is a closed period, so only its own days are judged — the same
+        // clamp `all_weeks_submitted_for_month` uses, so the dashboard and the team
+        // report can never disagree about the same month. Without it a draft booked
+        // on the 1st of the next month, or on the last days of the previous one,
+        // left this month permanently "not submitted".
+        if !check_weeks_all_submitted(
+            &due_week_mondays,
+            &holiday_set,
+            &absent_days,
+            &submitted_dates,
+            &incomplete_dates,
+            user_start_date,
+            &schedule_history,
+            Some((month_start, due_end)),
+        ) {
+            return Ok((false, false));
+        }
     }
     let reports_db = crate::repository::ReportDb::new(pool.clone());
     // Likewise bounded to the month: an entry waiting for approval in a
@@ -2012,10 +2043,11 @@ fn month_end_date(year: i32, month: u32) -> AppResult<NaiveDate> {
 /// Checks whether the working weeks overlapping the given month have been
 /// submitted for the user.
 ///
-/// Every week overlapping the month counts, the one being worked included — it
-/// belongs to this month as soon as any of its days do, and those days are what
-/// the month is missing. Only the month's own days are judged, so what is still
-/// being booked in the next month never reflects on this one.
+/// Every week overlapping the month counts once it is due — from its Friday,
+/// see [`due_through`]. The week straddling the month's end belongs to this
+/// month as soon as any of its days do, and those days are what the month is
+/// missing. Only the month's own days are judged, so what is still being
+/// booked in the next month never reflects on this one.
 pub async fn all_weeks_submitted_for_month(
     pool: &crate::db::DatabasePool,
     user_id: i64,
@@ -2049,7 +2081,12 @@ pub async fn all_weeks_submitted_for_month_as_of(
     submission_exempt: bool,
     today: NaiveDate,
 ) -> AppResult<bool> {
-    let complete_week_mondays = weeks_in_month_to_judge(month_start, month_end, today);
+    // Only weeks that are due, from their Friday on — see [`due_through`].
+    let due_end = due_through(month_end, today);
+    if due_end < month_start {
+        return Ok(true);
+    }
+    let complete_week_mondays = weeks_in_month_to_judge(month_start, due_end, today);
     if complete_week_mondays.is_empty() {
         return Ok(true);
     }
@@ -2069,7 +2106,7 @@ pub async fn all_weeks_submitted_for_month_as_of(
         &incomplete_dates,
         user_start_date,
         &schedule_history,
-        Some((month_start, month_end)),
+        Some((month_start, due_end)),
     ))
 }
 
@@ -2079,11 +2116,11 @@ pub async fn all_weeks_submitted_for_month_as_of(
 /// Weeks are counted whole. A period that starts on a Wednesday still stands or
 /// falls with that entire calendar week (`judged` says whether the days it is
 /// judged *on* are narrowed to the period — see [`JudgedDays`]) — the employee submits weeks, not days,
-/// so half a week is not a thing that can be handed in. Weeks that have not
-/// started yet are not counted at all: they cannot be missing. The week
-/// currently being worked *is* counted and stays "not handed in" until it is
-/// submitted, which an employee can do as soon as they know they will not book
-/// anything else in it.
+/// so half a week is not a thing that can be handed in. A week is counted once
+/// it is due, from its Friday (see [`due_through`]): weeks that have not started
+/// cannot be missing, and neither can the one still being worked before its
+/// Friday. Handing it in early is still possible; it simply joins the count on
+/// Friday as already handed in.
 #[allow(clippy::too_many_arguments)]
 pub async fn weeks_submission_counts(
     pool: &crate::db::DatabasePool,
@@ -2096,10 +2133,13 @@ pub async fn weeks_submission_counts(
     let today = crate::services::settings::app_today(pool).await;
     // Weeks that ended before the user was employed are nobody's business —
     // counting them would inflate both numbers with weeks that never existed
-    // for this person.
+    // for this person. A week joins the count once it is due, from its Friday
+    // (see [`due_through`]): before that it is still being worked, and counting
+    // it as missing turned the tile amber every Monday.
     let week_mondays: Vec<NaiveDate> = weeks_in_month_to_judge(from, to, today)
         .into_iter()
         .filter(|monday| *monday + Duration::days(6) >= user_start_date)
+        .filter(|monday| today >= *monday + Duration::days(4))
         .collect();
     if week_mondays.is_empty() {
         return Ok((0, 0));
@@ -2814,6 +2854,37 @@ mod tests {
             compute_current_week_status(false, false, true, true),
             "partial"
         );
+    }
+
+    #[test]
+    fn a_week_is_due_from_its_friday() {
+        let date = |month: u32, day: u32| NaiveDate::from_ymd_opt(2026, month, day).unwrap();
+        // Thursday 15 October: the week of the 12th is still being worked.
+        assert_eq!(due_through(date(10, 31), date(10, 15)), date(10, 11));
+        // From its Friday the week is effectively over and can be asked for.
+        assert_eq!(due_through(date(10, 31), date(10, 16)), date(10, 18));
+        // Monday: the week that just ended stays due, the new one is not yet.
+        assert_eq!(due_through(date(10, 31), date(10, 19)), date(10, 18));
+        // The month's last day: the week holding it is past its Friday.
+        assert_eq!(due_through(date(10, 31), date(10, 31)), date(10, 31));
+    }
+
+    #[test]
+    fn a_finished_month_waits_for_the_friday_of_its_straddling_week() {
+        let date = |month: u32, day: u32| NaiveDate::from_ymd_opt(2026, month, day).unwrap();
+        // Thursday 1 October: September is over, but its last week (from
+        // Monday 28 September) is still being worked — its days are not due.
+        assert_eq!(due_through(date(9, 30), date(10, 1)), date(9, 27));
+        // From Friday 2 October the whole month is due.
+        assert_eq!(due_through(date(9, 30), date(10, 2)), date(9, 30));
+        assert_eq!(due_through(date(9, 30), date(10, 20)), date(9, 30));
+    }
+
+    #[test]
+    fn nothing_is_due_before_the_first_friday_of_a_running_month() {
+        let date = |month: u32, day: u32| NaiveDate::from_ymd_opt(2026, month, day).unwrap();
+        // Thursday 1 October: no week of October has reached its Friday.
+        assert!(due_through(date(10, 31), date(10, 1)) < date(10, 1));
     }
 
     #[test]

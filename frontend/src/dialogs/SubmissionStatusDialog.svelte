@@ -43,10 +43,10 @@
   );
 </script>
 
-<Dialog title={$t("Submissions")} {onClose}>
+<Dialog title={$t("Team submissions")} {onClose}>
   <svelte:fragment slot="title">
     <span class="flex-1">
-      {$t("Submissions")} · {status.period_label}
+      {$t("Team submissions")} · {status.period_label}
       {#if status.in_progress}
         · {$t("still running")}
       {/if}

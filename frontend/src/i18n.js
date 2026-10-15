@@ -95,7 +95,7 @@ const TRANSLATIONS = {
       "Used to calculate the prorated leave-account entitlement for employees who already worked before they started using the application. Leave empty to use the start date.",
     "Counts as work": "Counts as work",
     help_submission_status:
-      "How many weeks of the selected period you have submitted. A week counts as submitted no matter how many days you booked in it; a week that overlaps the start or end of the period counts as a whole week. The week currently running counts too and stays open until you submit it.",
+      "How many weeks of the selected period you have submitted. A week counts as submitted no matter how many days you booked in it; a week that overlaps the start or end of the period counts as a whole week. The week currently running counts from its Friday, when it is effectively over and can be submitted.",
     Approvals: "Approvals",
     "All approved": "All approved",
     Incomplete: "Incomplete",
@@ -104,7 +104,7 @@ const TRANSLATIONS = {
     "All submitted (approvals pending)": "All submitted (approvals pending)",
     "Weeks missing": "Weeks missing",
     help_submissions_card:
-      "Who has closed the month: everything submitted and approved, submitted and waiting for a decision, or still missing. In the running month only weeks that are already over count as missing. Team leads see the people they approve. It says nothing about the payroll report — that has its own card.",
+      "Who has closed the month: everything submitted and approved, submitted and waiting for a decision, or still missing. A week that is not submitted counts as missing from its Friday on. Team leads see the people they approve. It says nothing about the payroll report — that has its own card.",
     "{absences} absences · {people} people with hours":
       "{absences} absences · {people} people with hours",
     "still running": "still running",
@@ -424,6 +424,9 @@ const TRANSLATIONS = {
     "{count} not submitted": "{count} not submitted",
     "{count} waiting for approval": "{count} waiting for approval",
     "Go to approvals": "Go to approvals",
+    // The team card, named apart from the own "Submissions" tile on the same
+    // dashboard.
+    "Team submissions": "Team submissions",
     "{month} sent": "{month} sent",
     "Nothing left to do this month.": "Nothing left to do this month.",
     "Show {month}": "Show {month}",
@@ -1320,7 +1323,7 @@ const TRANSLATIONS = {
     help_medical_certificate_relevant:
       "Abwesenheiten dieser Kategorie zählen für die Schwelle durchgehender Krankheitstage, die in den Admin-Einstellungen konfiguriert ist. Sobald ein durchgehender Krankheitszeitraum diese Schwelle erreicht, werden die betroffenen Anträge als eAU-pflichtig markiert. Unabhängig von den obigen Optionen — eine Kategorie kann sich wie eine Krankmeldung verhalten, ohne dies zu zählen, oder umgekehrt.",
     help_submission_status:
-      "Zeigt, wie viele Wochen des gewählten Zeitraums du eingereicht hast. Eine Woche zählt als eingereicht, egal an wie vielen Tagen du gebucht hast; eine Woche, die über Anfang oder Ende des Zeitraums hinausragt, zählt als ganze Woche. Die laufende Woche zählt mit und bleibt offen, bis du sie einreichst.",
+      "Zeigt, wie viele Wochen des gewählten Zeitraums du eingereicht hast. Eine Woche zählt als eingereicht, egal an wie vielen Tagen du gebucht hast; eine Woche, die über Anfang oder Ende des Zeitraums hinausragt, zählt als ganze Woche. Die laufende Woche zählt ab ihrem Freitag mit, wenn sie praktisch vorbei ist und eingereicht werden kann.",
     Approvals: "Genehmigungen",
     "All approved": "Alle genehmigt",
     Incomplete: "Unvollständig",
@@ -1330,7 +1333,7 @@ const TRANSLATIONS = {
       "Alles eingereicht (Genehmigungen ausstehend)",
     "Weeks missing": "Wochen fehlen",
     help_submissions_card:
-      "Wer den Monat abgeschlossen hat: alles eingereicht und genehmigt, eingereicht und auf Entscheidung wartend, oder noch offen. Im laufenden Monat gelten nur Wochen als offen, die schon vorbei sind. Teamleitungen sehen die Personen, die sie genehmigen. \u00dcber die Lohnmeldung sagt die Kachel nichts \u2014 daf\u00fcr gibt es eine eigene.",
+      "Wer den Monat abgeschlossen hat: alles eingereicht und genehmigt, eingereicht und auf Entscheidung wartend, oder noch offen. Eine nicht eingereichte Woche gilt ab ihrem Freitag als fehlend. Teamleitungen sehen die Personen, die sie genehmigen. \u00dcber die Lohnmeldung sagt die Kachel nichts \u2014 daf\u00fcr gibt es eine eigene.",
     "{absences} absences · {people} people with hours":
       "{absences} Abwesenheiten · {people} Personen mit Stunden",
     "still running": "l\u00e4uft noch",
@@ -1613,6 +1616,7 @@ const TRANSLATIONS = {
     "{count} not submitted": "{count} nicht eingereicht",
     "{count} waiting for approval": "{count} warten auf Genehmigung",
     "Go to approvals": "Zu den Genehmigungen",
+    "Team submissions": "Team-Einreichungen",
     "{month} sent": "{month} versendet",
     "Nothing left to do this month.": "Diesen Monat ist nichts mehr zu tun.",
     "Show {month}": "{month} anzeigen",

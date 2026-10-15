@@ -677,10 +677,12 @@ The time tracking page applies the break deduction as a preview for all non-reje
 
 ## Submission status indicator
 
-The `Submissions` tile shows whether all required past weeks have been submitted and approved.
+The `Submissions` tile shows whether all weeks that are due have been submitted and approved.
 
-- **Scope:** from your start date up to and including the last complete week.
-- **Current week is excluded** from this check (it is still ongoing).
+- **Scope:** from your start date up to and including the last week that is due.
+- **A week is due from its Friday.** By then the working week is effectively
+  over and can be submitted. Before that the current week is shown as *still
+  open*, not as missing.
 
 ### How completeness is determined
 
@@ -723,12 +725,12 @@ report's submission column, the monthly submission reminder, the payroll
 report, and the scheduled timesheet PDF upload. They can never disagree with
 each other.
 
-A month is judged by the weeks that overlap it, the week you are currently
-working included — as soon as any of its days belong to that month, those days
-are part of what the month is missing. Only the month's own days count, so
-whatever you are still booking in the new month never makes the old one look
-unfinished, and handing in the last days of a month settles it even though the
-week itself runs on.
+A month is judged by the weeks that overlap it, each one from its Friday on.
+That includes the week at the end of a month that reaches into the next one:
+as soon as its Friday has come, its days in the old month are part of what that
+month is missing. Only the month's own days count, so whatever you are still
+booking in the new month never makes the old one look unfinished, and handing
+in the last days of a month settles it even though the week itself runs on.
 
 ### Important: non-crediting entries affect completeness
 
@@ -1068,9 +1070,11 @@ Zerf distinguishes between workflow coverage and work-credit math.
   counted completely, and it makes no difference on how many days of it you
   booked. In a month view only that month's own days decide — hand in the last
   days of the month and the week counts, whatever you book afterwards. A freely
-  chosen range judges its boundary weeks as whole weeks. The week you are currently working counts too and stays open until
-  you submit it — you can submit a week as soon as you know you will not book
-  anything else in it. The tile is not shown for assistants or for users
+  chosen range judges its boundary weeks as whole weeks. The week you are
+  currently working joins the count on its Friday. You can submit it earlier,
+  as soon as you know you will not book anything else in it. Missing weeks are
+  always named first; the note about the current week only appears when
+  nothing else is missing. The tile is not shown for assistants or for users
   without weekly hours, who have no submission duty.
 - Team leads and admins additionally see an **Employee** / **Team** switch at
   the top of the page. The Employee tab shows one person's report at a time
@@ -1159,7 +1163,9 @@ Because approved absence sets target to `0`, and recorded work still counts as a
 
 ### Why does submission status show missing weeks even though current week is in progress?
 
-Current week is excluded. Missing status is based on incomplete past full weeks.
+It does not count the current week as missing before its Friday. A week only
+counts as missing once its Friday has come and it is still not submitted. If
+the tile shows missing weeks, an earlier week is still open.
 
 ### Why don't the hours I booked this week change my flextime balance?
 
@@ -2177,7 +2183,7 @@ configured day.
 Team leads and admins see two month cards next to **Who is absent** on their
 dashboard. Employees see neither.
 
-**Submissions** answers "who has closed their month". It shows a ring split into
+**Team submissions** answers "who has closed their month". It shows a ring split into
 three colours and the summary **"X of Y done"**. It counts everybody who tracks
 time and had started by the end of the month. Administrators are not counted,
 and neither are assistants with nothing in the month — no booking and no open
@@ -2204,7 +2210,7 @@ is waiting. Clicking anyone else opens their report for that month, in the month
 view, so it judges the weeks exactly as the card does. Drafts are never reported
 as waiting for approval — nobody has handed them in yet.
 
-This card says nothing about the payroll report. An outstanding week is worth
+The Team submissions card says nothing about the payroll report. An outstanding week is worth
 chasing, but it does not hold a report back (see [When it is
 sent](#when-it-is-sent)). Leaving somebody out of the payroll report does not
 remove them from this card either.
@@ -2220,9 +2226,10 @@ that switches that card to the month that is currently running, and back. Each
 link only changes its own card. It is not a setting — it is not saved, and
 coming back to the dashboard shows the previous month again.
 
-In the running month, the Submissions card only counts weeks that are already
-over as missing. The current week cannot be missing yet, so a draft in it does
-not turn anybody red. Anything waiting for a decision does count, though —
+A week counts as missing from its Friday on, as everywhere else in Zerf.
+Before that it is still being worked, so a draft in it does not turn anybody
+red. This also applies to the last week of the previous month when it reaches
+into the new one. Anything waiting for a decision does count, though —
 something already handed in for this week, or a request for a later week of the
 month — since you can decide on it right away. Because nobody can be done
 with a month that is still running, the card says **"X of Y up to date"**
