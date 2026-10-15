@@ -8,7 +8,7 @@
   export let activeHelp = null;
   export let onHelpToggle = () => {};
   export let onOpen = () => {};
-  // Switch between the previous month and the running one — see Dashboard.svelte.
+  // Switch this card between the previous month and the running one.
   export let onShowCurrentMonth = () => {};
   export let onShowPreviousMonth = () => {};
 

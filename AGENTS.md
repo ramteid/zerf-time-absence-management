@@ -987,20 +987,26 @@ and full approval for everyone. It shares nothing with the payroll report — no
 `payroll_members`, not the exclusion list, not the `month_export_readiness`
 gate — because "what may this document contain" is a different question from
 "has this person handed everything in". It asks its own questions in its own
-order (red: a due week or a draft/uncorrected rejection on a due day; amber: a
-submitted entry or an absence request awaiting a decision; red wins), with one
-query per question for everybody at once and only the week check per person.
-Rows before somebody's start date are hidden everywhere, so for a person who
-started inside the month those questions are asked again from their first day.
-A team lead sees their own team (`active_team_members`), an admin everybody;
-there are no anonymous rows. People who have left or stopped tracking time are
+order (red: a due week or a draft/uncorrected rejection on a due day; amber:
+anything the dashboard's approval lists offer for a decision — a submitted
+entry, an absence or cancellation request, a pending reopen request; red wins),
+with one query per question for everybody at once
+(`ReportDb::user_ids_with_unsubmitted_entries_since_start`,
+`ReportDb::user_ids_awaiting_a_decision`) and only the week check per person.
+Both queries skip rows before a person's start date, which are hidden
+everywhere. Assistants count when the month holds a booking or a pending
+decision of theirs, so the card never misses a request the approval list shows.
+A team lead sees the people they approve (`active_team_members` minus
+themselves — their own items wait for their approver, so an amber row of their
+own would point at a decision they cannot make), an admin everybody; there are
+no anonymous rows. People who have left or stopped tracking time are
 not on it: their rows are immutable and hidden from every team and approval
 view (`TimeEntryDb::list_all`), so nothing shown for them could be acted on.
 `GET /reports/payroll-content` (`build_content`) is the
 **Payroll Report** card: it runs the very code that assembles the document
 (`build_report_data`) on the same member set and window the matching send mode
 would use, so the card cannot claim something the PDF would not print; names of people
-outside a team lead's own team are stripped server-side. "Already delivered" is derived from the queue (period reached `payroll_report_queue_period` **and** no longer in `payroll_report_queue`) rather than a stored marker, so it is correct on installations that predate the card. Both cards follow one shared month toggle on the dashboard (previous month by default, the running month on request, and back). The dashboard re-fetches the status when the detail dialog is opened (`Dashboard.svelte`'s `openPayrollDetail`), because approvals granted on that page are exactly what the reader opens the list to verify.
+outside a team lead's own team are stripped server-side. "Already delivered" is derived from the queue (period reached `payroll_report_queue_period` **and** no longer in `payroll_report_queue`) rather than a stored marker, so it is correct on installations that predate the card. Each card has its own month toggle (previous month by default, the running month on request, and back); a card's link switches only that card, and only the newest response per card is applied. In the running month the Submissions card says "up to date" instead of "done" (`SubmissionStatus::in_progress`). Clicking a person opens their report in month mode (`/reports?user=…&month=YYYY-MM`), never as a custom range: a range judges its boundary weeks whole and could contradict the card. The dashboard re-fetches the status when the detail dialog is opened (`Dashboard.svelte`'s `openPayrollDetail`), because approvals granted on that page are exactly what the reader opens the list to verify.
 
 ### Integration tests
 

@@ -32,6 +32,7 @@ function status(overrides = {}) {
     period_label: "July 2026",
     from: "2026-07-01",
     to: "2026-07-31",
+    in_progress: false,
     sent: false,
     day_of_month: 5,
     total: 3,
@@ -120,11 +121,10 @@ describe("SubmissionStatus tile", () => {
 
   it("offers the way back while it shows the running month", async () => {
     const now = appTodayDate();
-    const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
     const onShowPreviousMonth = vi.fn();
     component = mount(SubmissionStatus, {
       target,
-      props: { status: status({ period: currentPeriod }), onShowPreviousMonth },
+      props: { status: status({ in_progress: true }), onShowPreviousMonth },
     });
     await settle();
 
@@ -140,6 +140,36 @@ describe("SubmissionStatus tile", () => {
 
     backButton.click();
     expect(onShowPreviousMonth).toHaveBeenCalled();
+  });
+
+  it("calls nobody done with a month that is still running", async () => {
+    component = mount(SubmissionStatus, {
+      target,
+      props: { status: status({ in_progress: true }) },
+    });
+    await settle();
+
+    expect(target.textContent).toContain("1 of 3 up to date");
+    expect(target.textContent).not.toContain("done");
+  });
+
+  it("says so when nobody is tracked instead of counting 0 of 0", async () => {
+    component = mount(SubmissionStatus, {
+      target,
+      props: {
+        status: status({
+          total: 0,
+          ready: 0,
+          awaiting_approval: 0,
+          not_submitted: 0,
+          members: [],
+        }),
+      },
+    });
+    await settle();
+
+    expect(target.textContent).toContain("No people in this month.");
+    expect(target.textContent).not.toContain("0 of 0");
   });
 
   it("explains itself, and says it is not the payroll report", async () => {
@@ -201,7 +231,7 @@ describe("SubmissionStatusDialog", () => {
     expect(document.body.textContent).not.toContain("Not visible to you");
   });
 
-  it("deep-links a named row into that person's report for the month", async () => {
+  it("opens that person's report in month mode for the same month", async () => {
     component = mount(SubmissionStatusDialog, {
       target,
       props: { status: status(), onClose: () => {} },
@@ -214,9 +244,22 @@ describe("SubmissionStatusDialog", () => {
     row.click();
     await settle();
 
-    expect(goMock).toHaveBeenCalledWith(
-      "/reports?user=2&from=2026-07-01&to=2026-07-31",
+    expect(goMock).toHaveBeenCalledWith("/reports?user=2&month=2026-07");
+  });
+
+  it("labels the running month up to date rather than done", async () => {
+    component = mount(SubmissionStatusDialog, {
+      target,
+      props: { status: status({ in_progress: true }), onClose: () => {} },
+    });
+    await settle();
+
+    const readyRow = [...document.querySelectorAll(".payroll-row")].find(
+      (row) => row.textContent.includes("Erin Employee"),
     );
+    expect(readyRow.textContent).toContain("Up to date");
+    expect(document.body.textContent).toContain("1 of 3 up to date");
+    expect(document.body.textContent).toContain("still running");
   });
 
   it("lists the people still missing before the ones already done", async () => {

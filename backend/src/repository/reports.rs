@@ -431,6 +431,66 @@ impl ReportDb {
             .await?)
     }
 
+    /// User IDs holding drafts or uncorrected rejections in the period, counting
+    /// only days on or after each person's start date. Rows before it are
+    /// hidden everywhere in the app, so nobody could hand them in. Drives the
+    /// dashboard's Submissions card.
+    pub async fn user_ids_with_unsubmitted_entries_since_start(
+        &self,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<HashSet<i64>> {
+        let sql = format!(
+            "SELECT DISTINCT te.user_id FROM time_entries te \
+             JOIN users u ON u.id = te.user_id \
+             WHERE te.entry_date BETWEEN $1 AND $2 \
+             AND te.entry_date >= u.start_date \
+             AND (te.status = 'draft' OR ({EFFECTIVE_REJECTED_TIME_ENTRY_CONDITION}))"
+        );
+        // AssertSqlSafe: the formatted fragment is a compile-time status predicate.
+        let rows: Vec<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+            .bind(from)
+            .bind(to)
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows.into_iter().collect())
+    }
+
+    /// User IDs with something in the period that waits for an approver's
+    /// decision — exactly what the dashboard's approval lists offer: a
+    /// submitted time entry, an absence request or a request to cancel an
+    /// approved absence, or a request to reopen a week. Only days on or after
+    /// each person's start date count, since earlier rows are hidden
+    /// everywhere. Drives the dashboard's Submissions card.
+    pub async fn user_ids_awaiting_a_decision(
+        &self,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<HashSet<i64>> {
+        let rows: Vec<i64> = sqlx::query_scalar(
+            "SELECT te.user_id FROM time_entries te \
+             JOIN users u ON u.id = te.user_id \
+             WHERE te.status = 'submitted' \
+             AND te.entry_date BETWEEN $1 AND $2 \
+             AND te.entry_date >= u.start_date \
+             UNION \
+             SELECT a.user_id FROM absences a \
+             JOIN users u ON u.id = a.user_id \
+             WHERE a.status IN ('requested','cancellation_pending') \
+             AND a.end_date >= GREATEST($1, u.start_date) AND a.start_date <= $2 \
+             UNION \
+             SELECT r.user_id FROM reopen_requests r \
+             JOIN users u ON u.id = r.user_id \
+             WHERE r.status = 'pending' \
+             AND r.week_start <= $2 AND r.week_start + 6 >= GREATEST($1, u.start_date)",
+        )
+        .bind(from)
+        .bind(to)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().collect())
+    }
+
     /// User IDs whose time entries in the period are handed in but still
     /// waiting for an approver. The other half of the month-end reminder: here
     /// the employee has done their part and the decision is owed.

@@ -104,7 +104,7 @@ const TRANSLATIONS = {
     "All submitted (approvals pending)": "All submitted (approvals pending)",
     "Weeks missing": "Weeks missing",
     help_submissions_card:
-      "Who has closed the month: everything submitted and approved, submitted and waiting for a decision, or still missing. In the running month only weeks that are already over count as missing. Team leads see their own team. It says nothing about the payroll report — that has its own card.",
+      "Who has closed the month: everything submitted and approved, submitted and waiting for a decision, or still missing. In the running month only weeks that are already over count as missing. Team leads see the people they approve. It says nothing about the payroll report — that has its own card.",
     "{absences} absences · {people} people with hours":
       "{absences} absences · {people} people with hours",
     "still running": "still running",
@@ -420,12 +420,14 @@ const TRANSLATIONS = {
       "{included} of {total} people included",
     // --- Payroll report: dashboard tile ---
     "{ready} of {total} done": "{ready} of {total} done",
+    "{ready} of {total} up to date": "{ready} of {total} up to date",
     "{month} sent": "{month} sent",
     "Nothing left to do this month.": "Nothing left to do this month.",
     "Show {month}": "Show {month}",
     "Not visible to you": "Not visible to you",
     "No people in this month.": "No people in this month.",
     Done: "Done",
+    "Up to date": "Up to date",
     "Waiting for approval": "Waiting for approval",
     "Not submitted": "Not submitted",
     help_payroll_report:
@@ -1325,7 +1327,7 @@ const TRANSLATIONS = {
       "Alles eingereicht (Genehmigungen ausstehend)",
     "Weeks missing": "Wochen fehlen",
     help_submissions_card:
-      "Wer den Monat abgeschlossen hat: alles eingereicht und genehmigt, eingereicht und auf Entscheidung wartend, oder noch offen. Im laufenden Monat gelten nur Wochen als offen, die schon vorbei sind. Teamleitungen sehen ihr eigenes Team. \u00dcber die Lohnmeldung sagt die Kachel nichts \u2014 daf\u00fcr gibt es eine eigene.",
+      "Wer den Monat abgeschlossen hat: alles eingereicht und genehmigt, eingereicht und auf Entscheidung wartend, oder noch offen. Im laufenden Monat gelten nur Wochen als offen, die schon vorbei sind. Teamleitungen sehen die Personen, die sie genehmigen. \u00dcber die Lohnmeldung sagt die Kachel nichts \u2014 daf\u00fcr gibt es eine eigene.",
     "{absences} absences · {people} people with hours":
       "{absences} Abwesenheiten · {people} Personen mit Stunden",
     "still running": "l\u00e4uft noch",
@@ -1604,12 +1606,14 @@ const TRANSLATIONS = {
       "{included} von {total} Personen einbezogen",
     // --- Lohnmeldung: Dashboard-Kachel ---
     "{ready} of {total} done": "{ready} von {total} fertig",
+    "{ready} of {total} up to date": "{ready} von {total} ohne R\u00fcckstand",
     "{month} sent": "{month} versendet",
     "Nothing left to do this month.": "Diesen Monat ist nichts mehr zu tun.",
     "Show {month}": "{month} anzeigen",
     "Not visible to you": "Für Sie nicht sichtbar",
     "No people in this month.": "Keine Personen in diesem Monat.",
     Done: "Fertig",
+    "Up to date": "Kein R\u00fcckstand",
     "Not submitted": "Nicht eingereicht",
     help_payroll_report:
       "Die Lohnmeldung f\u00fcr den Vormonat wird am Tag {day} des Monats kurz nach Mitternacht automatisch versendet. Sie wartet nur auf noch nicht genehmigte Arbeitszeiten, die in der Meldung erscheinen, auf noch nicht entschiedene lohnrelevante Abwesenheiten oder auf Daten vor dem Eintrittsdatum einer Person und wird jede Nacht erneut gepr\u00fcft. Die separate Karte Einreichungen zeigt, wer noch Wochen abschlie\u00dfen muss.",

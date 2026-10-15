@@ -9,7 +9,7 @@
   export let activeHelp = null;
   export let onHelpToggle = () => {};
   export let onOpen = () => {};
-  // Switch between the previous month and the running one — see Dashboard.svelte.
+  // Switch this card between the previous month and the running one.
   export let onShowCurrentMonth = () => {};
   export let onShowPreviousMonth = () => {};
 
@@ -18,12 +18,19 @@
   const previousMonthName = fmtMonthName(
     new Date(today.getFullYear(), today.getMonth() - 1, 1),
   );
-  // The whole "YYYY-MM" is compared: matching on the month number alone would
-  // also match the same month of another year.
-  const currentPeriod = `${today.getFullYear()}-${String(
-    today.getMonth() + 1,
-  ).padStart(2, "0")}`;
-  $: showingCurrentMonth = status?.period === currentPeriod;
+  // Told by the server, which picked the month: in the running month only
+  // weeks that are over are due, so nobody can be "done" with it yet.
+  $: showingCurrentMonth = !!status?.in_progress;
+  $: headline =
+    status && status.total === 0
+      ? $t("No people in this month.")
+      : $t(
+          showingCurrentMonth
+            ? "{ready} of {total} up to date"
+            : "{ready} of {total} done",
+        )
+          .replace("{ready}", status?.ready ?? 0)
+          .replace("{total}", status?.total ?? 0);
 </script>
 
 <div class="zf-card submissions-card">
@@ -55,11 +62,7 @@
       notSubmitted={status?.not_submitted ?? 0}
     />
     <div>
-      <div class="submissions-headline">
-        {$t("{ready} of {total} done")
-          .replace("{ready}", status?.ready ?? 0)
-          .replace("{total}", status?.total ?? 0)}
-      </div>
+      <div class="submissions-headline">{headline}</div>
       <div class="submissions-sub">
         {status?.period_label ?? ""}
         {#if showingCurrentMonth}

@@ -920,10 +920,11 @@ async fn payroll_report_settings_persist_the_exclusion_list() {
     app.cleanup().await;
 }
 
-/// A team lead sees their own team on the Submissions card — themselves and
-/// their direct reports, every one of them by name. People outside the team
-/// are not on the card at all: the lead cannot act on them, so anonymous rows
-/// only added noise. An admin sees everybody.
+/// A team lead sees the people they approve on the Submissions card, every one
+/// of them by name. People outside the team are not on it — the lead cannot
+/// act on them, so anonymous rows only added noise — and neither is the lead:
+/// their own pending items wait for their approver, not for them. An admin
+/// sees everybody.
 #[tokio::test]
 async fn submissions_card_shows_a_lead_only_their_own_team() {
     let app = TestApp::spawn().await;
@@ -1022,7 +1023,10 @@ async fn submissions_card_shows_a_lead_only_their_own_team() {
         lead_members.len(),
         "every row a lead gets carries a person: {lead_view}"
     );
-    assert!(named.contains(&lead_id), "a lead sees themselves");
+    assert!(
+        !named.contains(&lead_id),
+        "a lead is not on their own card: they cannot decide on their own items"
+    );
     assert!(named.contains(&emp_id), "a lead sees their own report");
     assert!(
         !named.contains(&other_lead_id),
@@ -1370,7 +1374,8 @@ async fn payroll_status_current_flag_reports_the_in_progress_month() {
         .await
         .expect("delete entry");
 
-    // Both cards track the same period and follow the same peek flag.
+    // Both cards track the previous period by default and the running month
+    // on request.
     for path in [
         "/api/v1/reports/submission-status",
         "/api/v1/reports/payroll-content",
@@ -1384,6 +1389,13 @@ async fn payroll_status_current_flag_reports_the_in_progress_month() {
         let (_, current_card) = admin.get(&format!("{path}?current=true")).await;
         assert_eq!(current_card["period"], json!(current), "{path} peek");
     }
+
+    let (_, submissions_peek) = admin
+        .get("/api/v1/reports/submission-status?current=true")
+        .await;
+    assert_eq!(submissions_peek["in_progress"], json!(true));
+    let (_, submissions_default) = admin.get("/api/v1/reports/submission-status").await;
+    assert_eq!(submissions_default["in_progress"], json!(false));
 
     // Only the payroll card carries a delivery state, and a month still in
     // progress can never have been delivered.
@@ -6268,6 +6280,138 @@ async fn submissions_card_does_not_count_the_running_week_as_missing() {
         submissions_card_status(&admin, running_month, fresh_id).await,
         "awaiting_approval",
         "handed in early, the approver can act on it right away"
+    );
+
+    app.cleanup().await;
+}
+
+/// Amber means "an approver has to decide something" and covers exactly what
+/// the dashboard's approval lists offer: besides submitted entries and absence
+/// requests also a request to reopen a week and a request to cancel an
+/// approved absence. Otherwise the card said "done" while the list right next
+/// to it still held a decision for that person.
+#[tokio::test]
+async fn submissions_card_counts_every_pending_decision() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "decisions").await;
+    let lead = login_change_pw(&app, "lead-decisions@example.com", &lead_pw).await;
+
+    let today = zerf::services::settings::app_today(&app.state.pool).await;
+    let running_monday = zerf::time_calc::week_monday(today);
+    let month_start = NaiveDate::from_ymd_opt(today.year(), today.month(), 1).unwrap();
+    let booked_day = running_monday.max(month_start);
+    let vacation_day = booked_day + Duration::days(1);
+    assert!(
+        vacation_day.month() == today.month()
+            && vacation_day.weekday().num_days_from_monday() < 5
+            && zerf::time_calc::week_monday(vacation_day) == running_monday,
+        "the reference date must leave a second weekday in the running week"
+    );
+    let iso = |day: NaiveDate| day.format("%Y-%m-%d").to_string();
+
+    // Starting this very week leaves nothing earlier that could be missing, so
+    // only the pending decisions below can colour this person.
+    let (status, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "fresh-decisions@example.com",
+                "first_name": "Dora",
+                "last_name": "Decisions",
+                "role": "employee",
+                "weekly_hours": 39,
+                "start_date": iso(running_monday),
+                "approver_ids": [lead_id],
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create employee: {body}");
+    let person_id = id(&body);
+    let person = login_change_pw(&app, "fresh-decisions@example.com", &temp_pw(&body)).await;
+    let running_month = "/api/v1/reports/submission-status?current=true";
+
+    // A request to reopen an approved week.
+    let entry_id = create_and_submit_entry(&person, &iso(booked_day), cat_id).await;
+    let (status, _) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [entry_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the entry");
+    assert_eq!(
+        submissions_card_status(&admin, running_month, person_id).await,
+        "ready"
+    );
+    let (status, body) = person
+        .post(
+            "/api/v1/reopen-requests",
+            &json!({"week_start": iso(running_monday), "reason": "fix a typo"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "request a reopen: {body}");
+    assert_eq!(body["status"], "pending", "the reopen needs a decision");
+    let reopen_id = id(&body);
+    assert_eq!(
+        submissions_card_status(&admin, running_month, person_id).await,
+        "awaiting_approval",
+        "a reopen request waits for the approver"
+    );
+    let (status, _) = lead
+        .post(
+            &format!("/api/v1/reopen-requests/{reopen_id}/reject"),
+            &json!({"reason": "not needed"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "reject the reopen");
+    assert_eq!(
+        submissions_card_status(&admin, running_month, person_id).await,
+        "ready"
+    );
+
+    // A request to cancel an approved absence.
+    let (status, categories) = person.get("/api/v1/absence-categories").await;
+    assert_eq!(status, StatusCode::OK);
+    let vacation_id = categories
+        .as_array()
+        .expect("categories")
+        .iter()
+        .find(|category| category["slug"].as_str() == Some("vacation"))
+        .and_then(|category| category["id"].as_i64())
+        .expect("vacation category");
+    let (status, body) = person
+        .post(
+            "/api/v1/absences",
+            &json!({
+                "category_id": vacation_id,
+                "start_date": iso(vacation_day),
+                "end_date": iso(vacation_day),
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "request a day off: {body}");
+    let absence_id = id(&body);
+    let (status, body) = lead
+        .post(
+            &format!("/api/v1/absences/{absence_id}/approve"),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the day off: {body}");
+    assert_eq!(
+        submissions_card_status(&admin, running_month, person_id).await,
+        "ready"
+    );
+    let (status, body) = person
+        .delete(&format!("/api/v1/absences/{absence_id}"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "ask to cancel it: {body}");
+    assert_eq!(
+        submissions_card_status(&admin, running_month, person_id).await,
+        "awaiting_approval",
+        "a cancellation request waits for the approver"
     );
 
     app.cleanup().await;

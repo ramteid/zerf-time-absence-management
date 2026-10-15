@@ -52,6 +52,9 @@ pub struct SubmissionStatus {
     pub period_label: String,
     pub from: NaiveDate,
     pub to: NaiveDate,
+    /// The month is still running: only weeks that are over are due, so a
+    /// person who is not behind is "up to date" rather than done.
+    pub in_progress: bool,
     pub total: usize,
     pub ready: usize,
     pub awaiting_approval: usize,
@@ -76,13 +79,14 @@ pub async fn build(
     let (from, to) = schedule::period_bounds(&period)?;
     let period_label = crate::i18n::format_month(language, from.year(), from.month());
 
-    let members = members_for(app_state, requester, from, to, today).await?;
     let open_items = OpenItems::load(app_state, from, to, today).await?;
+    let members = members_for(app_state, requester, from, to, today, &open_items).await?;
     let mut status = SubmissionStatus {
         period,
         period_label,
         from,
         to,
+        in_progress: show_current_month,
         total: members.len(),
         ready: 0,
         awaiting_approval: 0,
@@ -109,24 +113,28 @@ pub async fn build(
 ///
 /// Everybody who tracks time and has started by the end of the month — or by
 /// today while it is still running, since somebody starting next week owes
-/// nothing yet — except administrators, and except assistants who booked
-/// nothing in the month: they work irregularly without a target, so an empty
-/// month leaves them nothing to close.
+/// nothing yet — except administrators. Assistants work irregularly without a
+/// target, so they only count when the month holds something of theirs: a
+/// booking, or a request still waiting for a decision. Otherwise the approval
+/// list could show an assistant's request that the card knows nothing about.
 ///
 /// People who have left or no longer track time are not on the card. Their
 /// rows are kept unchanged and hidden from every team and approval view, so
 /// nobody could act on anything the card showed for them.
 ///
-/// A team lead sees their own team — themselves and their direct reports, the
-/// same people the team report shows them: those are the people they can act
-/// on. Counting everybody else as anonymous rows only added noise the lead
-/// could do nothing about. An admin sees everybody.
+/// A team lead sees the people they approve — the same people their approval
+/// lists cover, so the card and the lists agree. Not everybody else as
+/// anonymous rows, which only added noise the lead could do nothing about, and
+/// not themselves: their own pending items wait for *their* approver, so an
+/// amber row would point at a decision they cannot make. Their own month is on
+/// their personal dashboard. An admin sees everybody.
 async fn members_for(
     app_state: &AppState,
     requester: &crate::middleware::auth::User,
     from: NaiveDate,
     to: NaiveDate,
     today: NaiveDate,
+    open: &OpenItems,
 ) -> AppResult<Vec<User>> {
     let reports_db = &app_state.db.reports;
     let mut members = reports_db
@@ -139,31 +147,31 @@ async fn members_for(
             .into_iter()
             .map(|member| member.id)
             .collect();
-        members.retain(|member| team.contains(&member.id));
+        members.retain(|member| member.id != requester.id && team.contains(&member.id));
     }
     let booked_something = reports_db
         .user_ids_with_time_entries_in_range(from, to)
         .await?;
     members.retain(|member| {
         !is_admin_role(&member.role)
-            && (!is_assistant_role(&member.role) || booked_something.contains(&member.id))
+            && (!is_assistant_role(&member.role)
+                || booked_something.contains(&member.id)
+                || open.awaiting_decision.contains(&member.id))
     });
     Ok(members)
 }
 
-/// What is still open in the month, for everybody at once — one query each
-/// instead of three per person. Only somebody who started inside the month is
-/// asked again individually (see [`month_status`]).
+/// What is still open in the month, for everybody at once — one query per
+/// question instead of several per person. Rows before somebody's start date
+/// are hidden everywhere in the app, so the queries leave them out.
 struct OpenItems {
     from: NaiveDate,
     /// Last day that is due, see [`due_until`].
     due_to: NaiveDate,
-    /// Last day a pending decision is looked for, see [`reports::judged_period_end`].
-    open_to: NaiveDate,
     today: NaiveDate,
     /// Drafts or uncorrected rejections on a day that is due.
     not_handed_in: HashSet<i64>,
-    /// Submitted entries or absence requests waiting for a decision.
+    /// Anything the dashboard's approval lists offer for a decision.
     awaiting_decision: HashSet<i64>,
 }
 
@@ -178,10 +186,8 @@ impl OpenItems {
         let due_to = due_until(to, today);
         let not_handed_in = if due_to >= from {
             reports_db
-                .user_ids_with_unsubmitted_time_entries_in_range(from, due_to)
+                .user_ids_with_unsubmitted_entries_since_start(from, due_to)
                 .await?
-                .into_iter()
-                .collect()
         } else {
             HashSet::new()
         };
@@ -190,20 +196,12 @@ impl OpenItems {
         // business yet. Something handed in early counts, though — the
         // approver can act on it right away.
         let open_to = reports::judged_period_end(to, today);
-        let mut awaiting_decision: HashSet<i64> = reports_db
-            .user_ids_with_submitted_time_entries_in_range(from, open_to)
-            .await?
-            .into_iter()
-            .collect();
-        awaiting_decision.extend(
-            reports_db
-                .user_ids_with_requested_absences_in_range(from, open_to)
-                .await?,
-        );
+        let awaiting_decision = reports_db
+            .user_ids_awaiting_a_decision(from, open_to)
+            .await?;
         Ok(Self {
             from,
             due_to,
-            open_to,
             today,
             not_handed_in,
             awaiting_decision,
@@ -218,8 +216,10 @@ impl OpenItems {
 ///
 /// * **Red** — something due was not handed in: a week nobody submitted, or a
 ///   draft or an uncorrected rejection on a day that is due.
-/// * **Amber** — everything due is handed in, but a submitted entry or an
-///   absence request still waits for a decision.
+/// * **Amber** — everything due is handed in, but something waits for an
+///   approver's decision: a submitted entry, an absence or cancellation
+///   request, or a request to reopen a week. The same things the approval
+///   lists on the dashboard offer, so the card and the lists always agree.
 /// * **Green** — nothing is open.
 ///
 /// Assistants and contracts without weekly hours owe no weeks, so only their
@@ -229,25 +229,9 @@ async fn month_status(
     user: &User,
     open: &OpenItems,
 ) -> AppResult<MonthStatus> {
-    let reports_db = &app_state.db.reports;
-    // Rows before somebody's start date are hidden everywhere in the app, so
-    // nobody could hand them in or decide on them. The shared sets cover the
-    // whole month; for somebody who started inside it, ask again from their
-    // first day.
-    let started_in_month = user.start_date > open.from;
-
-    let not_handed_in = if started_in_month {
-        user.start_date <= open.due_to
-            && reports_db
-                .has_unsubmitted_time_entries_in_range(user.id, user.start_date, open.due_to)
-                .await?
-    } else {
-        open.not_handed_in.contains(&user.id)
-    };
-    if not_handed_in {
+    if open.not_handed_in.contains(&user.id) {
         return Ok(MonthStatus::NotSubmitted);
     }
-
     let owes_weeks = has_submission_obligation(&user.role, user.weekly_hours);
     if owes_weeks && open.due_to >= open.from {
         // Excuses days covered by a pending absence request: nobody can book
@@ -266,19 +250,7 @@ async fn month_status(
             return Ok(MonthStatus::NotSubmitted);
         }
     }
-
-    let awaiting_decision = if started_in_month {
-        user.start_date <= open.open_to
-            && (reports_db
-                .has_pending_submitted_entries_in_range(user.id, user.start_date, open.open_to)
-                .await?
-                || reports_db
-                    .has_requested_absences_in_period(user.id, user.start_date, open.open_to)
-                    .await?)
-    } else {
-        open.awaiting_decision.contains(&user.id)
-    };
-    Ok(if awaiting_decision {
+    Ok(if open.awaiting_decision.contains(&user.id) {
         MonthStatus::AwaitingApproval
     } else {
         MonthStatus::Ready

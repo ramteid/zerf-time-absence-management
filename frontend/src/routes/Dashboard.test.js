@@ -545,6 +545,7 @@ describe("Dashboard", () => {
             ...mockState.submissionStatus,
             period: runningPeriod(),
             period_label: "Running month",
+            in_progress: true,
             ready: 0,
             awaiting_approval: 1,
             not_submitted: 1,
@@ -568,7 +569,7 @@ describe("Dashboard", () => {
       await settle();
 
       // The tile switched to the current month's own donut, not the sent one.
-      await waitForText(target, "0 of 2 done");
+      await waitForText(target, "0 of 2 up to date");
       expect(payrollCalls("?current=true")).toBe(1);
 
       // Approving re-runs the dashboard load; the peek must not reset.
@@ -586,19 +587,15 @@ describe("Dashboard", () => {
       expect(payrollCalls()).toBe(1);
     });
 
-    it("switches both cards back to the previous month", async () => {
+    it("switches only the card whose link was clicked, and back", async () => {
       api.mockImplementation(
         approverApi({
           submissionStatusCurrent: {
             ...mockState.submissionStatus,
             period: runningPeriod(),
             period_label: "Running month",
-            ready: 0,
-          },
-          payrollContentCurrent: {
-            ...mockState.payrollContent,
-            period: runningPeriod(),
             in_progress: true,
+            ready: 0,
           },
         }),
       );
@@ -609,36 +606,36 @@ describe("Dashboard", () => {
       await waitForText(target, "1 of 2 done");
 
       const now = appTodayDate();
-      const findButton = (label) =>
-        [...target.querySelectorAll("button")].find(
-          (button) => button.textContent.trim() === label,
-        );
-      findButton(`Show ${fmtMonthName(now)}`).click();
-      await settle();
-      await settle();
-      await waitForText(target, "0 of 2 done");
-      expect(target.querySelector(".submissions-card").textContent).toContain(
-        "still running",
-      );
-
-      // Both cards now offer the way back, and either one takes both back.
+      const currentLabel = `Show ${fmtMonthName(now)}`;
       const previousLabel = `Show ${fmtMonthName(
         new Date(now.getFullYear(), now.getMonth() - 1, 1),
       )}`;
-      const backButtons = [...target.querySelectorAll("button")].filter(
-        (button) => button.textContent.trim() === previousLabel,
-      );
-      expect(backButtons.length).toBe(2);
+      const buttonIn = (card, label) =>
+        [...target.querySelectorAll(`${card} button`)].find(
+          (button) => button.textContent.trim() === label,
+        );
+      const payrollCurrentCalls = () =>
+        api.mock.calls.filter(
+          ([p]) => p === "/reports/payroll-content?current=true",
+        ).length;
+
+      buttonIn(".submissions-card", currentLabel).click();
+      await settle();
+      await settle();
+      await waitForText(target, "0 of 2 up to date");
+
+      // The payroll card did not move: it still offers the running month.
+      expect(payrollCurrentCalls()).toBe(0);
+      expect(buttonIn(".payroll-card", currentLabel)).toBeTruthy();
+
       const bareCallsBefore = payrollCalls();
-      backButtons[0].click();
+      buttonIn(".submissions-card", previousLabel).click();
       await settle();
       await settle();
 
       await waitForText(target, "1 of 2 done");
       expect(payrollCalls()).toBe(bareCallsBefore + 1);
-      expect(
-        api.mock.calls.filter(([p]) => p === "/reports/payroll-content").length,
-      ).toBeGreaterThan(1);
+      expect(payrollCurrentCalls()).toBe(0);
     });
 
     it("re-reads the status when the detail list is opened", async () => {
