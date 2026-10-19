@@ -162,6 +162,65 @@ describe("Time", () => {
     ).toBe("7.50h");
   });
 
+  it("starts a new entry after the latest entry of its day", async () => {
+    const monday = pastMonday();
+    path.set(`/time?week=${monday}`);
+    mockState.entries = [
+      {
+        id: 1,
+        user_id: 1,
+        entry_date: monday,
+        start_time: "08:00",
+        end_time: "14:00",
+        category_id: 1,
+        status: "draft",
+      },
+      {
+        id: 2,
+        user_id: 1,
+        entry_date: monday,
+        start_time: "09:00",
+        end_time: "12:00",
+        category_id: 1,
+        status: "draft",
+      },
+    ];
+
+    component = mount(Time, { target });
+    await settle();
+
+    target.querySelector("button.add-entry-btn").click();
+    await settle();
+
+    expect(target.querySelector("#entry-start-time").textContent.trim()).toBe(
+      "14:00",
+    );
+    expect(target.querySelector("#entry-end-time").textContent.trim()).toBe(
+      "18:00",
+    );
+  });
+
+  it("does not offer an invalid entry after one ending at 23:59", async () => {
+    const monday = pastMonday();
+    path.set(`/time?week=${monday}`);
+    mockState.entries = [
+      {
+        id: 1,
+        user_id: 1,
+        entry_date: monday,
+        start_time: "20:00",
+        end_time: "23:59",
+        category_id: 1,
+        status: "draft",
+      },
+    ];
+
+    component = mount(Time, { target });
+    await settle();
+
+    expect(target.querySelector("button.add-entry-btn").disabled).toBe(true);
+  });
+
   it("cancelled absences do not block time entry creation", async () => {
     const monday = pastMonday();
     path.set(`/time?week=${monday}`);
