@@ -57,12 +57,40 @@
     ) - dailyBreakMinutes,
   );
   $: dailyTotalHours = dailyTotalMinutes / 60;
-  $: canAdd = canAddEntryForDay(day, currentUser, today);
+  $: latestEntryEndMinutes = Math.max(
+    ...(day?.items || []).map((entry) => parseHHMM(entry.end_time)),
+  );
+  $: canAdd =
+    canAddEntryForDay(day, currentUser, today) &&
+    (!Number.isFinite(latestEntryEndMinutes) ||
+      latestEntryEndMinutes < 23 * 60 + 59);
 
   function parseHHMM(s) {
     if (!s) return 0;
     const parts = s.split(":");
     return parseInt(parts[0], 10) * 60 + parseInt(parts[1] || "0", 10);
+  }
+
+  function timeFromMinutes(totalMinutes) {
+    return (
+      String(Math.floor(totalMinutes / 60)).padStart(2, "0") +
+      ":" +
+      String(totalMinutes % 60).padStart(2, "0")
+    );
+  }
+
+  function newEntryTemplate() {
+    if (!Number.isFinite(latestEntryEndMinutes)) {
+      return { entry_date: day.ds };
+    }
+
+    return {
+      entry_date: day.ds,
+      start_time: timeFromMinutes(latestEntryEndMinutes),
+      end_time: timeFromMinutes(
+        Math.min(latestEntryEndMinutes + 240, 23 * 60 + 59),
+      ),
+    };
   }
 
   /** Places the existing in-entry hatch marker, but only for the common single-block
@@ -182,7 +210,7 @@
       <button
         class="zf-btn zf-btn-ghost zf-btn-sm add-entry-btn"
         disabled={!canAdd}
-        on:click={() => dispatch("add", { entry_date: day.ds })}
+        on:click={() => dispatch("add", newEntryTemplate())}
       >
         <Icon name="Plus" size={13} />{$t("Add")}
       </button>
