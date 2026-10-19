@@ -7,8 +7,8 @@ use crate::services::settings::{
     self, load_admin_settings, load_all_public_settings, load_setting, normalize_language,
     normalize_time_format, normalize_timezone, save_setting_tx, setting_value_changed,
     smtp_config_from_update, AdminSettingsData, PublicSettingsData, APPROVAL_REMINDERS_ENABLED_KEY,
-    AUTO_BREAK_DEDUCTION_MINUTES_2_KEY, AUTO_BREAK_THRESHOLD_HOURS_2_KEY,
-    SUBMISSION_REMINDERS_ENABLED_KEY, TIMEZONE_KEY,
+    AUTO_BREAK_DEDUCTION_MINUTES_2_KEY, AUTO_BREAK_FORBID_LONG_STRETCH_KEY,
+    AUTO_BREAK_THRESHOLD_HOURS_2_KEY, SUBMISSION_REMINDERS_ENABLED_KEY, TIMEZONE_KEY,
 };
 use crate::AppState;
 use axum::extract::State;
@@ -62,6 +62,9 @@ pub struct UpdateSettings {
     pub auto_break_deduction_minutes: Option<i32>,
     pub auto_break_threshold_hours_2: Option<f64>,
     pub auto_break_deduction_minutes_2: Option<i32>,
+    /// Read together with `auto_break_enabled: true`; omitted keeps the stored
+    /// value. Switching the automatic break deduction off clears it.
+    pub auto_break_forbid_long_stretch: Option<bool>,
     pub allow_team_lead_manage_assistants: Option<bool>,
     pub medical_certificate_threshold_days: Option<u32>,
 }
@@ -314,11 +317,24 @@ pub async fn update_admin_settings(
                     .unwrap_or_default(),
             )
             .await?;
+            save_if_some!(
+                transaction,
+                AUTO_BREAK_FORBID_LONG_STRETCH_KEY,
+                body.auto_break_forbid_long_stretch,
+                bool
+            );
         } else {
             save_setting_tx(&mut transaction, "auto_break_threshold_hours", "").await?;
             save_setting_tx(&mut transaction, "auto_break_deduction_minutes", "").await?;
             save_setting_tx(&mut transaction, AUTO_BREAK_THRESHOLD_HOURS_2_KEY, "").await?;
             save_setting_tx(&mut transaction, AUTO_BREAK_DEDUCTION_MINUTES_2_KEY, "").await?;
+            // The limit is the first break tier, which no longer exists.
+            save_setting_tx(
+                &mut transaction,
+                AUTO_BREAK_FORBID_LONG_STRETCH_KEY,
+                "false",
+            )
+            .await?;
         }
     }
 

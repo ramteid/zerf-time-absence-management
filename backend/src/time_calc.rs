@@ -77,6 +77,51 @@ pub fn compute_day_auto_break(entries: &[(NaiveTime, NaiveTime)], rules: &[(i64,
     (required_minutes - taken_minutes).max(0)
 }
 
+/// The shortest pause that counts as a rest break. ArbZG §4 allows a day's
+/// break to be split into periods of "mindestens 15 Minuten"; a shorter pause
+/// does not interrupt the work around it.
+pub const MIN_REST_BREAK_MINUTES: i64 = 15;
+
+/// Minutes of uninterrupted work that `candidate` belongs to once it is added
+/// to the `existing` entries of the same day.
+///
+/// ArbZG §4 forbids working "länger als sechs Stunden hintereinander" without
+/// a rest break. A stretch therefore runs from the first start to the last end
+/// of every entry that is not separated from the next by a pause of at least
+/// [`MIN_REST_BREAK_MINUTES`] — shorter pauses are part of the stretch. Only
+/// the stretch containing `candidate` is measured: a long stretch elsewhere
+/// that the candidate does not touch is none of its doing.
+///
+/// A started minute counts as a whole one, so a stretch of 6 h 0 min 59 s is
+/// not mistaken for six hours.
+///
+/// Callers pass the entries that count as work; rejected entries and
+/// non-working categories are not part of a stretch.
+pub fn work_stretch_minutes_with(
+    candidate: (NaiveTime, NaiveTime),
+    existing: &[(NaiveTime, NaiveTime)],
+) -> i64 {
+    let rest_break = Duration::minutes(MIN_REST_BREAK_MINUTES);
+    let (mut start, mut end) = candidate;
+    // Absorb every entry within reach of the stretch and repeat: an absorbed
+    // entry moves the edge, which can bring the next one within reach.
+    loop {
+        let (grown_start, grown_end) = existing
+            .iter()
+            .filter(|(entry_start, entry_end)| {
+                *entry_start - end < rest_break && start - *entry_end < rest_break
+            })
+            .fold((start, end), |(first, last), (entry_start, entry_end)| {
+                (first.min(*entry_start), last.max(*entry_end))
+            });
+        if (grown_start, grown_end) == (start, end) {
+            break;
+        }
+        (start, end) = (grown_start, grown_end);
+    }
+    ((end - start).num_seconds() + 59) / 60
+}
+
 /// Compute the Monday of the ISO week that contains `date`.
 /// This is the canonical implementation used across services and background tasks.
 pub fn week_monday(date: NaiveDate) -> NaiveDate {
@@ -797,6 +842,125 @@ mod tests {
         assert_eq!(
             compute_day_auto_break(&[(t(8, 0), t(15, 0)), (t(15, 20), t(16, 20))], &[(360, 30)]),
             10
+        );
+    }
+
+    #[test]
+    fn work_stretch_of_an_entry_on_its_own_is_its_length() {
+        assert_eq!(work_stretch_minutes_with((t(8, 0), t(14, 0)), &[]), 360);
+    }
+
+    #[test]
+    fn work_stretch_extends_an_entry_that_touches_it() {
+        // 08:00-14:00 already booked; 14:00-14:15 continues it without a pause.
+        assert_eq!(
+            work_stretch_minutes_with((t(14, 0), t(14, 15)), &[(t(8, 0), t(14, 0))]),
+            375
+        );
+        // The same stretch when the new entry comes first (the early service
+        // booked after the main shift).
+        assert_eq!(
+            work_stretch_minutes_with((t(7, 45), t(8, 0)), &[(t(8, 0), t(14, 0))]),
+            375
+        );
+    }
+
+    #[test]
+    fn work_stretch_is_cut_by_a_pause_of_at_least_the_minimum_rest_break() {
+        let morning = [(t(8, 0), t(14, 0))];
+        // Exactly 15 minutes is a rest break: the new entry stands alone.
+        assert_eq!(
+            work_stretch_minutes_with((t(14, 15), t(15, 0)), &morning),
+            45
+        );
+        assert_eq!(work_stretch_minutes_with((t(7, 0), t(7, 45)), &morning), 45);
+    }
+
+    #[test]
+    fn work_stretch_runs_through_a_pause_shorter_than_the_minimum_rest_break() {
+        // 14 minutes is no rest break, so the stretch is the whole 08:00-15:00,
+        // pause included — leaving out one minute of it must not void the rule.
+        assert_eq!(
+            work_stretch_minutes_with((t(14, 14), t(15, 0)), &[(t(8, 0), t(14, 0))]),
+            420
+        );
+        assert_eq!(
+            work_stretch_minutes_with((t(7, 0), t(7, 46)), &[(t(8, 0), t(14, 0))]),
+            420
+        );
+    }
+
+    #[test]
+    fn work_stretch_joins_the_stretches_an_entry_bridges() {
+        // Two stretches of 3 h and 3.5 h with a 30-minute pause between them;
+        // an entry filling the pause makes them one 7-hour stretch.
+        assert_eq!(
+            work_stretch_minutes_with(
+                (t(11, 0), t(11, 30)),
+                &[(t(8, 0), t(11, 0)), (t(11, 30), t(15, 0))]
+            ),
+            420
+        );
+    }
+
+    #[test]
+    fn work_stretch_follows_a_chain_of_short_pauses() {
+        // Each pause is only 10 minutes, so every entry reaches the next even
+        // though the first and last are hours apart.
+        let existing = [
+            (t(12, 10), t(14, 0)),
+            (t(8, 0), t(10, 0)),
+            (t(10, 10), t(12, 0)),
+        ];
+        assert_eq!(
+            work_stretch_minutes_with((t(14, 10), t(15, 0)), &existing),
+            420
+        );
+    }
+
+    #[test]
+    fn work_stretch_ignores_entries_behind_a_rest_break() {
+        // The 15-minute pause 10:00-10:15 ends the first stretch: only 10:15
+        // onwards belongs to the new entry's.
+        let existing = [(t(8, 0), t(10, 0)), (t(10, 15), t(12, 0))];
+        assert_eq!(
+            work_stretch_minutes_with((t(12, 5), t(13, 0)), &existing),
+            165
+        );
+    }
+
+    #[test]
+    fn work_stretch_is_not_made_longer_by_a_long_stretch_elsewhere() {
+        // 07:45-14:00 is already too long, but 15:00-16:00 has nothing to do
+        // with it: only what the new entry belongs to is measured.
+        assert_eq!(
+            work_stretch_minutes_with((t(15, 0), t(16, 0)), &[(t(7, 45), t(14, 0))]),
+            60
+        );
+    }
+
+    #[test]
+    fn work_stretch_merges_an_overlapping_entry_defensively() {
+        assert_eq!(
+            work_stretch_minutes_with((t(11, 0), t(13, 0)), &[(t(8, 0), t(12, 0))]),
+            300
+        );
+    }
+
+    #[test]
+    fn work_stretch_counts_a_started_minute_as_a_whole_one() {
+        let start = NaiveTime::from_hms_opt(8, 0, 0).unwrap();
+        let exactly_six_hours = NaiveTime::from_hms_opt(14, 0, 0).unwrap();
+        let a_second_over = NaiveTime::from_hms_opt(14, 0, 1).unwrap();
+        let almost_a_minute_over = NaiveTime::from_hms_opt(14, 0, 59).unwrap();
+        assert_eq!(
+            work_stretch_minutes_with((start, exactly_six_hours), &[]),
+            360
+        );
+        assert_eq!(work_stretch_minutes_with((start, a_second_over), &[]), 361);
+        assert_eq!(
+            work_stretch_minutes_with((start, almost_a_minute_over), &[]),
+            361
         );
     }
 

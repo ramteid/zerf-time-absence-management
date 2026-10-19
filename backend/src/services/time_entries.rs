@@ -353,6 +353,31 @@ pub fn require_tracks_time(user: &User) -> AppResult<()> {
     crate::services::users::require_tracks_time(user)
 }
 
+/// The longest stretch of work in a row, in minutes, that a new entry may
+/// produce — `None` when the guard is off.
+///
+/// The limit is the first break tier's threshold: the point from which the day
+/// owes a break at all, six hours under ArbZG §4. The guard only exists next to
+/// the automatic break deduction, so it is off whenever that is.
+async fn max_work_stretch_minutes(pool: &crate::db::DatabasePool) -> AppResult<Option<i64>> {
+    let guard_enabled = crate::services::settings::load_setting(
+        pool,
+        crate::services::settings::AUTO_BREAK_FORBID_LONG_STRETCH_KEY,
+        "false",
+    )
+    .await?
+        == "true";
+    if !guard_enabled {
+        return Ok(None);
+    }
+    let break_rules = crate::services::reports::load_auto_break_config(pool).await?;
+    Ok(break_rules.and_then(|rules| {
+        rules
+            .first()
+            .map(|(threshold_minutes, _)| *threshold_minutes)
+    }))
+}
+
 pub async fn create(
     app_state: &AppState,
     requester: &User,
@@ -380,11 +405,22 @@ pub async fn create(
         category_id,
         comment,
     };
-    let created = app_state
-        .db
-        .time_entries
-        .create(requester.id, &entry_data)
-        .await?;
+    let created = match max_work_stretch_minutes(&app_state.pool).await? {
+        Some(max_stretch_minutes) => {
+            app_state
+                .db
+                .time_entries
+                .create_within_work_stretch(requester.id, &entry_data, max_stretch_minutes)
+                .await?
+        }
+        None => {
+            app_state
+                .db
+                .time_entries
+                .create(requester.id, &entry_data)
+                .await?
+        }
+    };
     let created_entry = repo_entry_to_service(created);
     audit::log(
         &app_state.pool,

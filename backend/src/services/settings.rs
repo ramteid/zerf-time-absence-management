@@ -14,6 +14,11 @@ pub const AUTO_BREAK_THRESHOLD_HOURS_KEY: &str = "auto_break_threshold_hours";
 pub const AUTO_BREAK_DEDUCTION_MINUTES_KEY: &str = "auto_break_deduction_minutes";
 pub const AUTO_BREAK_THRESHOLD_HOURS_2_KEY: &str = "auto_break_threshold_hours_2";
 pub const AUTO_BREAK_DEDUCTION_MINUTES_2_KEY: &str = "auto_break_deduction_minutes_2";
+/// When "true", a new time entry is refused if it would make the day's work in
+/// a row exceed the first break tier's threshold (see
+/// `services::time_entries::max_work_stretch_minutes`). Only meaningful while
+/// the automatic break deduction is enabled; switching that off clears it.
+pub const AUTO_BREAK_FORBID_LONG_STRETCH_KEY: &str = "auto_break_forbid_long_stretch";
 
 /// When TRUE, non-admin team leads may create and manage "assistant" (Aushilfe)
 /// users that are assigned to them as approver. On by default; only an admin
@@ -280,6 +285,9 @@ pub async fn load_admin_settings(pool: &crate::db::DatabasePool) -> AppResult<Ad
         non_empty(load_setting(pool, BACKUP_LAST_SUCCESS_AT_KEY, "").await?);
     let backup_last_manual_at = non_empty(load_setting(pool, BACKUP_LAST_MANUAL_AT_KEY, "").await?);
 
+    let auto_break_forbid_long_stretch =
+        load_setting(pool, AUTO_BREAK_FORBID_LONG_STRETCH_KEY, "false").await? == "true";
+
     let allow_team_lead_manage_assistants = team_lead_assistant_management_enabled(pool).await?;
 
     let medical_certificate_threshold_days: u32 = load_setting(
@@ -315,6 +323,7 @@ pub async fn load_admin_settings(pool: &crate::db::DatabasePool) -> AppResult<Ad
         backup_interval_days,
         backup_last_success_at,
         backup_last_manual_at,
+        auto_break_forbid_long_stretch,
         allow_team_lead_manage_assistants,
         medical_certificate_threshold_days,
         payroll_report_enabled: payroll_report.enabled,
@@ -479,6 +488,10 @@ pub struct AdminSettingsData {
     /// UTC timestamp of the last successful *manual* ("Back up now") backup,
     /// or `None` if none has run yet.
     pub backup_last_manual_at: Option<String>,
+    /// When TRUE, a new time entry that would put more work in a row than the
+    /// first break tier allows is refused. Admin-only: nothing but the settings
+    /// form reads it; the entry check loads it itself.
+    pub auto_break_forbid_long_stretch: bool,
     /// When TRUE, non-admin team leads may create/manage "assistant" users
     /// assigned to them (see `/team-users*`). On by default.
     pub allow_team_lead_manage_assistants: bool,

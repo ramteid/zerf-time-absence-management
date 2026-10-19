@@ -41,6 +41,7 @@ Use this document if you are:
   - [What counts toward flextime actuals](#what-counts-toward-flextime-actuals)
   - [The flextime account](#the-flextime-account)
   - [Automatic break deduction](#automatic-break-deduction)
+  - [Refusing too much work in a row](#refusing-too-much-work-in-a-row)
 - [Submission status indicator](#submission-status-indicator)
   - [How completeness is determined](#how-completeness-is-determined)
   - [Important: non-crediting entries affect completeness](#important-non-crediting-entries-affect-completeness)
@@ -674,6 +675,37 @@ The time tracking page applies the break deduction as a preview for all non-reje
 | Break deduction (minutes) | Tier-1 total minutes deducted once the threshold is exceeded (1–480 min). |
 | Second threshold (hours) | Optional tier-2 threshold. Must be greater than tier-1. Once a day's total work exceeds this threshold, the tier-2 deduction replaces tier-1. |
 | Second deduction (minutes) | Tier-2 total minutes deducted (1–480 min). This is the total, not additional — e.g. configure 45 min here, not 15 min, to achieve a 45-minute break at the tier-2 threshold. |
+| Forbid entries with too long work time in a row | Off by default. When on, a new time entry is refused if it would leave more work in a row than the break threshold without a break of at least 15 minutes. Existing entries are not affected. See [Refusing too much work in a row](#refusing-too-much-work-in-a-row). |
+
+### Refusing too much work in a row
+
+The break deduction only checks the day's total, so it does not notice
+work stretches that run past the break threshold before the break starts —
+for example 07:45–14:00 followed by a 30-minute pause. Switching on **Forbid
+entries with too long work time in a row** (Settings → General, below the
+break tiers) closes that gap: a new time entry is refused if it would leave you
+with more work in a row than the **Break threshold (hours)** without a break.
+
+- **What counts as a break:** a pause of at least 15 minutes. A shorter pause
+  does not interrupt the work around it — the work before and after it counts
+  as one stretch, pause included.
+- **The limit:** a stretch exactly as long as the threshold is still fine; one
+  minute more is not.
+- **What you see:** when you try to save such an entry, the dialog stays open
+  and tells you how long the stretch would be and how long it may be. Nothing is
+  saved. Leave a break of at least 15 minutes or shorten the entry, then save
+  again.
+- **Only the stretch the new entry belongs to counts.** A long stretch
+  elsewhere on the same day does not stop you from adding an entry that is
+  separated from it by a break.
+- **Existing entries are not affected.** Entries that are already booked stay as
+  they are: they can still be edited, submitted and approved, even if they run
+  longer than the threshold. Only adding a new entry is checked; editing an
+  existing entry is not.
+- **Only work counts.** Entries in categories that do not count as work, and
+  rejected entries, are not part of a stretch.
+- Switching off the automatic break deduction switches this option off as
+  well, because the break threshold is what the limit is measured by.
 
 ## Submission status indicator
 
@@ -1201,11 +1233,15 @@ following rules apply:
 - The day must not be covered by a non-sick absence that is approved,
   pending cancellation, or still awaiting approval. Sick-like (auto-approve)
   absences do not block time entry creation; all other absence types do.
+- If your admin has switched on the option to forbid too much work in a row,
+  the entry must not leave you with more work in a row than the break
+  threshold allows. See [Refusing too much work in a row](#refusing-too-much-work-in-a-row).
 
 There is intentionally **no maximum number of hours per day** and no limit on
-the length of a single entry. Zerf records whatever hours were actually worked —
-long or on-call days are legitimate, and assistants (see the Roles section
-above) have no target to measure against anyway.
+the length of a single entry, apart from that optional rule about work in a
+row. Zerf records whatever hours were actually worked — long or on-call days
+are legitimate, and assistants (see the Roles section above) have no target to
+measure against anyway.
 
 A new entry is always created in draft status.
 
@@ -1214,7 +1250,9 @@ A new entry is always created in draft status.
 Only `draft` entries can be edited directly. Submitted, approved, or rejected
 entries are part of a locked week — to change them you must first reopen the
 whole week via a reopen request (see below). The same validation rules as
-creation apply.
+creation apply, except the optional
+[work-in-a-row rule](#refusing-too-much-work-in-a-row), which only checks new
+entries.
 
 **Delete a time entry**
 
@@ -1851,11 +1889,13 @@ Rules:
 
 - The admin must be a different user from the entry owner (not editing their own entry).
 - Entry status must be submitted or approved.
-- The same validation rules as time entry creation apply, with one exception:
-  the per-user category enablement check is skipped. An admin correction may
+- The same validation rules as time entry creation apply, with two exceptions.
+  The per-user category enablement check is skipped: an admin correction may
   assign a category that is disabled for that specific employee (only an
   inactive category is still rejected); it does not, by itself, re-enable the
-  category for the employee's own future entries.
+  category for the employee's own future entries. And the optional
+  [work-in-a-row rule](#refusing-too-much-work-in-a-row) is not applied,
+  because it only checks new entries.
 
 Admins editing their *own* submitted or approved entries must instead go through
 the regular reopen workflow — the admin correction path only applies to other
@@ -1912,7 +1952,7 @@ Admins configure system-wide behavior in the Settings panel (Settings → Genera
 | Submission deadline day | Day of the month (1–28) when the monthly submission reminder is sent. |
 | Submission reminders enabled | Enable or disable the monthly submission reminder. |
 | Approval reminders enabled | Enable or disable the weekly approval reminder. |
-| Automatic break deduction | When enabled, deducts a configured break from each day where total crediting work exceeds a threshold. See [Automatic break deduction](#automatic-break-deduction). |
+| Automatic break deduction | When enabled, deducts a configured break from each day where total crediting work exceeds a threshold. Optionally also refuses new entries that would mean too much work in a row. See [Automatic break deduction](#automatic-break-deduction). |
 | Consecutive sick days before a certificate is required | How many consecutive calendar days of illness trigger an eAU (electronic certificate of incapacity for work) requirement. Default: 4. Only applies to absence categories marked accordingly on the [Managing categories](#managing-categories) page. See [Medical certificate (eAU) requirement](#medical-certificate-eau-requirement). |
 | SMTP configuration | Server, port, and credentials for outgoing email. Required for registration emails and email reminders. |
 | Public URL | Used to construct login links in registration emails. |

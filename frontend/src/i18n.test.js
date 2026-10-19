@@ -129,6 +129,22 @@ describe("translate", () => {
       localizeErrorMessage("Absence must include at least one workday."),
     ).toBe("Die Abwesenheit muss mindestens einen Arbeitstag enthalten.");
   });
+
+  it("localizes the refusal of too much work in a row and states it in hours", () => {
+    // The server reports minutes; the page shows hours like everywhere else.
+    const serverMessage =
+      "This entry would mean 375 min of work in a row without a break; at most 360 min are allowed. Leave a break of at least 15 min or shorten the entry.";
+
+    setLanguage("de");
+    expect(localizeErrorMessage(serverMessage)).toBe(
+      "Dieser Eintrag würde 6,25 Std. Arbeitszeit am Stück ergeben. Erlaubt sind höchstens 6,00 Std. ohne Pause. Bitte planen Sie eine Pause von mindestens 15 Min. ein oder kürzen Sie den Eintrag.",
+    );
+
+    setLanguage("en");
+    expect(localizeErrorMessage(serverMessage)).toBe(
+      "This entry would mean 6.25h of work in a row without a break; at most 6.00h are allowed. Leave a break of at least 15 min or shorten the entry.",
+    );
+  });
 });
 
 describe("resolveLanguage", () => {

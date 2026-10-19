@@ -1239,6 +1239,8 @@ const TRANSLATIONS = {
       "Eintragsdatum liegt vor dem Startdatum des Benutzers.",
     "Overlap with an existing entry.":
       "Überschneidung mit einem bestehenden Eintrag.",
+    "This entry would mean {stretch} of work in a row without a break; at most {limit} are allowed. Leave a break of at least {rest} min or shorten the entry.":
+      "Dieser Eintrag würde {stretch} Arbeitszeit am Stück ergeben. Erlaubt sind höchstens {limit} ohne Pause. Bitte planen Sie eine Pause von mindestens {rest} Min. ein oder kürzen Sie den Eintrag.",
     "Entries in the future are not allowed.":
       "Einträge in der Zukunft sind nicht erlaubt.",
     "Editing would create overlapping draft entries.":
@@ -1466,6 +1468,10 @@ const TRANSLATIONS = {
     "e.g. 45 (optional)": "z. B. 45 (optional)",
     "Please enter both second threshold and second deduction, or leave both empty.":
       "Bitte beide Felder der zweiten Stufe ausfüllen oder beide leer lassen.",
+    "Forbid entries with too long work time in a row":
+      "Einträge mit zu langer Arbeitszeit am Stück verbieten",
+    "When enabled, a new time entry cannot be saved if it would mean more work in a row than the break threshold without a break of at least 15 minutes. Existing entries are not affected.":
+      "Wenn aktiviert, kann ein neuer Zeiteintrag nicht gespeichert werden, wenn dadurch mehr Arbeitszeit am Stück als die Pausenschwelle ohne eine Pause von mindestens 15 Minuten entstünde. Bereits vorhandene Einträge sind nicht betroffen.",
     Break: "Pause",
     "Break too short: {taken}/{required} min":
       "Pause zu kurz: {taken}/{required} Min.",
@@ -1763,6 +1769,21 @@ const ERROR_PATTERNS = Object.freeze([
     key: "Cannot log time on a day with an approved absence ({kind}). Please cancel or adjust the absence first.",
     params(match) {
       return { kind: absenceKindLabel(match.groups.kind) };
+    },
+  },
+  {
+    // The server states minutes; the page shows durations the way it shows
+    // every other duration, in hours.
+    pattern:
+      /^This entry would mean (?<stretch>\d+) min of work in a row without a break; at most (?<limit>\d+) min are allowed\. Leave a break of at least (?<rest>\d+) min or shorten the entry\.$/,
+    key: "This entry would mean {stretch} of work in a row without a break; at most {limit} are allowed. Leave a break of at least {rest} min or shorten the entry.",
+    params(match) {
+      const { stretch, limit, rest } = match.groups;
+      return {
+        stretch: formatHours(Number(stretch) / 60),
+        limit: formatHours(Number(limit) / 60),
+        rest,
+      };
     },
   },
   {
