@@ -1,5 +1,7 @@
 <script>
+  import { onMount } from "svelte";
   import { api } from "../api.js";
+  import Icon from "../Icons.svelte";
   import { currentUser, theme, toast } from "../stores.js";
   import { loadPostAuthData } from "../appData.js";
   import { t, roleLabel, formatHours } from "../i18n.js";
@@ -28,7 +30,18 @@
     nw2 = "",
     error = "";
   let savingTheme = false;
+  let appInfo = { version: "unknown", git_commit: "unknown" };
   $: isAssistantCurrentUser = isAssistantUser($currentUser);
+
+  onMount(async () => {
+    try {
+      const info = await api("/app-info");
+      if (info?.version && info?.git_commit) appInfo = info;
+    } catch {
+      // Build details are supplementary; the account page remains usable when
+      // the deployment does not expose them.
+    }
+  });
 
   async function toggleDarkMode() {
     if (savingTheme) return;
@@ -245,6 +258,18 @@
       </button>
     </div>
   </div>
+
+  <section class="about" aria-label="About">
+    <span>ZERF {appInfo.version} ({appInfo.git_commit})</span>
+    <a
+      href="https://github.com/ramteid/zerf-time-absence-management"
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      <Icon name="GitHub" size={16} />
+      GitHub
+    </a>
+  </section>
 </div>
 
 <style>
@@ -268,5 +293,28 @@
   .form-actions {
     display: flex;
     justify-content: flex-end;
+  }
+
+  .about {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin: 32px 0 8px;
+    color: var(--text-tertiary);
+    font-size: 0.8125rem;
+  }
+
+  .about a {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .about a:hover {
+    color: var(--text-primary);
+    text-decoration: underline;
   }
 </style>

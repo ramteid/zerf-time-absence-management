@@ -375,6 +375,7 @@ async fn settings_and_metadata_repository_workflow() {
     let cfg = zerf::config::Config {
         database_url: app.state.cfg.database_url.clone(),
         session_secret: app.state.cfg.session_secret.clone(),
+        app_version: app.state.cfg.app_version.clone(),
         git_commit: " repo-init-commit ".to_string(),
         bind: app.state.cfg.bind.clone(),
         static_dir: app.state.cfg.static_dir.clone(),

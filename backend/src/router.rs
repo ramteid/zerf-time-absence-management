@@ -37,6 +37,7 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
         .merge(
             Router::new()
                 .route("/auth/me", get(handlers::auth::me))
+                .route("/app-info", get(handlers::settings::app_info))
                 .route("/auth/password", put(handlers::auth::change_password))
                 .route("/auth/preferences", put(handlers::auth::update_preferences))
                 .route(

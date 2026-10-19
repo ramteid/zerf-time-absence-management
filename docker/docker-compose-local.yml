@@ -109,6 +109,7 @@ services:
       dockerfile: docker/app.Dockerfile
       args:
         ZERF_GIT_COMMIT: ${ZERF_GIT_COMMIT:-unknown}
+        ZERF_VERSION: ${ZERF_VERSION:-unknown}
         ZERF_BUILD_PROFILE: ${ZERF_BUILD_PROFILE:-release}
         ZERF_FRONTEND_DEBUG_BUILD: ${ZERF_FRONTEND_DEBUG_BUILD:-false}
     container_name: zerf-app

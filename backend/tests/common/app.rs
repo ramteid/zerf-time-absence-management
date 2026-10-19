@@ -81,6 +81,7 @@ impl TestApp {
         let cfg = Config {
             database_url: database_url.clone(),
             session_secret: "integration-test-secret-do-not-use-in-prod-32-characters".into(),
+            app_version: "test".into(),
             git_commit: "test".into(),
             bind: "127.0.0.1:0".into(),
             static_dir: "static".into(),
@@ -204,6 +205,7 @@ impl TestApp {
         let cfg = Config {
             database_url: database_url.clone(),
             session_secret: "integration-test-secret-do-not-use-in-prod-32-characters".into(),
+            app_version: "test".into(),
             git_commit: "test".into(),
             bind: "127.0.0.1:0".into(),
             static_dir: "static".into(),

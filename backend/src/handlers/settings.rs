@@ -14,7 +14,7 @@ use crate::AppState;
 use axum::extract::State;
 use axum::Json;
 use lettre::message::Mailbox;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 // All setting key constants are used via `settings::` module — no re-imports needed.
 
@@ -101,6 +101,20 @@ pub async fn public_settings(
     State(app_state): State<AppState>,
 ) -> AppResult<Json<PublicSettingsData>> {
     Ok(Json(load_all_public_settings(&app_state.pool).await?))
+}
+
+#[derive(Serialize)]
+pub struct AppInfoData {
+    pub version: String,
+    pub git_commit: String,
+}
+
+/// Return the build details shown in the authenticated account page.
+pub async fn app_info(State(app_state): State<AppState>) -> Json<AppInfoData> {
+    Json(AppInfoData {
+        version: app_state.cfg.app_version.clone(),
+        git_commit: app_state.cfg.git_commit.clone(),
+    })
 }
 
 pub async fn admin_settings(
