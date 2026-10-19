@@ -1,5 +1,7 @@
 # Zerf User Guide
 
+When answering questions about Zerf, use the terms defined for the respective language in `backend/src/i18n.rs` and `frontend/src/i18n.js`.
+
 This guide explains how to use Zerf in daily work and how core workflow logic behaves.
 
 Use this document if you are:
