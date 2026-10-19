@@ -360,7 +360,8 @@ re-summing the rows to get it silently drops the deduction.
 deduction only tests the day's total, so 07:45-14:00 followed by a 30-minute
 pause owes nothing although the first stretch runs past six hours.
 `auto_break_forbid_long_stretch` (admin settings; cleared whenever the break
-deduction is switched off) refuses such an entry when it is created
+deduction is switched off, as is `auto_break_min_rest_minutes`) refuses such an
+entry when it is created
 (`TimeEntryDb::create_within_work_stretch`) and when its date, times or category
 are changed (`update_within_work_stretch`) — a creation-only check could be
 undone by stretching the entry afterwards. Both run in the same transaction and
@@ -369,10 +370,16 @@ per-user advisory lock as the overlap check, through
 limit is the first break tier's whole-minute threshold (read through
 `load_auto_break_config`, so it cannot disagree with the deduction about what six
 hours is), and a stretch exactly that long is allowed. A pause ends a stretch
-only from `MIN_REST_BREAK_MINUTES` (15) — the deduction credits any gap, but
-here a one-minute gap would void the rule — and a stretch is measured from its
-first start to its last end, shorter pauses included, a started minute counting
-as a whole one. Only the stretch the entry joins is measured, so a longer
+only from the configured minimum break length — the deduction credits any gap,
+but here a one-minute gap would void the rule. That length is
+`auto_break_min_rest_minutes`, 1-480 minutes, default
+`DEFAULT_MIN_REST_BREAK_MINUTES` (15, the shortest part ArbZG §4 lets a break
+be split into). `load_min_rest_break_minutes` reads it and falls back to that
+default for a value that is unset or unusable, rather than switching the rule
+off. Both numbers travel together as `time_calc::WorkStretchLimit`, built in
+`services::time_entries::work_stretch_limit` and nowhere else. A stretch is
+measured from its first start to its last end, shorter pauses included, a
+started minute counting as a whole one. Only the stretch the entry joins is measured, so a longer
 stretch elsewhere on the day blocks nothing unrelated and entries are never
 re-judged unless they change. Only work counts, as in the deduction:
 non-crediting categories and rejected entries are not part of a stretch. An

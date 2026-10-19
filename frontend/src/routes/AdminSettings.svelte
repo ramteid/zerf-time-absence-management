@@ -184,6 +184,22 @@
         );
         return;
       }
+      if (settingsForm.auto_break_forbid_long_stretch) {
+        const minRestMinutes = settingsForm.auto_break_min_rest_minutes;
+        if (
+          !Number.isInteger(minRestMinutes) ||
+          minRestMinutes < 1 ||
+          minRestMinutes > 480
+        ) {
+          toast(
+            $t(
+              "Please enter the minimum break length as a whole number of minutes between 1 and 480.",
+            ),
+            "error",
+          );
+          return;
+        }
+      }
     }
     saving = true;
     try {
@@ -207,6 +223,12 @@
         auto_break_forbid_long_stretch:
           !!settingsForm.auto_break_enabled &&
           !!settingsForm.auto_break_forbid_long_stretch,
+        // Sent only while its input is shown; left out, the stored value stays.
+        auto_break_min_rest_minutes:
+          settingsForm.auto_break_enabled &&
+          settingsForm.auto_break_forbid_long_stretch
+            ? settingsForm.auto_break_min_rest_minutes
+            : undefined,
       };
       const saved = await api("/settings", { method: "PUT", body });
       settingsForm = saved;
@@ -565,11 +587,35 @@
             </label>
             <div class="field-hint">
               {$t(
-                "When enabled, a time entry cannot be saved if it would mean more work in a row than the break threshold without a break of at least 15 minutes. This applies to new entries and to later changes of their times. Entries that were already booked when this option was introduced are not affected.",
+                "When enabled, a time entry cannot be saved if it would mean more work in a row than the break threshold without a break. This applies to new entries and to later changes of their times.",
               )}
             </div>
           </div>
         </div>
+        {#if settingsForm.auto_break_forbid_long_stretch}
+          <div class="field-row mt-10">
+            <div>
+              <label class="zf-label" for="settings-break-min-rest"
+                >{$t("Minimum break length (minutes)")}</label
+              >
+              <input
+                id="settings-break-min-rest"
+                class="zf-input"
+                type="number"
+                step="1"
+                min="1"
+                max="480"
+                bind:value={settingsForm.auto_break_min_rest_minutes}
+                placeholder={$t("e.g. 15")}
+              />
+              <div class="field-hint">
+                {$t(
+                  "A pause counts as a break only from this length. Shorter pauses are part of the work in a row. The Working Hours Act (ArbZG §4) sets 15 minutes.",
+                )}
+              </div>
+            </div>
+          </div>
+        {/if}
       {/if}
 
       <div class="zf-form-section-title">

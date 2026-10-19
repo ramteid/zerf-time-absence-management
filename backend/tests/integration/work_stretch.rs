@@ -736,3 +736,159 @@ async fn entries_that_exist_when_the_column_is_added_are_exempt_and_later_ones_a
 
     app.cleanup().await;
 }
+
+#[tokio::test]
+async fn the_minimum_break_length_is_configurable() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, _lead_pw, _emp_id, emp_pw, _monday_iso, _cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "min-rest").await;
+    let employee = login_change_pw(&app, "emp-min-rest@example.com", &emp_pw).await;
+    let (status, categories) = employee.get("/api/v1/categories").await;
+    assert_eq!(status, StatusCode::OK, "load categories: {categories}");
+    let work = categories
+        .as_array()
+        .expect("categories array")
+        .iter()
+        .find(|row| row["counts_as_work"].as_bool() == Some(true))
+        .and_then(|row| row["id"].as_i64())
+        .expect("a category that counts as work");
+    let monday = next_monday(-14);
+    let day = |offset: i64| {
+        (monday + Duration::days(offset))
+            .format("%Y-%m-%d")
+            .to_string()
+    };
+    // The break settings as the form sends them, with the pause length under test.
+    let break_settings = |min_rest_minutes: Option<i64>| {
+        let mut settings = json!({
+            "auto_break_enabled": true,
+            "auto_break_threshold_hours": 6,
+            "auto_break_deduction_minutes": 30,
+            "auto_break_forbid_long_stretch": true,
+        });
+        if let Some(minutes) = min_rest_minutes {
+            settings["auto_break_min_rest_minutes"] = json!(minutes);
+        }
+        settings
+    };
+
+    // -- Until an admin chooses otherwise, the legal minimum applies --
+    let (status, body) = admin.get("/api/v1/settings").await;
+    assert_eq!(status, StatusCode::OK, "load settings: {body}");
+    assert_eq!(body["auto_break_min_rest_minutes"], json!(15));
+
+    // -- Only whole minutes from 1 to 480 are accepted, and nothing is kept of a refusal --
+    for refused in [0, -5, 481] {
+        let (status, body) = put_break_settings(&admin, break_settings(Some(refused))).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{refused} minutes: {body}");
+    }
+    let (_, body) = admin.get("/api/v1/settings").await;
+    assert_eq!(body["auto_break_min_rest_minutes"], json!(15));
+
+    // -- A longer minimum: a 20-minute pause is no break any more --
+    let (status, body) = put_break_settings(&admin, break_settings(Some(30))).await;
+    assert_eq!(status, StatusCode::OK, "thirty minutes: {body}");
+    assert_eq!(body["auto_break_min_rest_minutes"], json!(30));
+    let (status, body) = put_break_settings(&admin, break_settings(None)).await;
+    assert_eq!(status, StatusCode::OK, "save without it: {body}");
+    assert_eq!(
+        body["auto_break_min_rest_minutes"],
+        json!(30),
+        "a save that leaves it out keeps it"
+    );
+
+    let (status, body) = book(&employee, &day(0), "08:00", "14:00", work).await;
+    assert_eq!(status, StatusCode::OK, "six hours: {body}");
+    let (status, body) = book(&employee, &day(0), "14:20", "15:00", work).await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "a 20-minute pause where 30 are required: {body}"
+    );
+    assert_eq!(
+        body["error"].as_str(),
+        Some(
+            "This entry would mean 420 min of work in a row without a break; \
+             at most 360 min are allowed. \
+             Leave a break of at least 30 min or shorten the entry."
+        ),
+        "the refusal names the pause length that is required"
+    );
+    let (status, body) = book(&employee, &day(0), "14:30", "15:00", work).await;
+    assert_eq!(status, StatusCode::OK, "a 30-minute pause: {body}");
+
+    // -- A shorter minimum: 10 minutes is a break, 9 is not --
+    let (status, body) = put_break_settings(&admin, break_settings(Some(10))).await;
+    assert_eq!(status, StatusCode::OK, "ten minutes: {body}");
+    let (status, body) = book(&employee, &day(1), "08:00", "14:00", work).await;
+    assert_eq!(status, StatusCode::OK, "six hours: {body}");
+    let (status, body) = book(&employee, &day(1), "14:09", "15:00", work).await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "a 9-minute pause where 10 are required: {body}"
+    );
+    assert!(
+        body["error"].as_str().is_some_and(|message| {
+            message.contains("420 min") && message.contains("at least 10 min")
+        }),
+        "{body}"
+    );
+    let (status, body) = book(&employee, &day(1), "14:10", "15:00", work).await;
+    assert_eq!(status, StatusCode::OK, "a 10-minute pause: {body}");
+
+    // -- Changing an entry is measured with the same pause length --
+    let (status, body) = book(&employee, &day(2), "08:00", "14:00", work).await;
+    assert_eq!(status, StatusCode::OK, "six hours: {body}");
+    let (status, body) = book(&employee, &day(2), "14:10", "15:00", work).await;
+    assert_eq!(status, StatusCode::OK, "a 10-minute pause: {body}");
+    let separated_id = id(&body);
+    let (status, body) = edit(
+        &employee,
+        separated_id,
+        &day(2),
+        "14:09",
+        "15:00",
+        work,
+        None,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "moved a minute closer, the pause is no break: {body}"
+    );
+
+    // -- The pause length is private to the admin form --
+    let (status, body) = app.client().get("/api/v1/settings/public").await;
+    assert_eq!(status, StatusCode::OK, "public settings: {body}");
+    assert!(body.get("auto_break_min_rest_minutes").is_none());
+
+    // -- Switching the break deduction off puts the legal minimum back --
+    let (status, body) = put_break_settings(&admin, json!({"auto_break_enabled": false})).await;
+    assert_eq!(status, StatusCode::OK, "switch the deduction off: {body}");
+    assert_eq!(body["auto_break_min_rest_minutes"], json!(15));
+
+    // -- A stored value the form never writes reads as the legal minimum --
+    for unusable in ["abc", "0", "481", ""] {
+        app.state
+            .db
+            .settings
+            .save_setting(
+                zerf::services::settings::AUTO_BREAK_MIN_REST_MINUTES_KEY,
+                unusable,
+            )
+            .await
+            .expect("store the value");
+        let (status, body) = admin.get("/api/v1/settings").await;
+        assert_eq!(status, StatusCode::OK, "load settings: {body}");
+        assert_eq!(
+            body["auto_break_min_rest_minutes"],
+            json!(15),
+            "{unusable:?} reads as the default"
+        );
+    }
+
+    app.cleanup().await;
+}

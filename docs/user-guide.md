@@ -677,7 +677,8 @@ The time tracking page applies the break deduction as a preview for all non-reje
 | Break deduction (minutes) | Tier-1 total minutes deducted once the threshold is exceeded (1–480 min). |
 | Second threshold (hours) | Optional tier-2 threshold. Must be greater than tier-1. Once a day's total work exceeds this threshold, the tier-2 deduction replaces tier-1. |
 | Second deduction (minutes) | Tier-2 total minutes deducted (1–480 min). This is the total, not additional — e.g. configure 45 min here, not 15 min, to achieve a 45-minute break at the tier-2 threshold. |
-| Forbid entries with too long work time in a row | Off by default. When on, a time entry is refused if creating it, or later changing its date, times or category, would leave more work in a row than the break threshold without a break of at least 15 minutes. Entries booked before the option existed are not affected. See [Refusing too much work in a row](#refusing-too-much-work-in-a-row). |
+| Forbid entries with too long work time in a row | Off by default. When on, a time entry is refused if creating it, or later changing its date, times or category, would leave more work in a row than the break threshold without a break. Entries booked before the option existed are not affected. See [Refusing too much work in a row](#refusing-too-much-work-in-a-row). |
+| Minimum break length (minutes) | Shown while the option above is on. How long a pause must last to count as a break and end a stretch of work (1–480 min). Default: 15, the shortest part the Working Hours Act (ArbZG §4) allows a break to be split into. Switching off the automatic break deduction resets it. |
 
 ### Refusing too much work in a row
 
@@ -688,15 +689,17 @@ entries with too long work time in a row** (Settings → General, below the
 break tiers) closes that gap: a new time entry is refused if it would leave you
 with more work in a row than the **Break threshold (hours)** without a break.
 
-- **What counts as a break:** a pause of at least 15 minutes. A shorter pause
-  does not interrupt the work around it — the work before and after it counts
-  as one stretch, pause included.
+- **What counts as a break:** a pause of at least the **Minimum break length**
+  — 15 minutes unless your admin chose another length. A shorter pause does not
+  interrupt the work around it — the work before and after it counts as one
+  stretch, pause included. A length below 15 minutes accepts pauses the law does
+  not count as a break; the admin is responsible for that choice.
 - **The limit:** a stretch exactly as long as the threshold is still fine; one
   minute more is not.
 - **What you see:** when you try to save such an entry, the dialog stays open
   and tells you how long the stretch would be and how long it may be. Nothing is
-  saved. Leave a break of at least 15 minutes or shorten the entry, then save
-  again.
+  saved. Leave a break of at least the length it names or shorten the entry,
+  then save again.
 - **When it is checked:** when you add an entry, and when you later change an
   entry's date, times or category — otherwise an entry could simply be stretched
   after it was saved. Changing only the comment is never checked. An admin's

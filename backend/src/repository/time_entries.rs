@@ -275,9 +275,10 @@ pub(crate) async fn validate_entry(
 }
 
 /// Refuse a work entry that would leave its day with more than
-/// `max_stretch_minutes` of work in a row (ArbZG §4: no more than six hours
-/// without a rest break). `exclude_id` is the entry being edited, which must
-/// not count as its own neighbour.
+/// `limit.max_minutes` of work in a row (ArbZG §4: no more than six hours
+/// without a rest break). A pause ends a stretch from `limit.min_rest_minutes`
+/// on. `exclude_id` is the entry being edited, which must not count as its own
+/// neighbour.
 ///
 /// Only the stretch the entry joins is measured, so a day that already holds a
 /// longer stretch does not block entries elsewhere in it, and entries that
@@ -290,8 +291,12 @@ async fn validate_work_stretch(
     user_id: i64,
     te: &NewEntryData,
     exclude_id: Option<i64>,
-    max_stretch_minutes: i64,
+    limit: time_calc::WorkStretchLimit,
 ) -> AppResult<()> {
+    let time_calc::WorkStretchLimit {
+        max_minutes,
+        min_rest_minutes,
+    } = limit;
     let counts_as_work: bool =
         sqlx::query_scalar("SELECT counts_as_work FROM categories WHERE id = $1")
             .bind(te.category_id)
@@ -325,13 +330,13 @@ async fn validate_work_stretch(
     let stretch_minutes = time_calc::work_stretch_minutes_with(
         (parse_time(&te.start_time)?, parse_time(&te.end_time)?),
         &existing,
+        min_rest_minutes,
     );
-    if stretch_minutes > max_stretch_minutes {
+    if stretch_minutes > max_minutes {
         return Err(AppError::bad_request(format!(
             "This entry would mean {stretch_minutes} min of work in a row without a break; \
-             at most {max_stretch_minutes} min are allowed. \
-             Leave a break of at least {} min or shorten the entry.",
-            time_calc::MIN_REST_BREAK_MINUTES
+             at most {max_minutes} min are allowed. \
+             Leave a break of at least {min_rest_minutes} min or shorten the entry."
         )));
     }
     Ok(())
@@ -788,22 +793,21 @@ impl TimeEntryDb {
     }
 
     /// Like [`Self::create`], but refuses an entry that would leave its day
-    /// with more than `max_stretch_minutes` of work in a row.
+    /// with more work in a row than `limit` allows.
     pub async fn create_within_work_stretch(
         &self,
         user_id: i64,
         entry: &NewEntryData,
-        max_stretch_minutes: i64,
+        limit: time_calc::WorkStretchLimit,
     ) -> AppResult<TimeEntry> {
-        self.create_checked(user_id, entry, Some(max_stretch_minutes))
-            .await
+        self.create_checked(user_id, entry, Some(limit)).await
     }
 
     async fn create_checked(
         &self,
         user_id: i64,
         entry: &NewEntryData,
-        max_work_stretch_minutes: Option<i64>,
+        work_stretch_limit: Option<time_calc::WorkStretchLimit>,
     ) -> AppResult<TimeEntry> {
         let mut tx = self.pool.begin().await?;
         sqlx::query("SELECT pg_advisory_xact_lock($1)")
@@ -811,8 +815,8 @@ impl TimeEntryDb {
             .execute(&mut *tx)
             .await?;
         validate_entry(&mut tx, user_id, entry, None).await?;
-        if let Some(max_stretch_minutes) = max_work_stretch_minutes {
-            validate_work_stretch(&mut tx, user_id, entry, None, max_stretch_minutes).await?;
+        if let Some(limit) = work_stretch_limit {
+            validate_work_stretch(&mut tx, user_id, entry, None, limit).await?;
         }
         let new_id: i64 = sqlx::query_scalar(
             "INSERT INTO time_entries(user_id, entry_date, start_time, end_time, \
@@ -848,24 +852,24 @@ impl TimeEntryDb {
     }
 
     /// Like [`Self::update`], but refuses a change to when or what is worked
-    /// that would leave the day with more than `max_stretch_minutes` of work in
-    /// a row. An entry that predates the guard is never refused on this ground,
-    /// and a change that leaves the booked time and category alone (a comment)
-    /// is not a change to what is worked.
+    /// that would leave the day with more work in a row than `limit` allows.
+    /// An entry that predates the guard is never refused on this ground, and a
+    /// change that leaves the booked time and category alone (a comment) is not
+    /// a change to what is worked.
     pub async fn update_within_work_stretch(
         &self,
         entry_id: i64,
         requester_id: i64,
         requester_is_admin: bool,
         entry: &NewEntryData,
-        max_stretch_minutes: i64,
+        limit: time_calc::WorkStretchLimit,
     ) -> AppResult<(TimeEntry, TimeEntry)> {
         self.update_checked(
             entry_id,
             requester_id,
             requester_is_admin,
             entry,
-            Some(max_stretch_minutes),
+            Some(limit),
         )
         .await
     }
@@ -876,7 +880,7 @@ impl TimeEntryDb {
         requester_id: i64,
         requester_is_admin: bool,
         entry: &NewEntryData,
-        max_work_stretch_minutes: Option<i64>,
+        work_stretch_limit: Option<time_calc::WorkStretchLimit>,
     ) -> AppResult<(TimeEntry, TimeEntry)> {
         let owner_id: i64 = sqlx::query_scalar("SELECT user_id FROM time_entries WHERE id=$1")
             .bind(entry_id)
@@ -912,16 +916,10 @@ impl TimeEntryDb {
             || prev.start_time != entry.start_time
             || prev.end_time != entry.end_time
             || prev.category_id != entry.category_id;
-        if let Some(max_stretch_minutes) = max_work_stretch_minutes {
+        if let Some(limit) = work_stretch_limit {
             if content_changed && !is_work_stretch_exempt(&mut tx, entry_id).await? {
-                validate_work_stretch(
-                    &mut tx,
-                    prev.user_id,
-                    entry,
-                    Some(entry_id),
-                    max_stretch_minutes,
-                )
-                .await?;
+                validate_work_stretch(&mut tx, prev.user_id, entry, Some(entry_id), limit)
+                    .await?;
             }
         }
         sqlx::query(

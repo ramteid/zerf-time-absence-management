@@ -179,8 +179,24 @@ describe("AdminSettings", () => {
         auto_break_threshold_hours_2: null,
         auto_break_deduction_minutes_2: null,
         auto_break_forbid_long_stretch: false,
+        auto_break_min_rest_minutes: 15,
         ...overrides,
       };
+    }
+
+    function minimumBreakInput() {
+      return target.querySelector("#settings-break-min-rest");
+    }
+
+    function enter(input, value) {
+      input.value = value;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+
+    function saveWasSent() {
+      return apiMock.mock.calls.some(
+        ([path, opts]) => path === "/settings" && opts?.method === "PUT",
+      );
     }
 
     function checkboxLabelled(text) {
@@ -266,6 +282,64 @@ describe("AdminSettings", () => {
       await settle();
 
       expect(checkboxLabelled(forbidLabel).checked).toBe(false);
+    });
+
+    it("asks for the minimum break length only while the option is on", async () => {
+      withBreakDeduction({ auto_break_forbid_long_stretch: false });
+      component = mount(AdminSettings, { target });
+      await settle();
+      await settle();
+      expect(minimumBreakInput()).toBeNull();
+
+      toggle(checkboxLabelled(forbidLabel));
+      await settle();
+      expect(minimumBreakInput()).not.toBeNull();
+    });
+
+    it("shows the stored minimum break length", async () => {
+      withBreakDeduction({
+        auto_break_forbid_long_stretch: true,
+        auto_break_min_rest_minutes: 20,
+      });
+      component = mount(AdminSettings, { target });
+      await settle();
+      await settle();
+
+      expect(minimumBreakInput().value).toBe("20");
+    });
+
+    it("saves the minimum break length as entered", async () => {
+      withBreakDeduction({ auto_break_forbid_long_stretch: true });
+      const body = await mountAndSave(() => enter(minimumBreakInput(), "10"));
+
+      expect(body.auto_break_forbid_long_stretch).toBe(true);
+      expect(body.auto_break_min_rest_minutes).toBe(10);
+    });
+
+    it("does not save an empty or unusable minimum break length", async () => {
+      withBreakDeduction({ auto_break_forbid_long_stretch: true });
+      component = mount(AdminSettings, { target });
+      await settle();
+      await settle();
+
+      for (const unusable of ["", "0", "481", "12.5"]) {
+        enter(minimumBreakInput(), unusable);
+        await settle();
+        target.querySelector(".zf-btn-primary").click();
+        await settle();
+        expect(saveWasSent(), `"${unusable}" must not be sent`).toBe(false);
+      }
+    });
+
+    it("leaves the minimum break length out of a save while the option is off", async () => {
+      withBreakDeduction({
+        auto_break_forbid_long_stretch: false,
+        auto_break_min_rest_minutes: 20,
+      });
+      const body = await mountAndSave(() => {});
+
+      expect(body.auto_break_forbid_long_stretch).toBe(false);
+      expect(body.auto_break_min_rest_minutes).toBeUndefined();
     });
   });
 });
