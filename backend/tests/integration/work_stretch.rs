@@ -195,8 +195,7 @@ async fn entries_cannot_put_more_work_in_a_row_than_the_break_threshold_allows()
     let work = category_where(true);
     let no_work = category_where(false);
 
-    // Every scenario gets a day of its own: Monday to Sunday of one past week,
-    // plus two days of the week before.
+    // Every scenario gets a day of its own, counted from a Monday in the past.
     let monday = next_monday(-14);
     let day = |offset: i64| {
         (monday + Duration::days(offset))
@@ -529,6 +528,118 @@ async fn entries_cannot_put_more_work_in_a_row_than_the_break_threshold_allows()
         status,
         StatusCode::OK,
         "correcting it to five hours: {body}"
+    );
+
+    // -- A move is measured on the day the entry moves to --
+    let (status, body) = book(&employee, &day(-9), "08:00", "14:00", work).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "six hours on the target day: {body}"
+    );
+    let (status, body) = book(&employee, &day(-8), "14:00", "15:00", work).await;
+    assert_eq!(status, StatusCode::OK, "an hour on its own day: {body}");
+    let moved_id = id(&body);
+    let (status, body) = edit(&employee, moved_id, &day(-9), "14:00", "15:00", work, None).await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "moved right behind the six hours: {body}"
+    );
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("420 min")),
+        "measured against the day it would move to: {body}"
+    );
+    let (status, stored) = employee
+        .get(&format!(
+            "/api/v1/time-entries?from={}&to={}",
+            day(-8),
+            day(-8)
+        ))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "list the day it comes from: {stored}"
+    );
+    assert_eq!(
+        stored
+            .as_array()
+            .map(|entries| entries.iter().map(id).collect::<Vec<_>>()),
+        Some(vec![moved_id]),
+        "the refused move left the entry where it was"
+    );
+    let target_day = day(-9);
+    let (status, body) = edit(
+        &employee,
+        moved_id,
+        &target_day,
+        "14:15",
+        "15:00",
+        work,
+        None,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "moved behind a 15-minute pause: {body}"
+    );
+    assert_eq!(
+        body["entry_date"].as_str(),
+        Some(target_day.as_str()),
+        "the entry is now on the other day"
+    );
+
+    // -- Time that is not work becomes work: measured from then on --
+    let (status, body) = book(&employee, &day(-10), "08:00", "14:00", work).await;
+    assert_eq!(status, StatusCode::OK, "six hours of work: {body}");
+    let (status, body) = book(&employee, &day(-10), "14:00", "14:30", no_work).await;
+    assert_eq!(status, StatusCode::OK, "time that is not work: {body}");
+    let relabelled_id = id(&body);
+    let (status, body) = edit(
+        &employee,
+        relabelled_id,
+        &day(-10),
+        "14:00",
+        "14:30",
+        work,
+        None,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "the same time, now counted as work: {body}"
+    );
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("390 min")),
+        "the half hour joins the six: {body}"
+    );
+    let (status, stored) = employee
+        .get(&format!(
+            "/api/v1/time-entries?from={}&to={}",
+            day(-10),
+            day(-10)
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "list the day: {stored}");
+    let relabelled = stored
+        .as_array()
+        .and_then(|entries| {
+            entries
+                .iter()
+                .find(|entry| entry["id"].as_i64() == Some(relabelled_id))
+        })
+        .expect("the entry is still there");
+    assert_eq!(
+        relabelled["category_id"].as_i64(),
+        Some(no_work),
+        "the refused change left the category alone"
     );
 
     // -- Off means off --
