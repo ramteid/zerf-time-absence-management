@@ -356,6 +356,28 @@ minutes printed beside it — the server-side CSV, the timesheet PDF
 alike. The entry rows deliberately stay raw; only the total is net, and
 re-summing the rows to get it silently drops the deduction.
 
+**Work in a row is a separate, optional rule from the break deduction.** The
+deduction only tests the day's total, so 07:45-14:00 followed by a 30-minute
+pause owes nothing although the first stretch runs past six hours.
+`auto_break_forbid_long_stretch` (admin settings; cleared whenever the break
+deduction is switched off) refuses such an entry *when it is created*:
+`TimeEntryDb::create_within_work_stretch` checks it in the same transaction and
+per-user advisory lock as the overlap check, using
+`time_calc::work_stretch_minutes_with`. Several decisions are deliberate. The
+limit is the first break tier's whole-minute threshold (read through
+`load_auto_break_config`, so it cannot disagree with the deduction about what six
+hours is), and a stretch exactly that long is allowed. A pause ends a stretch
+only from `MIN_REST_BREAK_MINUTES` (15) — the deduction credits any gap, but
+here a one-minute gap would void the rule — and a stretch is measured from its
+first start to its last end, shorter pauses included. Only the stretch the new
+entry joins is measured, so a longer stretch elsewhere on the day blocks nothing
+unrelated and existing entries are never re-judged. Only work counts, as in the
+deduction: non-crediting categories and rejected entries are not part of a
+stretch. Editing an existing entry (`update`, which shares `validate_entry`) is
+deliberately not checked, so an entry can still be lengthened after it was
+created. The refusal's wording is a contract with the frontend: `ERROR_PATTERNS`
+in `i18n.js` parses its minutes back out to show them as hours.
+
 The break belongs to a **day**, never to a set of entries, which is why the
 approval queue is priced as a difference. A day can hold approved hours and a
 fresh submission at once — nothing stops booking more time into a week that was

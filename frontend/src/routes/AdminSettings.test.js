@@ -165,4 +165,107 @@ describe("AdminSettings", () => {
     );
     expect(saveCall).toBeTruthy();
   });
+
+  describe("forbidding too much work in a row", () => {
+    const breakDeductionLabel = "Enable automatic break deduction";
+    const forbidLabel = "Forbid entries with too long work time in a row";
+
+    function withBreakDeduction(overrides = {}) {
+      mockState.settings = {
+        ...mockState.settings,
+        auto_break_enabled: true,
+        auto_break_threshold_hours: 6,
+        auto_break_deduction_minutes: 30,
+        auto_break_threshold_hours_2: null,
+        auto_break_deduction_minutes_2: null,
+        auto_break_forbid_long_stretch: false,
+        ...overrides,
+      };
+    }
+
+    function checkboxLabelled(text) {
+      const label = [...target.querySelectorAll("label")].find((element) =>
+        element.textContent.includes(text),
+      );
+      return label?.querySelector("input[type='checkbox']") ?? null;
+    }
+
+    function toggle(checkbox) {
+      checkbox.checked = !checkbox.checked;
+      checkbox.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    function savedBody() {
+      const saveCall = apiMock.mock.calls.find(
+        ([path, opts]) => path === "/settings" && opts?.method === "PUT",
+      );
+      expect(saveCall).toBeTruthy();
+      return saveCall[1].body;
+    }
+
+    async function mountAndSave(change) {
+      component = mount(AdminSettings, { target });
+      await settle();
+      await settle();
+      change();
+      await settle();
+      target.querySelector(".zf-btn-primary").click();
+      await settle();
+      return savedBody();
+    }
+
+    it("offers the option only while the automatic break deduction is on", async () => {
+      component = mount(AdminSettings, { target });
+      await settle();
+      await settle();
+      expect(checkboxLabelled(forbidLabel)).toBeNull();
+
+      toggle(checkboxLabelled(breakDeductionLabel));
+      await settle();
+      expect(checkboxLabelled(forbidLabel)).not.toBeNull();
+    });
+
+    it("saves the option as chosen", async () => {
+      withBreakDeduction();
+      const body = await mountAndSave(() =>
+        toggle(checkboxLabelled(forbidLabel)),
+      );
+
+      expect(body.auto_break_enabled).toBe(true);
+      expect(body.auto_break_forbid_long_stretch).toBe(true);
+    });
+
+    it("shows the stored choice", async () => {
+      withBreakDeduction({ auto_break_forbid_long_stretch: true });
+      component = mount(AdminSettings, { target });
+      await settle();
+      await settle();
+
+      expect(checkboxLabelled(forbidLabel).checked).toBe(true);
+    });
+
+    it("clears the option when the automatic break deduction is switched off", async () => {
+      withBreakDeduction({ auto_break_forbid_long_stretch: true });
+      const body = await mountAndSave(() =>
+        toggle(checkboxLabelled(breakDeductionLabel)),
+      );
+
+      expect(body.auto_break_enabled).toBe(false);
+      expect(body.auto_break_forbid_long_stretch).toBe(false);
+    });
+
+    it("does not bring the option back when the deduction is switched off and on again", async () => {
+      withBreakDeduction({ auto_break_forbid_long_stretch: true });
+      component = mount(AdminSettings, { target });
+      await settle();
+      await settle();
+
+      toggle(checkboxLabelled(breakDeductionLabel));
+      await settle();
+      toggle(checkboxLabelled(breakDeductionLabel));
+      await settle();
+
+      expect(checkboxLabelled(forbidLabel).checked).toBe(false);
+    });
+  });
 });

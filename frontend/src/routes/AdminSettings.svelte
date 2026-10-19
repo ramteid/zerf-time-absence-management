@@ -204,6 +204,9 @@
         auto_break_deduction_minutes_2: settingsForm.auto_break_enabled
           ? settingsForm.auto_break_deduction_minutes_2 || null
           : null,
+        auto_break_forbid_long_stretch:
+          !!settingsForm.auto_break_enabled &&
+          !!settingsForm.auto_break_forbid_long_stretch,
       };
       const saved = await api("/settings", { method: "PUT", body });
       settingsForm = saved;
@@ -458,6 +461,7 @@
                     auto_break_deduction_minutes: null,
                     auto_break_threshold_hours_2: null,
                     auto_break_deduction_minutes_2: null,
+                    auto_break_forbid_long_stretch: false,
                   };
                   breakThresholdStr = "";
                   breakThresholdStr2 = "";
@@ -546,6 +550,22 @@
             <div class="field-hint">
               {$t(
                 "Total minutes deducted when the second threshold is reached.",
+              )}
+            </div>
+          </div>
+        </div>
+        <div class="field-row mt-10">
+          <div class="flex-none">
+            <label class="zf-label zf-check-label">
+              <input
+                type="checkbox"
+                bind:checked={settingsForm.auto_break_forbid_long_stretch}
+              />
+              {$t("Forbid entries with too long work time in a row")}
+            </label>
+            <div class="field-hint">
+              {$t(
+                "When enabled, a new time entry cannot be saved if it would mean more work in a row than the break threshold without a break of at least 15 minutes. Existing entries are not affected.",
               )}
             </div>
           </div>

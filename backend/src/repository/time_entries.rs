@@ -225,7 +225,8 @@ pub(crate) async fn validate_entry(
     // no target and no flextime account and are simply paid for the hours they
     // work, while regular employees may legitimately log long or on-call days.
     // Keeping it simple, the only time-range rules are "end after start", "not in
-    // the future", and "no overlap".
+    // the future", and "no overlap". (Creation alone can additionally be refused
+    // for too much work in a row; see `validate_work_stretch`.)
     let existing: Vec<(i64, String, String, String)> = sqlx::query_as(
         "SELECT te.id, te.start_time, te.end_time, te.status \
          FROM time_entries te \
@@ -267,6 +268,65 @@ pub(crate) async fn validate_entry(
         return Err(AppError::bad_request(format!(
             "Cannot log time on a day with an approved absence ({kind}). \
              Please cancel or adjust the absence first."
+        )));
+    }
+    Ok(())
+}
+
+/// Refuse a new work entry that would leave its day with more than
+/// `max_stretch_minutes` of work in a row (ArbZG §4: no more than six hours
+/// without a rest break).
+///
+/// Only the stretch the new entry joins is measured, so a day that already
+/// holds a longer stretch does not block entries elsewhere in it, and entries
+/// that exist today are never re-judged. Rejected entries and categories that
+/// do not count as work are not part of a stretch — the same entries the break
+/// deduction looks at. Called within the transaction that holds the user's
+/// advisory lock, so two concurrent creations cannot both slip through.
+async fn validate_work_stretch(
+    conn: &mut sqlx::PgConnection,
+    user_id: i64,
+    te: &NewEntryData,
+    max_stretch_minutes: i64,
+) -> AppResult<()> {
+    let counts_as_work: bool =
+        sqlx::query_scalar("SELECT counts_as_work FROM categories WHERE id = $1")
+            .bind(te.category_id)
+            .fetch_one(&mut *conn)
+            .await?;
+    if !counts_as_work {
+        return Ok(());
+    }
+    let existing: Vec<(String, String)> = sqlx::query_as(
+        "SELECT te.start_time, te.end_time \
+         FROM time_entries te \
+         JOIN categories c ON c.id = te.category_id \
+         WHERE te.user_id = $1 AND te.entry_date = $2 \
+           AND te.status <> 'rejected' AND c.counts_as_work",
+    )
+    .bind(user_id)
+    .bind(te.entry_date)
+    .fetch_all(&mut *conn)
+    .await?;
+    let existing = existing
+        .iter()
+        .map(|(start, end)| {
+            Ok((
+                time_calc::parse_stored_time(start)?,
+                time_calc::parse_stored_time(end)?,
+            ))
+        })
+        .collect::<AppResult<Vec<_>>>()?;
+    let stretch_minutes = time_calc::work_stretch_minutes_with(
+        (parse_time(&te.start_time)?, parse_time(&te.end_time)?),
+        &existing,
+    );
+    if stretch_minutes > max_stretch_minutes {
+        return Err(AppError::bad_request(format!(
+            "This entry would mean {stretch_minutes} min of work in a row without a break; \
+             at most {max_stretch_minutes} min are allowed. \
+             Leave a break of at least {} min or shorten the entry.",
+            time_calc::MIN_REST_BREAK_MINUTES
         )));
     }
     Ok(())
@@ -708,12 +768,36 @@ impl TimeEntryDb {
     // ── Mutations ──────────────────────────────────────────────────────────
 
     pub async fn create(&self, user_id: i64, entry: &NewEntryData) -> AppResult<TimeEntry> {
+        self.create_checked(user_id, entry, None).await
+    }
+
+    /// Like [`Self::create`], but refuses an entry that would leave its day
+    /// with more than `max_stretch_minutes` of work in a row.
+    pub async fn create_within_work_stretch(
+        &self,
+        user_id: i64,
+        entry: &NewEntryData,
+        max_stretch_minutes: i64,
+    ) -> AppResult<TimeEntry> {
+        self.create_checked(user_id, entry, Some(max_stretch_minutes))
+            .await
+    }
+
+    async fn create_checked(
+        &self,
+        user_id: i64,
+        entry: &NewEntryData,
+        max_work_stretch_minutes: Option<i64>,
+    ) -> AppResult<TimeEntry> {
         let mut tx = self.pool.begin().await?;
         sqlx::query("SELECT pg_advisory_xact_lock($1)")
             .bind(user_id)
             .execute(&mut *tx)
             .await?;
         validate_entry(&mut tx, user_id, entry, None).await?;
+        if let Some(max_stretch_minutes) = max_work_stretch_minutes {
+            validate_work_stretch(&mut tx, user_id, entry, max_stretch_minutes).await?;
+        }
         let new_id: i64 = sqlx::query_scalar(
             "INSERT INTO time_entries(user_id, entry_date, start_time, end_time, \
              category_id, comment) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id",

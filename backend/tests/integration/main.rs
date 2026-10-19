@@ -50,3 +50,4 @@ mod team_users;
 mod time_entries;
 mod tracks_time;
 mod users;
+mod work_stretch;
