@@ -75,6 +75,19 @@ describe("Account", () => {
     expect(target.textContent).toContain("Smith");
   });
 
+  it("shows build information and links to the GitHub repository", async () => {
+    apiMock.mockResolvedValueOnce({ version: "1.2.3", git_commit: "abc1234" });
+    component = mount(Account, { target });
+    await settle();
+
+    expect(target.textContent).toContain("ZERF 1.2.3 (abc1234)");
+    const link = target.querySelector(
+      'a[href="https://github.com/ramteid/zerf-time-absence-management"]',
+    );
+    expect(link?.target).toBe("_blank");
+    expect(link?.textContent).toContain("GitHub");
+  });
+
   it("renders the user's email as readonly", async () => {
     component = mount(Account, { target });
     await settle();
@@ -191,7 +204,12 @@ describe("Account", () => {
   });
 
   it("shows API error on password change failure", async () => {
-    apiMock.mockRejectedValueOnce({ message: "Wrong current password" });
+    apiMock.mockImplementation((path) => {
+      if (path === "/app-info") {
+        return Promise.resolve({ version: "1.2.3", git_commit: "abc1234" });
+      }
+      return Promise.reject({ message: "Wrong current password" });
+    });
 
     component = mount(Account, { target });
     await settle();

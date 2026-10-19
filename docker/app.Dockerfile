@@ -103,6 +103,7 @@ COPY --from=frontend-builder --chmod=0555 /build/dist /app/static
 
 ENV ZERF_STATIC_DIR=/app/static \
     ZERF_BIND=0.0.0.0:3333 \
+    ZERF_VERSION=${ZERF_VERSION} \
     ZERF_GIT_COMMIT=${ZERF_GIT_COMMIT} \
     RUST_BACKTRACE=0
 

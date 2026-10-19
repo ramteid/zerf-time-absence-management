@@ -4,6 +4,7 @@ use std::env;
 pub struct Config {
     pub database_url: String,
     pub session_secret: String,
+    pub app_version: String,
     pub git_commit: String,
 
     pub bind: String,
@@ -73,6 +74,8 @@ impl Config {
         Self {
             database_url,
             session_secret,
+            app_version: env::var("ZERF_VERSION")
+                .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").into()),
             git_commit: env::var("ZERF_GIT_COMMIT").unwrap_or_else(|_| "unknown".into()),
             bind: env::var("ZERF_BIND").unwrap_or_else(|_| "0.0.0.0:3333".into()),
             static_dir: env::var("ZERF_STATIC_DIR").unwrap_or_else(|_| "static".into()),
@@ -101,6 +104,7 @@ mod tests {
         let keys = [
             "ZERF_DATABASE_URL",
             "ZERF_SESSION_SECRET",
+            "ZERF_VERSION",
             "ZERF_GIT_COMMIT",
             "ZERF_BIND",
             "ZERF_STATIC_DIR",
@@ -171,6 +175,23 @@ mod tests {
                 assert!(cfg.secure_cookies);
                 assert!(cfg.enforce_csrf);
                 assert!(cfg.enforce_origin);
+            },
+        );
+    }
+
+    #[test]
+    fn from_env_uses_the_runtime_build_version() {
+        with_env(
+            &[
+                ("ZERF_DATABASE_URL", Some("postgres://localhost/db")),
+                (
+                    "ZERF_SESSION_SECRET",
+                    Some("01234567890123456789012345678901"),
+                ),
+                ("ZERF_VERSION", Some("dev")),
+            ],
+            || {
+                assert_eq!(Config::from_env().app_version, "dev");
             },
         );
     }
