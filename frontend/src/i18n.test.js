@@ -145,6 +145,17 @@ describe("translate", () => {
       "This entry would mean 6.25h of work in a row without a break; at most 6.00h are allowed. Leave a break of at least 15 min or shorten the entry.",
     );
   });
+
+  it("states the break length the server asks for, whatever it is", () => {
+    setLanguage("de");
+    expect(
+      localizeErrorMessage(
+        "This entry would mean 420 min of work in a row without a break; at most 360 min are allowed. Leave a break of at least 30 min or shorten the entry.",
+      ),
+    ).toBe(
+      "Dieser Eintrag würde 7,00 Std. Arbeitszeit am Stück ergeben. Erlaubt sind höchstens 6,00 Std. ohne Pause. Bitte planen Sie eine Pause von mindestens 30 Min. ein oder kürzen Sie den Eintrag.",
+    );
+  });
 });
 
 describe("resolveLanguage", () => {

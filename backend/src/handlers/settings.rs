@@ -65,6 +65,9 @@ pub struct UpdateSettings {
     /// Read together with `auto_break_enabled: true`; omitted keeps the stored
     /// value. Switching the automatic break deduction off clears it.
     pub auto_break_forbid_long_stretch: Option<bool>,
+    /// Read together with `auto_break_enabled: true`; omitted keeps the stored
+    /// value. Switching the automatic break deduction off resets it.
+    pub auto_break_min_rest_minutes: Option<i32>,
     pub allow_team_lead_manage_assistants: Option<bool>,
     pub medical_certificate_threshold_days: Option<u32>,
 }
@@ -247,6 +250,13 @@ pub async fn update_admin_settings(
                     ));
                 }
             }
+            if let Some(min_rest_minutes) = body.auto_break_min_rest_minutes {
+                if !settings::is_valid_min_rest_break_minutes(i64::from(min_rest_minutes)) {
+                    return Err(AppError::BadRequest(
+                        "auto_break_min_rest_minutes must be between 1 and 480.".into(),
+                    ));
+                }
+            }
         }
     }
 
@@ -337,16 +347,29 @@ pub async fn update_admin_settings(
                 body.auto_break_forbid_long_stretch,
                 bool
             );
+            save_if_some!(
+                transaction,
+                settings::AUTO_BREAK_MIN_REST_MINUTES_KEY,
+                body.auto_break_min_rest_minutes,
+                num
+            );
         } else {
             save_setting_tx(&mut transaction, "auto_break_threshold_hours", "").await?;
             save_setting_tx(&mut transaction, "auto_break_deduction_minutes", "").await?;
             save_setting_tx(&mut transaction, AUTO_BREAK_THRESHOLD_HOURS_2_KEY, "").await?;
             save_setting_tx(&mut transaction, AUTO_BREAK_DEDUCTION_MINUTES_2_KEY, "").await?;
-            // The limit is the first break tier, which no longer exists.
+            // The limit is the first break tier, which no longer exists, and the
+            // pause length only matters next to it.
             save_setting_tx(
                 &mut transaction,
                 AUTO_BREAK_FORBID_LONG_STRETCH_KEY,
                 "false",
+            )
+            .await?;
+            save_setting_tx(
+                &mut transaction,
+                settings::AUTO_BREAK_MIN_REST_MINUTES_KEY,
+                "",
             )
             .await?;
         }

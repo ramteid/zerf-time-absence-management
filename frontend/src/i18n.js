@@ -1470,8 +1470,14 @@ const TRANSLATIONS = {
       "Bitte beide Felder der zweiten Stufe ausfüllen oder beide leer lassen.",
     "Forbid entries with too long work time in a row":
       "Einträge mit zu langer Arbeitszeit am Stück verbieten",
-    "When enabled, a time entry cannot be saved if it would mean more work in a row than the break threshold without a break of at least 15 minutes. This applies to new entries and to later changes of their times. Entries that were already booked when this option was introduced are not affected.":
-      "Wenn aktiviert, kann ein Zeiteintrag nicht gespeichert werden, wenn dadurch mehr Arbeitszeit am Stück als die Pausenschwelle ohne eine Pause von mindestens 15 Minuten entstünde. Das gilt für neue Einträge und für spätere Änderungen ihrer Zeiten. Einträge, die bei Einführung dieser Option bereits erfasst waren, sind nicht betroffen.",
+    "When enabled, a time entry cannot be saved if it would mean more work in a row than the break threshold without a break. This applies to new entries and to later changes of their times.":
+      "Wenn aktiviert, kann ein Zeiteintrag nicht gespeichert werden, wenn dadurch mehr Arbeitszeit am Stück als die Pausenschwelle ohne Pause entstünde.",
+    "Minimum break length (minutes)": "Mindestlänge einer Pause (Minuten)",
+    "A pause counts as a break only from this length. Shorter pauses are part of the work in a row. The Working Hours Act (ArbZG §4) sets 15 minutes.":
+      "Eine Unterbrechung gilt erst ab dieser Länge als Pause. Kürzere Unterbrechungen zählen zur Arbeitszeit am Stück. Das Arbeitszeitgesetz (§ 4 ArbZG) sieht 15 Minuten vor.",
+    "e.g. 15": "z.B. 15",
+    "Please enter the minimum break length as a whole number of minutes between 1 and 480.":
+      "Bitte die Mindestlänge einer Pause als ganze Minutenzahl zwischen 1 und 480 eingeben.",
     Break: "Pause",
     "Break too short: {taken}/{required} min":
       "Pause zu kurz: {taken}/{required} Min.",

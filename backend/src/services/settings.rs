@@ -16,11 +16,16 @@ pub const AUTO_BREAK_THRESHOLD_HOURS_2_KEY: &str = "auto_break_threshold_hours_2
 pub const AUTO_BREAK_DEDUCTION_MINUTES_2_KEY: &str = "auto_break_deduction_minutes_2";
 /// When "true", a time entry is refused if creating it, or changing when or
 /// what it books, would make the day's work in a row exceed the first break
-/// tier's threshold (see `services::time_entries::max_work_stretch_minutes`).
+/// tier's threshold (see `services::time_entries::work_stretch_limit`).
 /// Entries that predate the guard are exempt when changed (`work_stretch_exempt`).
 /// Only meaningful while the automatic break deduction is enabled; switching
 /// that off clears it.
 pub const AUTO_BREAK_FORBID_LONG_STRETCH_KEY: &str = "auto_break_forbid_long_stretch";
+/// Whole minutes a pause must last to end a stretch of work for the guard
+/// above; shorter pauses are part of the stretch. Unset means
+/// [`crate::time_calc::DEFAULT_MIN_REST_BREAK_MINUTES`]. Switching the
+/// automatic break deduction off resets it.
+pub const AUTO_BREAK_MIN_REST_MINUTES_KEY: &str = "auto_break_min_rest_minutes";
 
 /// When TRUE, non-admin team leads may create and manage "assistant" (Aushilfe)
 /// users that are assigned to them as approver. On by default; only an admin
@@ -134,6 +139,23 @@ pub async fn load_setting(
 ) -> AppResult<String> {
     let db = SettingsDb::new(pool.clone());
     db.load_setting(key, default).await
+}
+
+/// Whether `minutes` is an acceptable minimum length for a rest break.
+pub fn is_valid_min_rest_break_minutes(minutes: i64) -> bool {
+    (1..=480).contains(&minutes)
+}
+
+/// The minimum length, in minutes, a pause needs to count as a rest break.
+/// A value that is unset or unusable reads as the legal default rather than
+/// switching the rule off or making it absurdly strict.
+pub async fn load_min_rest_break_minutes(pool: &crate::db::DatabasePool) -> AppResult<i64> {
+    let stored = load_setting(pool, AUTO_BREAK_MIN_REST_MINUTES_KEY, "").await?;
+    Ok(stored
+        .parse::<i64>()
+        .ok()
+        .filter(|minutes| is_valid_min_rest_break_minutes(*minutes))
+        .unwrap_or(crate::time_calc::DEFAULT_MIN_REST_BREAK_MINUTES))
 }
 
 pub async fn load_app_timezone(pool: &crate::db::DatabasePool) -> chrono_tz::Tz {
@@ -289,6 +311,7 @@ pub async fn load_admin_settings(pool: &crate::db::DatabasePool) -> AppResult<Ad
 
     let auto_break_forbid_long_stretch =
         load_setting(pool, AUTO_BREAK_FORBID_LONG_STRETCH_KEY, "false").await? == "true";
+    let auto_break_min_rest_minutes = load_min_rest_break_minutes(pool).await?;
 
     let allow_team_lead_manage_assistants = team_lead_assistant_management_enabled(pool).await?;
 
@@ -326,6 +349,7 @@ pub async fn load_admin_settings(pool: &crate::db::DatabasePool) -> AppResult<Ad
         backup_last_success_at,
         backup_last_manual_at,
         auto_break_forbid_long_stretch,
+        auto_break_min_rest_minutes,
         allow_team_lead_manage_assistants,
         medical_certificate_threshold_days,
         payroll_report_enabled: payroll_report.enabled,
@@ -495,6 +519,9 @@ pub struct AdminSettingsData {
     /// Admin-only: nothing but the settings form reads it; the entry check
     /// loads it itself.
     pub auto_break_forbid_long_stretch: bool,
+    /// How long a pause must last, in minutes, to end a stretch of work for the
+    /// option above. Admin-only for the same reason.
+    pub auto_break_min_rest_minutes: i64,
     /// When TRUE, non-admin team leads may create/manage "assistant" users
     /// assigned to them (see `/team-users*`). On by default.
     pub allow_team_lead_manage_assistants: bool,

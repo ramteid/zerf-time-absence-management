@@ -353,13 +353,17 @@ pub fn require_tracks_time(user: &User) -> AppResult<()> {
     crate::services::users::require_tracks_time(user)
 }
 
-/// The longest stretch of work in a row, in minutes, that an entry may produce
-/// when it is created or changed — `None` when the guard is off.
+/// What the work-in-a-row guard enforces when an entry is created or changed —
+/// `None` when the guard is off.
 ///
-/// The limit is the first break tier's threshold: the point from which the day
-/// owes a break at all, six hours under ArbZG §4. The guard only exists next to
-/// the automatic break deduction, so it is off whenever that is.
-async fn max_work_stretch_minutes(pool: &crate::db::DatabasePool) -> AppResult<Option<i64>> {
+/// The longest stretch is the first break tier's threshold: the point from
+/// which the day owes a break at all, six hours under ArbZG §4. The shortest
+/// pause that ends a stretch is its own setting, 15 minutes unless an admin
+/// chose otherwise. The guard only exists next to the automatic break
+/// deduction, so it is off whenever that is.
+async fn work_stretch_limit(
+    pool: &crate::db::DatabasePool,
+) -> AppResult<Option<crate::time_calc::WorkStretchLimit>> {
     let guard_enabled = crate::services::settings::load_setting(
         pool,
         crate::services::settings::AUTO_BREAK_FORBID_LONG_STRETCH_KEY,
@@ -371,10 +375,16 @@ async fn max_work_stretch_minutes(pool: &crate::db::DatabasePool) -> AppResult<O
         return Ok(None);
     }
     let break_rules = crate::services::reports::load_auto_break_config(pool).await?;
-    Ok(break_rules.and_then(|rules| {
+    let Some(max_minutes) = break_rules.and_then(|rules| {
         rules
             .first()
             .map(|(threshold_minutes, _)| *threshold_minutes)
+    }) else {
+        return Ok(None);
+    };
+    Ok(Some(crate::time_calc::WorkStretchLimit {
+        max_minutes,
+        min_rest_minutes: crate::services::settings::load_min_rest_break_minutes(pool).await?,
     }))
 }
 
@@ -405,12 +415,12 @@ pub async fn create(
         category_id,
         comment,
     };
-    let created = match max_work_stretch_minutes(&app_state.pool).await? {
-        Some(max_stretch_minutes) => {
+    let created = match work_stretch_limit(&app_state.pool).await? {
+        Some(limit) => {
             app_state
                 .db
                 .time_entries
-                .create_within_work_stretch(requester.id, &entry_data, max_stretch_minutes)
+                .create_within_work_stretch(requester.id, &entry_data, limit)
                 .await?
         }
         None => {
@@ -483,8 +493,8 @@ pub async fn update(
         category_id: input.category_id,
         comment: input.comment,
     };
-    let (prev, updated) = match max_work_stretch_minutes(&app_state.pool).await? {
-        Some(max_stretch_minutes) => {
+    let (prev, updated) = match work_stretch_limit(&app_state.pool).await? {
+        Some(limit) => {
             app_state
                 .db
                 .time_entries
@@ -493,7 +503,7 @@ pub async fn update(
                     requester.id,
                     requester.is_admin(),
                     &entry_data,
-                    max_stretch_minutes,
+                    limit,
                 )
                 .await?
         }
