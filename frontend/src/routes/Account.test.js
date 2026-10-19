@@ -76,11 +76,15 @@ describe("Account", () => {
   });
 
   it("shows build information and links to the GitHub repository", async () => {
-    apiMock.mockResolvedValueOnce({ version: "1.2.3", git_commit: "abc1234" });
+    apiMock.mockResolvedValueOnce({
+      version: "1.2.3",
+      git_commit: "abc1234def56",
+    });
     component = mount(Account, { target });
     await settle();
 
     expect(target.textContent).toContain("ZERF 1.2.3 (abc1234)");
+    expect(target.textContent).not.toContain("abc1234def56");
     const link = target.querySelector(
       'a[href="https://github.com/ramteid/zerf-time-absence-management"]',
     );

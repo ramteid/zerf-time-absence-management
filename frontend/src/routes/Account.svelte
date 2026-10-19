@@ -32,6 +32,7 @@
   let savingTheme = false;
   let appInfo = { version: "unknown", git_commit: "unknown" };
   $: isAssistantCurrentUser = isAssistantUser($currentUser);
+  $: shortCommit = appInfo.git_commit.slice(0, 7);
 
   onMount(async () => {
     try {
@@ -260,7 +261,7 @@
   </div>
 
   <section class="about" aria-label="About">
-    <span>ZERF {appInfo.version} ({appInfo.git_commit})</span>
+    <span>ZERF {appInfo.version} ({shortCommit})</span>
     <a
       href="https://github.com/ramteid/zerf-time-absence-management"
       target="_blank"
