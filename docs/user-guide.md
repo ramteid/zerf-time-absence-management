@@ -675,7 +675,7 @@ The time tracking page applies the break deduction as a preview for all non-reje
 | Break deduction (minutes) | Tier-1 total minutes deducted once the threshold is exceeded (1–480 min). |
 | Second threshold (hours) | Optional tier-2 threshold. Must be greater than tier-1. Once a day's total work exceeds this threshold, the tier-2 deduction replaces tier-1. |
 | Second deduction (minutes) | Tier-2 total minutes deducted (1–480 min). This is the total, not additional — e.g. configure 45 min here, not 15 min, to achieve a 45-minute break at the tier-2 threshold. |
-| Forbid entries with too long work time in a row | Off by default. When on, a new time entry is refused if it would leave more work in a row than the break threshold without a break of at least 15 minutes. Existing entries are not affected. See [Refusing too much work in a row](#refusing-too-much-work-in-a-row). |
+| Forbid entries with too long work time in a row | Off by default. When on, a time entry is refused if creating it, or later changing its date, times or category, would leave more work in a row than the break threshold without a break of at least 15 minutes. Entries booked before the option existed are not affected. See [Refusing too much work in a row](#refusing-too-much-work-in-a-row). |
 
 ### Refusing too much work in a row
 
@@ -695,13 +695,18 @@ with more work in a row than the **Break threshold (hours)** without a break.
   and tells you how long the stretch would be and how long it may be. Nothing is
   saved. Leave a break of at least 15 minutes or shorten the entry, then save
   again.
-- **Only the stretch the new entry belongs to counts.** A long stretch
-  elsewhere on the same day does not stop you from adding an entry that is
+- **When it is checked:** when you add an entry, and when you later change an
+  entry's date, times or category — otherwise an entry could simply be stretched
+  after it was saved. Changing only the comment is never checked. An admin's
+  correction of an entry is checked the same way.
+- **Only the stretch the entry belongs to counts.** A long stretch elsewhere on
+  the same day does not stop you from adding or changing an entry that is
   separated from it by a break.
-- **Existing entries are not affected.** Entries that are already booked stay as
-  they are: they can still be edited, submitted and approved, even if they run
-  longer than the threshold. Only adding a new entry is checked; editing an
-  existing entry is not.
+- **Entries booked before the option existed are not affected.** Entries that
+  were already booked when Zerf was updated to include this option stay as they
+  are: they can still be changed in any way, submitted and approved, even if
+  they run longer than the threshold. Entries booked after that update are
+  checked, also if the option was only switched on later.
 - **Only work counts.** Entries in categories that do not count as work, and
   rejected entries, are not part of a stretch.
 - Switching off the automatic break deduction switches this option off as
@@ -1250,9 +1255,7 @@ A new entry is always created in draft status.
 Only `draft` entries can be edited directly. Submitted, approved, or rejected
 entries are part of a locked week — to change them you must first reopen the
 whole week via a reopen request (see below). The same validation rules as
-creation apply, except the optional
-[work-in-a-row rule](#refusing-too-much-work-in-a-row), which only checks new
-entries.
+creation apply.
 
 **Delete a time entry**
 
@@ -1889,13 +1892,11 @@ Rules:
 
 - The admin must be a different user from the entry owner (not editing their own entry).
 - Entry status must be submitted or approved.
-- The same validation rules as time entry creation apply, with two exceptions.
-  The per-user category enablement check is skipped: an admin correction may
+- The same validation rules as time entry creation apply, with one exception:
+  the per-user category enablement check is skipped. An admin correction may
   assign a category that is disabled for that specific employee (only an
   inactive category is still rejected); it does not, by itself, re-enable the
-  category for the employee's own future entries. And the optional
-  [work-in-a-row rule](#refusing-too-much-work-in-a-row) is not applied,
-  because it only checks new entries.
+  category for the employee's own future entries.
 
 Admins editing their *own* submitted or approved entries must instead go through
 the regular reopen workflow — the admin correction path only applies to other

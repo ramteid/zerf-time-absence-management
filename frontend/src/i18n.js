@@ -1470,8 +1470,8 @@ const TRANSLATIONS = {
       "Bitte beide Felder der zweiten Stufe ausfüllen oder beide leer lassen.",
     "Forbid entries with too long work time in a row":
       "Einträge mit zu langer Arbeitszeit am Stück verbieten",
-    "When enabled, a new time entry cannot be saved if it would mean more work in a row than the break threshold without a break of at least 15 minutes. Existing entries are not affected.":
-      "Wenn aktiviert, kann ein neuer Zeiteintrag nicht gespeichert werden, wenn dadurch mehr Arbeitszeit am Stück als die Pausenschwelle ohne eine Pause von mindestens 15 Minuten entstünde. Bereits vorhandene Einträge sind nicht betroffen.",
+    "When enabled, a time entry cannot be saved if it would mean more work in a row than the break threshold without a break of at least 15 minutes. This applies to new entries and to later changes of their times. Entries that were already booked when this option was introduced are not affected.":
+      "Wenn aktiviert, kann ein Zeiteintrag nicht gespeichert werden, wenn dadurch mehr Arbeitszeit am Stück als die Pausenschwelle ohne eine Pause von mindestens 15 Minuten entstünde. Das gilt für neue Einträge und für spätere Änderungen ihrer Zeiten. Einträge, die bei Einführung dieser Option bereits erfasst waren, sind nicht betroffen.",
     Break: "Pause",
     "Break too short: {taken}/{required} min":
       "Pause zu kurz: {taken}/{required} Min.",
