@@ -360,23 +360,37 @@ re-summing the rows to get it silently drops the deduction.
 deduction only tests the day's total, so 07:45-14:00 followed by a 30-minute
 pause owes nothing although the first stretch runs past six hours.
 `auto_break_forbid_long_stretch` (admin settings; cleared whenever the break
-deduction is switched off) refuses such an entry *when it is created*:
-`TimeEntryDb::create_within_work_stretch` checks it in the same transaction and
-per-user advisory lock as the overlap check, using
+deduction is switched off) refuses such an entry when it is created
+(`TimeEntryDb::create_within_work_stretch`) and when its date, times or category
+are changed (`update_within_work_stretch`) — a creation-only check could be
+undone by stretching the entry afterwards. Both run in the same transaction and
+per-user advisory lock as the overlap check, through
 `time_calc::work_stretch_minutes_with`. Several decisions are deliberate. The
 limit is the first break tier's whole-minute threshold (read through
 `load_auto_break_config`, so it cannot disagree with the deduction about what six
 hours is), and a stretch exactly that long is allowed. A pause ends a stretch
 only from `MIN_REST_BREAK_MINUTES` (15) — the deduction credits any gap, but
 here a one-minute gap would void the rule — and a stretch is measured from its
-first start to its last end, shorter pauses included. Only the stretch the new
-entry joins is measured, so a longer stretch elsewhere on the day blocks nothing
-unrelated and existing entries are never re-judged. Only work counts, as in the
-deduction: non-crediting categories and rejected entries are not part of a
-stretch. Editing an existing entry (`update`, which shares `validate_entry`) is
-deliberately not checked, so an entry can still be lengthened after it was
-created. The refusal's wording is a contract with the frontend: `ERROR_PATTERNS`
-in `i18n.js` parses its minutes back out to show them as hours.
+first start to its last end, shorter pauses included, a started minute counting
+as a whole one. Only the stretch the entry joins is measured, so a longer
+stretch elsewhere on the day blocks nothing unrelated and entries are never
+re-judged unless they change. Only work counts, as in the deduction:
+non-crediting categories and rejected entries are not part of a stretch. An
+update that leaves date, times and category alone (a comment) is not checked at
+all.
+
+What existed before the guard is exempt from the *edit* check, never from being
+a neighbour: `time_entries.work_stretch_exempt` (migration 051) is TRUE for every
+row that existed when the column was added and FALSE for every row created since,
+and an exempt entry stays exempt however it is edited. It is a column on the row
+rather than a cut-off date in `app_settings` because a row's flag cannot go
+missing or fail to parse, and the migration backfills it only when it creates the
+column — re-running that UPDATE would exempt entries booked later and reopen the
+loophole. Entries created after the update but before an admin switches the
+option on are therefore not exempt. Admin corrections go through the same
+update path and are checked like any other edit. The refusal's wording is a
+contract with the frontend: `ERROR_PATTERNS` in `i18n.js` parses its minutes back
+out to show them as hours.
 
 The break belongs to a **day**, never to a set of entries, which is why the
 approval queue is priced as a difference. A day can hold approved hours and a
@@ -733,7 +747,7 @@ The admin's SMTP test sends no message and needs none.
 | `sessions` | Hashed session tokens, CSRF tokens, activity timestamps |
 | `login_attempts` | Failed login tracking for rate-limit lockout |
 | `categories` | Work categories |
-| `time_entries` | Daily entries (date, start/end, category, status, `payroll_reported_period`) |
+| `time_entries` | Daily entries (date, start/end, category, status, `payroll_reported_period`, `work_stretch_exempt`) |
 | `payroll_reported_days` | Signed net working minutes declared per person and day by each payroll report |
 | `payroll_reported_periods` | Months settled after exact per-day payroll accounting became available |
 | `payroll_reported_content` | Ordered rendered rows of each delivered payroll report for exact dashboard readback |

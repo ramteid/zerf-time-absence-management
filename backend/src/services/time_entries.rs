@@ -353,8 +353,8 @@ pub fn require_tracks_time(user: &User) -> AppResult<()> {
     crate::services::users::require_tracks_time(user)
 }
 
-/// The longest stretch of work in a row, in minutes, that a new entry may
-/// produce — `None` when the guard is off.
+/// The longest stretch of work in a row, in minutes, that an entry may produce
+/// when it is created or changed — `None` when the guard is off.
 ///
 /// The limit is the first break tier's threshold: the point from which the day
 /// owes a break at all, six hours under ArbZG §4. The guard only exists next to
@@ -483,11 +483,28 @@ pub async fn update(
         category_id: input.category_id,
         comment: input.comment,
     };
-    let (prev, updated) = app_state
-        .db
-        .time_entries
-        .update(entry_id, requester.id, requester.is_admin(), &entry_data)
-        .await?;
+    let (prev, updated) = match max_work_stretch_minutes(&app_state.pool).await? {
+        Some(max_stretch_minutes) => {
+            app_state
+                .db
+                .time_entries
+                .update_within_work_stretch(
+                    entry_id,
+                    requester.id,
+                    requester.is_admin(),
+                    &entry_data,
+                    max_stretch_minutes,
+                )
+                .await?
+        }
+        None => {
+            app_state
+                .db
+                .time_entries
+                .update(entry_id, requester.id, requester.is_admin(), &entry_data)
+                .await?
+        }
+    };
     let previous_entry = repo_entry_to_service(prev);
     let updated_entry = repo_entry_to_service(updated);
     audit::log(

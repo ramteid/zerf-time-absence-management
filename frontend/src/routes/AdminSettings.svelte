@@ -565,7 +565,7 @@
             </label>
             <div class="field-hint">
               {$t(
-                "When enabled, a new time entry cannot be saved if it would mean more work in a row than the break threshold without a break of at least 15 minutes. Existing entries are not affected.",
+                "When enabled, a time entry cannot be saved if it would mean more work in a row than the break threshold without a break of at least 15 minutes. This applies to new entries and to later changes of their times. Entries that were already booked when this option was introduced are not affected.",
               )}
             </div>
           </div>
