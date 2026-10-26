@@ -81,6 +81,16 @@ KEYRING_SRC="${ZERF_KEYRING_SRC:-/keyring-src/pg_tde_keyring.enc}"
 # single indexed SELECT over a local, trusted Postgres connection is trivial
 # load even at this cadence.  Overridable so tests need not sleep for real.
 POLL_INTERVAL_SECS="${ZERF_BACKUP_POLL_INTERVAL_SECS:-20}"
+# Always make monotonic progress, even with an invalid polling override.
+case "$POLL_INTERVAL_SECS" in
+  ''|*[!0-9]*|0) POLL_INTERVAL_SECS=20 ;;
+esac
+# Strip leading zeroes before shell arithmetic (which may interpret them as
+# octal). An all-zero or oversized value falls back to the normal cadence.
+while [ "${POLL_INTERVAL_SECS#0}" != "$POLL_INTERVAL_SECS" ]; do
+  POLL_INTERVAL_SECS="${POLL_INTERVAL_SECS#0}"
+done
+[ "${POLL_INTERVAL_SECS:-0}" -gt 0 ] 2>/dev/null || POLL_INTERVAL_SECS=20
 
 # -- Database connection -------------------------------------------------------
 
@@ -272,7 +282,9 @@ is_backup_due() {
   if [ -z "$_last" ]; then
     return 0
   fi
-  _last_epoch="$(date -d "$_last" +%s 2>/dev/null || echo 0)"
+  # Stored timestamps are UTC. Do not let the container's TZ reinterpret a
+  # timestamp lacking an explicit offset during a clock change.
+  _last_epoch="$(date -u -d "$_last" +%s 2>/dev/null || echo 0)"
   _now_epoch="$(date -u +%s)"
   _interval_secs="$(( _interval_days * 86400 ))"
   [ "$(( _now_epoch - _last_epoch ))" -ge "$_interval_secs" ]
@@ -287,7 +299,7 @@ seconds_until_next_backup() {
     printf '0'
     return
   fi
-  _last_epoch="$(date -d "$_last" +%s 2>/dev/null || echo 0)"
+  _last_epoch="$(date -u -d "$_last" +%s 2>/dev/null || echo 0)"
   _interval_secs="$(( _interval_days * 86400 ))"
   _next_epoch="$(( _last_epoch + _interval_secs ))"
   _now_epoch="$(date -u +%s)"

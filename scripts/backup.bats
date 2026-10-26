@@ -173,6 +173,46 @@ fi
 
 # -- seconds_until_next_backup ------------------------------------------------
 
+@test "backup schedule: repeated Berlin hour uses explicit UTC offsets" {
+  # Both spellings denote the same instant across the fall-back transition.
+  make_shim date '
+case "$*" in
+  "-u +%s") printf "1792891800\n" ;;
+  *) /usr/bin/date "$@" ;;
+esac'
+  export TZ=Europe/Berlin
+  first="$(seconds_until_next_backup '2026-10-25T02:30:00+02:00' 1)"
+  equivalent="$(seconds_until_next_backup '2026-10-25T00:30:00Z' 1)"
+  second="$(seconds_until_next_backup '2026-10-25T02:30:00+01:00' 1)"
+  [ "$first" = "$equivalent" ]
+  [ "$((second - first))" -eq 3600 ]
+}
+
+@test "backup schedule: timestamps without offsets are independent of host timezone" {
+  make_shim date '
+case "$*" in
+  "-u +%s") printf "1774747800\n" ;;
+  *) /usr/bin/date "$@" ;;
+esac'
+  export TZ=Europe/Berlin
+  berlin="$(seconds_until_next_backup '2026-03-29T00:30:00' 1)"
+  export TZ=America/New_York
+  new_york="$(seconds_until_next_backup '2026-03-29T00:30:00' 1)"
+  [ "$berlin" = "$new_york" ]
+  [ "$berlin" -gt 0 ]
+}
+
+@test "backup polling: zero override cannot create an endless sleep loop" {
+  for invalid in 0 00 000 -1 invalid 999999999999999999999999999; do
+    export ZERF_BACKUP_POLL_INTERVAL_SECS="$invalid"
+    . "$(dirname "$BATS_TEST_FILENAME")/../scripts/backup.sh"
+    [ "$POLL_INTERVAL_SECS" -eq 20 ]
+  done
+  export ZERF_BACKUP_POLL_INTERVAL_SECS=008
+  . "$(dirname "$BATS_TEST_FILENAME")/../scripts/backup.sh"
+  [ "$POLL_INTERVAL_SECS" = 8 ]
+}
+
 @test "seconds_until_next_backup: returns 0 when last_ts is empty" {
   run seconds_until_next_backup "" 1
   [ "$status" -eq 0 ]

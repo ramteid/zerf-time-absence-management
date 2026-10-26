@@ -8,6 +8,7 @@ Zerf (Zeiterfassung) is a self-hosted time tracking and absence management platf
 ## Development Workflow
 
 - All development happens on `main`.
+- Commit and push completed changes directly to `main` unless explicitly instructed otherwise.
 - Do not create feature branches or pull requests unless explicitly requested.
 
 ## Repository Layout

@@ -6,11 +6,10 @@ use crate::db::DatabasePool;
 use crate::services::settings::{
     app_today, load_setting, DEFAULT_TIMEZONE, SUBMISSION_REMINDERS_ENABLED_KEY, TIMEZONE_KEY,
 };
-use chrono::{Datelike, NaiveDate, TimeZone, Timelike, Utc};
+use chrono::{Datelike, NaiveDate, Timelike, Utc};
 use std::time::Duration;
 
 const SUBMISSION_DEADLINE_DAY_KEY: &str = "submission_deadline_day";
-const SETTINGS_POLL_INTERVAL: Duration = Duration::from_secs(3600);
 
 /// Returns the duration to wait until the next occurrence of `day_of_month` at 07:00 local time.
 pub fn duration_until_next_deadline(
@@ -51,16 +50,7 @@ fn resolve_local_datetime(
     hour: u32,
     timezone: chrono_tz::Tz,
 ) -> Option<chrono::DateTime<chrono_tz::Tz>> {
-    let naive = date.and_hms_opt(hour, 0, 0)?;
-    match timezone.from_local_datetime(&naive) {
-        chrono::LocalResult::Single(dt) => Some(dt),
-        chrono::LocalResult::Ambiguous(earliest, _) => Some(earliest),
-        chrono::LocalResult::None => {
-            // Hour falls in a DST gap; try one hour later
-            let fallback = date.and_hms_opt(hour + 1, 0, 0)?;
-            timezone.from_local_datetime(&fallback).earliest()
-        }
-    }
+    super::schedule::resolve_local_time(date, hour, 0, 0, timezone)
 }
 
 fn advance_one_month(date: NaiveDate, desired_day: u32) -> NaiveDate {
@@ -74,7 +64,7 @@ fn advance_one_month(date: NaiveDate, desired_day: u32) -> NaiveDate {
 }
 
 pub fn scheduler_sleep_duration(deadline_wait: Duration) -> Duration {
-    deadline_wait.min(SETTINGS_POLL_INTERVAL)
+    super::schedule::scheduler_sleep_duration(deadline_wait)
 }
 
 fn deadline_is_due_now(now: chrono::DateTime<chrono_tz::Tz>, day_of_month: u8) -> bool {
@@ -247,8 +237,7 @@ pub async fn run_check(state: &crate::AppState) {
         ..
     } in rows
     {
-        let missing_weeks =
-            find_unsubmitted_weeks(pool, user_id, user_start).await;
+        let missing_weeks = find_unsubmitted_weeks(pool, user_id, user_start).await;
 
         if missing_weeks.is_empty() {
             continue;
@@ -273,10 +262,10 @@ pub async fn run_check(state: &crate::AppState) {
 
         // Idempotent per user per local day (configured timezone, not UTC).
         // The key must NOT depend on which weeks are still missing: `run_loop`
-        // re-checks every hour while the deadline day lasts, so a content-derived
+        // re-checks every minute while the deadline day lasts, so a content-derived
         // key would mint a fresh notification — and a fresh email — each time
         // someone submits one of their outstanding weeks, nagging them once per
-        // hour precisely while they are working through the backlog.
+        // minute precisely while they are working through the backlog.
         let dedupe_key = format!("submission_reminder:{}", today);
         crate::services::notifications::deliver(
             state,
@@ -323,10 +312,7 @@ fn month_reminder_is_due_now(now: chrono::DateTime<chrono_tz::Tz>) -> bool {
 /// configured, and it is the date the reminders name. Should it ever be unset,
 /// the payroll send day stands in — the report goes out just after midnight on
 /// that day, so the day before is the last one that still counts.
-async fn month_submission_deadline(
-    pool: &DatabasePool,
-    today: NaiveDate,
-) -> Option<NaiveDate> {
+async fn month_submission_deadline(pool: &DatabasePool, today: NaiveDate) -> Option<NaiveDate> {
     let configured: Option<u8> = load_setting(pool, SUBMISSION_DEADLINE_DAY_KEY, "")
         .await
         .ok()
@@ -335,7 +321,9 @@ async fn month_submission_deadline(
     if let Some(day) = configured {
         return NaiveDate::from_ymd_opt(today.year(), today.month(), u32::from(day));
     }
-    let config = crate::services::payroll_report::load_config(pool).await.ok()?;
+    let config = crate::services::payroll_report::load_config(pool)
+        .await
+        .ok()?;
     if !config.enabled || config.day_of_month <= 1 {
         return None;
     }
@@ -430,7 +418,7 @@ pub async fn run_month_end_check(
             &params,
         );
         // Per day: the pass repeats every third day while the booking is still
-        // not handed in, and the loop re-checks every hour within the day.
+        // not handed in, and the loop re-checks every minute within the day.
         let dedupe_key = format!("month_end_submission_reminder:{today}");
         crate::services::notifications::deliver(
             state,
@@ -505,12 +493,7 @@ pub async fn run_month_weeks_reminder(
     } in rows
     {
         let missing = crate::services::reports::unsubmitted_weeks_in_month(
-            pool,
-            user_id,
-            from,
-            to,
-            user_start,
-            today,
+            pool, user_id, from, to, user_start, today,
         )
         .await
         .unwrap_or_default();
@@ -542,8 +525,8 @@ pub async fn run_month_weeks_reminder(
         }
         let text = crate::i18n::notification_event_text(&language, kind, &params);
         let email_body = crate::i18n::notification_email_body(&language, kind, &email_params);
-        // Per day: the loop wakes hourly, and the list must not be re-sent each
-        // hour while somebody is working through it.
+        // Per day: the loop wakes every minute, and the list must not be re-sent each
+        // minute while somebody is working through it.
         let dedupe_key = format!("{kind}:{today}");
         crate::services::notifications::deliver(
             state,
@@ -578,7 +561,7 @@ pub async fn run_loop(pool: DatabasePool, state: crate::AppState) {
                 .parse::<chrono_tz::Tz>()
                 .unwrap_or(chrono_tz::Europe::Berlin);
             // Due check first, so a restart after 07:00 on the deadline day still
-            // fires. Running it on every hourly wake-up is safe because the
+            // fires. Running it every minute is safe because the
             // per-day dedupe key in `run_check` collapses the repeats into one
             // notification and one email.
             if deadline_is_due_now(Utc::now().with_timezone(&tz), d) {
@@ -587,7 +570,7 @@ pub async fn run_loop(pool: DatabasePool, state: crate::AppState) {
             }
             // Independent of the configured deadline day: the finished month's
             // leftovers are chased on the 1st, because the monthly exports
-            // depend on them. Safe to call on every hourly wake-up — the
+            // depend on them. Safe to call every minute — the
             // per-period dedupe key collapses the repeats.
             let now_local = Utc::now().with_timezone(&tz);
             run_month_end_check(&state, now_local).await;
@@ -602,7 +585,7 @@ pub async fn run_loop(pool: DatabasePool, state: crate::AppState) {
             );
             tokio::time::sleep(sleep_for).await;
         } else {
-            // No deadline configured – poll every hour. The month-end pass is
+            // No deadline configured – poll every minute. The month-end pass is
             // not tied to that setting, so it still has to run.
             let timezone = load_setting(&pool, TIMEZONE_KEY, DEFAULT_TIMEZONE)
                 .await
@@ -613,7 +596,7 @@ pub async fn run_loop(pool: DatabasePool, state: crate::AppState) {
             let now_local = Utc::now().with_timezone(&tz);
             run_month_end_check(&state, now_local).await;
             run_month_weeks_reminder(&state, now_local).await;
-            tokio::time::sleep(Duration::from_secs(3600)).await;
+            tokio::time::sleep(Duration::from_secs(60)).await;
         }
     }
 }
@@ -621,6 +604,7 @@ pub async fn run_loop(pool: DatabasePool, state: crate::AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
     use chrono_tz::Europe::Berlin;
 
     /// Both month-boundary passes share one rhythm — every third day from the
@@ -674,18 +658,18 @@ mod tests {
         let wait = duration_until_next_deadline(now, 15);
         assert_eq!(
             scheduler_sleep_duration(wait),
-            Duration::from_secs(3600),
+            Duration::from_secs(60),
             "long waits are capped so settings are reloaded regularly"
         );
     }
 
     #[test]
     fn scheduler_sleep_keeps_imminent_deadline_waits() {
-        let now = Berlin.with_ymd_and_hms(2026, 5, 15, 6, 30, 0).unwrap();
+        let now = Berlin.with_ymd_and_hms(2026, 5, 15, 6, 59, 30).unwrap();
         let wait = duration_until_next_deadline(now, 15);
         assert_eq!(
             scheduler_sleep_duration(wait).as_secs(),
-            30 * 60,
+            30,
             "imminent deadline should not be delayed by polling"
         );
     }
