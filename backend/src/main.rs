@@ -61,6 +61,7 @@ async fn main() -> Result<()> {
         let db = state.db.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(86_400));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 interval.tick().await;
                 notifications::cleanup_old(&db).await;

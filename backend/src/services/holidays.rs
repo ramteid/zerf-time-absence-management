@@ -1,5 +1,5 @@
 use crate::error::{AppError, AppResult};
-use chrono::{DateTime, Datelike, Duration, NaiveDate, TimeZone, Timelike};
+use chrono::{DateTime, Datelike, NaiveDate};
 use serde::{Deserialize, Serialize};
 
 /// A single holiday from the Nager.Date API.
@@ -420,19 +420,7 @@ pub async fn ensure_holidays(pool: &crate::db::DatabasePool, year: i32) -> AppRe
 }
 
 pub fn next_monday_noon(now: DateTime<chrono_tz::Tz>) -> AppResult<DateTime<chrono_tz::Tz>> {
-    let weekday = now.weekday().num_days_from_monday();
-    let days_ahead = if weekday == 0 && now.hour() < 12 {
-        0
-    } else {
-        7 - weekday
-    };
-    let target_date = now.date_naive() + Duration::days(i64::from(days_ahead));
-    let target_naive = target_date.and_hms_opt(12, 0, 0).ok_or_else(|| {
-        AppError::Internal("Failed to calculate holiday scheduler target.".into())
-    })?;
-    now.timezone()
-        .from_local_datetime(&target_naive)
-        .single()
+    crate::background::schedule::next_monday_at(now, 12)
         .ok_or_else(|| AppError::Internal("Failed to resolve local scheduler time.".into()))
 }
 
@@ -457,6 +445,7 @@ pub async fn prepare_holidays(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{TimeZone, Timelike};
 
     fn sample_holidays() -> Vec<NagerHoliday> {
         vec![

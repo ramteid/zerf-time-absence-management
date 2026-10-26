@@ -1966,6 +1966,8 @@ Admins configure system-wide behavior in the Settings panel (Settings → Genera
 | Payroll Report | Email a monthly PDF with absence days and working hours to your payroll accountant or tax office. See [Payroll Report](#payroll-report). |
 | Allow team leads to create assistant users | Off by default. Only an admin can change it. When on, non-admin team leads get a scoped Users tab limited to creating/managing "Assistant" users assigned to them. See [Scoped assistant user management (optional)](#scoped-assistant-user-management-optional). |
 
+Scheduled reminders and reports follow the app timezone, including summer and winter time. If a scheduled local time occurs twice, it is used once; if it does not exist, the job waits until the next valid local time. Changes to the app timezone take effect within one minute.
+
 If the email server is temporarily unreachable, Zerf keeps every outgoing
 email queued and automatically retries delivery every few minutes until it
 succeeds — no email is silently lost. If SMTP is turned off while emails are

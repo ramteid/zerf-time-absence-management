@@ -5,53 +5,21 @@ use crate::db::DatabasePool;
 use crate::services::settings::{
     app_today, load_setting, APPROVAL_REMINDERS_ENABLED_KEY, DEFAULT_TIMEZONE, TIMEZONE_KEY,
 };
-use chrono::{Datelike, Duration, TimeZone, Timelike, Utc};
+use chrono::{Datelike, Timelike, Utc};
 use std::time::Duration as StdDuration;
-
-const SETTINGS_POLL_INTERVAL: StdDuration = StdDuration::from_secs(3600);
 
 /// Returns the duration to wait until the next Monday at 07:00 in the
 /// configured application timezone.
 /// If today is Monday and it is not yet 07:00, targets today.
 pub fn duration_until_next_monday_7am(now: chrono::DateTime<chrono_tz::Tz>) -> StdDuration {
-    let weekday = now.weekday().num_days_from_monday();
-    let days_ahead = if weekday == 0 && now.hour() < 7 {
-        0
-    } else {
-        7 - weekday
-    };
-    let target_date = now.date_naive() + Duration::days(i64::from(days_ahead));
-    let target_naive = match target_date.and_hms_opt(7, 0, 0) {
-        Some(n) => n,
-        None => return StdDuration::from_secs(3600),
-    };
-    let target = match now.timezone().from_local_datetime(&target_naive) {
-        chrono::LocalResult::Single(dt) => dt,
-        chrono::LocalResult::Ambiguous(earliest, _) => earliest,
-        chrono::LocalResult::None => {
-            // Hour falls in DST gap; try later hours up to 23, like submission_reminders does.
-            let mut resolved = None;
-            for hour in 8..=23 {
-                if let Some(naive) = target_date.and_hms_opt(hour, 0, 0) {
-                    if let Some(dt) = now.timezone().from_local_datetime(&naive).earliest() {
-                        resolved = Some(dt);
-                        break;
-                    }
-                }
-            }
-            match resolved {
-                Some(dt) => dt,
-                None => return StdDuration::from_secs(3600),
-            }
-        }
-    };
-    (target - now)
-        .to_std()
+    super::schedule::next_monday_at(now, 7)
+        .and_then(|target| (target - now).to_std().ok())
+        .filter(|wait| !wait.is_zero())
         .unwrap_or(StdDuration::from_secs(60))
 }
 
 pub fn scheduler_sleep_duration(deadline_wait: StdDuration) -> StdDuration {
-    deadline_wait.min(SETTINGS_POLL_INTERVAL)
+    super::schedule::scheduler_sleep_duration(deadline_wait)
 }
 
 fn approval_reminder_is_due_now(now: chrono::DateTime<chrono_tz::Tz>) -> bool {
@@ -143,8 +111,7 @@ const REMINDER_INTERVAL_DAYS: u32 = 3;
 /// fires once would leave the report blocked by something nobody is being
 /// asked about any more.
 fn month_end_reminder_is_due_now(now: chrono::DateTime<chrono_tz::Tz>) -> bool {
-    now.hour() >= 8
-        && (now.date_naive().day() - 1).is_multiple_of(REMINDER_INTERVAL_DAYS)
+    now.hour() >= 8 && (now.date_naive().day() - 1).is_multiple_of(REMINDER_INTERVAL_DAYS)
 }
 
 /// Ask approvers for the finished month specifically.
@@ -255,8 +222,8 @@ pub async fn run_loop(state: crate::AppState) {
             tracing::info!(target:"zerf::approval_reminders", "Running approval reminder check");
             run_check(&state).await;
         }
-        // The month-end pass rides the same hourly wake-up (the sleep below is
-        // capped at one hour), so it fires on its own day regardless of which
+        // The month-end pass rides the same minute-based wake-up (the sleep below is
+        // capped at one minute), so it fires on its own day regardless of which
         // weekday that is. Repeats within the day are collapsed by the
         // per-period dedupe key.
         if month_end_reminder_is_due_now(now_local) {
@@ -320,16 +287,16 @@ mod tests {
         let wait = duration_until_next_monday_7am(now);
         assert_eq!(
             scheduler_sleep_duration(wait),
-            StdDuration::from_secs(3600),
+            StdDuration::from_secs(60),
             "long waits are capped so timezone settings are reloaded regularly"
         );
     }
 
     #[test]
     fn scheduler_sleep_keeps_imminent_approval_waits() {
-        let now = Berlin.with_ymd_and_hms(2026, 5, 4, 6, 30, 0).unwrap();
+        let now = Berlin.with_ymd_and_hms(2026, 5, 4, 6, 59, 30).unwrap();
         let wait = duration_until_next_monday_7am(now);
-        assert_eq!(scheduler_sleep_duration(wait).as_secs(), 30 * 60);
+        assert_eq!(scheduler_sleep_duration(wait).as_secs(), 30);
     }
 
     #[test]

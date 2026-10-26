@@ -2,7 +2,7 @@
 //! (Nextcloud timesheet upload and payroll report email).
 //!
 //! Both jobs follow the identical pattern:
-//!   1. wake up once per day shortly after midnight in the app timezone,
+//!   1. run once per day shortly after midnight in the app timezone,
 //!   2. once the configured day of month is reached, queue every month that is
 //!      still missing up to and including the previous month,
 //!   3. process queued periods, deferring the just-finished previous month
@@ -14,13 +14,140 @@
 use crate::error::{AppError, AppResult};
 use crate::services::settings;
 use crate::AppState;
-use chrono::{Datelike, NaiveDate};
+use chrono::{DateTime, Datelike, NaiveDate, TimeZone, Utc};
+use chrono_tz::Tz;
 use std::future::Future;
 
-/// Fallback sleep when the next midnight cannot be computed (e.g. a timezone
-/// transition makes the local midnight ambiguous). One hour keeps the loop
-/// alive and retries soon.
+/// Invalid/out-of-range dates retry through the same bounded sleep as normal
+/// deadlines, never through an immediate retry loop.
 const FALLBACK_WAIT: std::time::Duration = std::time::Duration::from_secs(3600);
+
+/// All wall-clock deadlines are rechecked after a bounded monotonic sleep.
+/// A past, equal or invalid deadline must never turn into a busy loop.
+pub fn scheduler_sleep_duration(wait: std::time::Duration) -> std::time::Duration {
+    wait.clamp(
+        std::time::Duration::from_secs(1),
+        std::time::Duration::from_secs(60),
+    )
+}
+
+/// Run an overlapping local time only at its first occurrence. For a missing
+/// time, use the first valid minute afterwards (including a skipped date).
+/// The search is bounded even for unusual historical timezone transitions.
+pub fn resolve_local_time(
+    date: NaiveDate,
+    hour: u32,
+    minute: u32,
+    second: u32,
+    timezone: Tz,
+) -> Option<DateTime<Tz>> {
+    let start = date.and_hms_opt(hour, minute, second)?;
+    for minutes in 0..=48 * 60 {
+        let candidate = start.checked_add_signed(chrono::Duration::minutes(minutes))?;
+        if let Some(target) = timezone.from_local_datetime(&candidate).earliest() {
+            return Some(target);
+        }
+    }
+    None
+}
+
+pub fn next_monday_at(now: DateTime<Tz>, hour: u32) -> Option<DateTime<Tz>> {
+    let days = (7 - now.weekday().num_days_from_monday()) % 7;
+    let date = now
+        .date_naive()
+        .checked_add_days(chrono::Days::new(days.into()))?;
+    let target = resolve_local_time(date, hour, 0, 0, now.timezone())?;
+    if target > now {
+        Some(target)
+    } else {
+        resolve_local_time(
+            date.checked_add_days(chrono::Days::new(7))?,
+            hour,
+            0,
+            0,
+            now.timezone(),
+        )
+        .filter(|target| *target > now)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub enum CalendarSchedule {
+    DailyAfterMidnight,
+    MondayNoon,
+}
+
+impl CalendarSchedule {
+    fn next(self, now: DateTime<Tz>) -> Option<DateTime<Tz>> {
+        match self {
+            Self::MondayNoon => next_monday_at(now, 12),
+            Self::DailyAfterMidnight => {
+                let date = now.date_naive();
+                let today = resolve_local_time(date, 0, 0, 30, now.timezone())?;
+                if today > now {
+                    Some(today)
+                } else {
+                    resolve_local_time(date.succ_opt()?, 0, 0, 30, now.timezone())
+                        .filter(|target| *target > now)
+                }
+            }
+        }
+    }
+}
+
+/// Re-read timezone settings and UTC time every minute, including after clock
+/// jumps. Repeated local dates are suppressed by the caller's high-water mark.
+pub async fn wait_for_calendar_run(
+    pool: &crate::db::DatabasePool,
+    schedule: CalendarSchedule,
+    last_run: Option<NaiveDate>,
+) -> NaiveDate {
+    let mut timer = CalendarTimer {
+        schedule,
+        planned: None,
+        last_run,
+    };
+    loop {
+        let timezone = settings::load_app_timezone(pool).await;
+        let now = Utc::now().with_timezone(&timezone);
+        if let Some(date) = timer.poll(now) {
+            return date;
+        }
+        let wait = timer
+            .planned
+            .and_then(|(_, target)| (target - now).to_std().ok())
+            .unwrap_or(FALLBACK_WAIT);
+        tokio::time::sleep(scheduler_sleep_duration(wait)).await;
+    }
+}
+
+struct CalendarTimer {
+    schedule: CalendarSchedule,
+    planned: Option<(Tz, DateTime<Tz>)>,
+    last_run: Option<NaiveDate>,
+}
+
+impl CalendarTimer {
+    fn poll(&mut self, now: DateTime<Tz>) -> Option<NaiveDate> {
+        let timezone = now.timezone();
+        if self.planned.is_none_or(|(tz, _)| tz != timezone) {
+            self.planned = self.schedule.next(now).map(|target| (timezone, target));
+        }
+        if let Some((_, target)) = self.planned {
+            if target <= now {
+                self.planned = self.schedule.next(now).map(|target| (timezone, target));
+                if self.last_run.is_none_or(|date| target.date_naive() > date) {
+                    // After a forward jump the task processes today's state,
+                    // not every missed day. Remember today to avoid replaying
+                    // it if the clock subsequently moves backwards.
+                    self.last_run = Some(now.date_naive());
+                    return self.last_run;
+                }
+            }
+        }
+        None
+    }
+}
 
 /// Run `task` once per day, 30 seconds after local midnight in the app
 /// timezone. Errors are logged with `label` as the prefix and never abort the
@@ -30,20 +157,12 @@ where
     F: Fn(AppState) -> Fut,
     Fut: Future<Output = AppResult<()>>,
 {
+    let mut last_run = None;
     loop {
-        let timezone = settings::load_app_timezone(&state.pool).await;
-        let now_utc = chrono::Utc::now();
-        let now_local = now_utc.with_timezone(&timezone);
-        let wait = now_local
-            .date_naive()
-            .succ_opt()
-            .and_then(|next_day| next_day.and_hms_opt(0, 0, 30))
-            .and_then(|local_midnight| local_midnight.and_local_timezone(timezone).single())
-            .map(|local_midnight| local_midnight.with_timezone(&chrono::Utc))
-            .and_then(|midnight_utc| (midnight_utc - now_utc).to_std().ok())
-            .unwrap_or(FALLBACK_WAIT);
-
-        tokio::time::sleep(wait).await;
+        last_run = Some(
+            wait_for_calendar_run(&state.pool, CalendarSchedule::DailyAfterMidnight, last_run)
+                .await,
+        );
 
         if let Err(e) = task(state.clone()).await {
             tracing::error!("{label}: {e:?}");
@@ -246,6 +365,172 @@ pub fn period_is_deferred(period: &str, process_through: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Timelike;
+    use chrono_tz::Europe::Berlin;
+
+    #[test]
+    fn berlin_gap_is_shifted_forward_and_overlap_uses_first_occurrence() {
+        let gap = date(2026, 3, 29);
+        assert!(Berlin
+            .with_ymd_and_hms(2026, 3, 29, 2, 30, 0)
+            .single()
+            .is_none());
+        let resolved = resolve_local_time(gap, 2, 30, 0, Berlin).unwrap();
+        assert_eq!((resolved.hour(), resolved.minute()), (3, 0));
+        let overlap = Berlin.with_ymd_and_hms(2026, 10, 25, 2, 30, 0);
+        assert_ne!(overlap.earliest(), overlap.latest());
+        assert_eq!(
+            resolve_local_time(date(2026, 10, 25), 2, 30, 0, Berlin),
+            overlap.earliest()
+        );
+    }
+
+    #[test]
+    fn resolver_handles_a_whole_skipped_date_and_invalid_input() {
+        let target =
+            resolve_local_time(date(2011, 12, 30), 0, 0, 0, chrono_tz::Pacific::Apia).unwrap();
+        assert_eq!(target.date_naive(), date(2011, 12, 31));
+        assert!(resolve_local_time(date(2026, 1, 1), 24, 0, 0, Berlin).is_none());
+        assert!(resolve_local_time(NaiveDate::MAX, 23, 59, 59, Berlin).is_some());
+    }
+
+    #[test]
+    fn daily_schedule_has_23_and_25_hour_days() {
+        for (month, day, expected_hours) in [(3, 29, 23), (10, 25, 25)] {
+            let now = Berlin.with_ymd_and_hms(2026, month, day, 0, 0, 30).unwrap();
+            let target = CalendarSchedule::DailyAfterMidnight.next(now).unwrap();
+            assert_eq!((target - now).num_hours(), expected_hours);
+            assert_eq!(target.date_naive(), now.date_naive().succ_opt().unwrap());
+        }
+    }
+
+    #[test]
+    fn weekly_schedules_follow_local_time_across_short_and_long_weeks() {
+        for (month, day, expected_hours) in [(3, 23, 167), (10, 19, 169)] {
+            for hour in [7, 12] {
+                let now = Berlin
+                    .with_ymd_and_hms(2026, month, day, hour, 0, 0)
+                    .unwrap();
+                let target = next_monday_at(now, hour).unwrap();
+                assert_eq!((target - now).num_hours(), expected_hours);
+                assert_eq!(target.hour(), hour);
+                assert_eq!(target.weekday(), chrono::Weekday::Mon);
+            }
+        }
+    }
+
+    #[test]
+    fn all_calendar_deadlines_advance_through_both_berlin_transitions() {
+        for (month, day) in [(3, 28), (10, 24)] {
+            let start = Utc.with_ymd_and_hms(2026, month, day, 0, 0, 0).unwrap();
+            for minute in 0..3 * 24 * 60 {
+                let now = (start + chrono::Duration::minutes(minute)).with_timezone(&Berlin);
+                for target in [
+                    CalendarSchedule::DailyAfterMidnight.next(now).unwrap(),
+                    next_monday_at(now, 7).unwrap(),
+                    next_monday_at(now, 12).unwrap(),
+                ] {
+                    assert!(target > now);
+                }
+                for day in 1..=28 {
+                    assert!(
+                        !crate::background::submission_reminders::duration_until_next_deadline(
+                            now, day
+                        )
+                        .is_zero()
+                    );
+                }
+            }
+        }
+    }
+
+    fn timer(schedule: CalendarSchedule) -> CalendarTimer {
+        CalendarTimer {
+            schedule,
+            planned: None,
+            last_run: None,
+        }
+    }
+
+    #[test]
+    fn daily_timer_does_not_repeat_a_midnight_when_the_clock_moves_backwards() {
+        // Cuba changes its clocks at midnight, so the daily job itself lands
+        // in the repeated hour (Berlin's overlap is later in the night).
+        let tz = chrono_tz::America::Havana;
+        let mut timer = timer(CalendarSchedule::DailyAfterMidnight);
+        let before = tz.with_ymd_and_hms(2026, 10, 31, 23, 59, 0).unwrap();
+        assert_eq!(timer.poll(before), None);
+        let overlap = tz.with_ymd_and_hms(2026, 11, 1, 0, 0, 30);
+        let first = overlap.earliest().unwrap();
+        let second = overlap.latest().unwrap();
+        assert_ne!(first, second);
+        assert_eq!(timer.poll(first), Some(date(2026, 11, 1)));
+        // The service constructs a new waiter after every completed task.
+        // Its retained date must also protect against a backwards wall clock.
+        let mut timer = CalendarTimer {
+            schedule: CalendarSchedule::DailyAfterMidnight,
+            planned: None,
+            last_run: timer.last_run,
+        };
+        assert_eq!(timer.poll(before), None);
+        assert_eq!(timer.poll(first), None);
+        assert_eq!(timer.poll(second), None);
+        assert_eq!(
+            timer.poll(tz.with_ymd_and_hms(2026, 11, 2, 0, 0, 30).unwrap()),
+            Some(date(2026, 11, 2))
+        );
+    }
+
+    #[test]
+    fn pending_daily_and_weekly_jobs_replan_when_timezone_changes() {
+        for schedule in [
+            CalendarSchedule::DailyAfterMidnight,
+            CalendarSchedule::MondayNoon,
+        ] {
+            let mut timer = timer(schedule);
+            let now = Utc.with_ymd_and_hms(2026, 5, 3, 20, 0, 0).unwrap();
+            assert_eq!(timer.poll(now.with_timezone(&Berlin)), None);
+            let old_target = timer.planned.unwrap().1;
+            let new_now = now.with_timezone(&chrono_tz::America::New_York);
+            assert_eq!(timer.poll(new_now), None);
+            let new_target = timer.planned.unwrap().1;
+            assert_ne!(
+                old_target.with_timezone(&Utc),
+                new_target.with_timezone(&Utc)
+            );
+            assert_eq!(timer.poll(new_target), Some(new_target.date_naive()));
+        }
+    }
+
+    #[test]
+    fn a_forward_clock_jump_runs_once_without_replaying_missed_days() {
+        let mut timer = timer(CalendarSchedule::DailyAfterMidnight);
+        assert_eq!(
+            timer.poll(Berlin.with_ymd_and_hms(2026, 3, 28, 23, 0, 0).unwrap()),
+            None
+        );
+        let later = Berlin.with_ymd_and_hms(2026, 4, 2, 12, 0, 0).unwrap();
+        assert!(timer.poll(later).is_some());
+        assert_eq!(timer.poll(later), None);
+        assert!(timer.planned.unwrap().1 > later);
+    }
+
+    #[test]
+    fn sleeps_are_positive_bounded_and_preserve_nearby_deadlines() {
+        use std::time::Duration;
+        assert_eq!(
+            scheduler_sleep_duration(Duration::ZERO),
+            Duration::from_secs(1)
+        );
+        assert_eq!(
+            scheduler_sleep_duration(Duration::from_secs(30)),
+            Duration::from_secs(30)
+        );
+        assert_eq!(
+            scheduler_sleep_duration(Duration::MAX),
+            Duration::from_secs(60)
+        );
+    }
 
     fn date(year: i32, month: u32, day: u32) -> NaiveDate {
         NaiveDate::from_ymd_opt(year, month, day).unwrap()

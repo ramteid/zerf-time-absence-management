@@ -91,6 +91,7 @@ pub fn new_token() -> String {
 /// idle > IDLE_TIMEOUT_HOURS OR absolute age > ABSOLUTE_TIMEOUT_HOURS.
 pub async fn cleanup_loop(pool: crate::db::DatabasePool) {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let sessions = crate::repository::SessionDb::new(pool);
     loop {
         interval.tick().await;
