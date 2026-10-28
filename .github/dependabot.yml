@@ -31,6 +31,11 @@ updates:
     labels: ["dependencies", "docker"]
     commit-message:
       prefix: "deps(docker)"
+    # The Postgres image is pinned to a digest on purpose: a new image can make
+    # the existing encrypted data volume unreadable, so it is only changed by
+    # hand together with the backup/restore procedure in postgres.Dockerfile.
+    ignore:
+      - dependency-name: "percona/percona-distribution-postgresql"
 
   # GitHub Actions versions used by the workflows.
   - package-ecosystem: "github-actions"
