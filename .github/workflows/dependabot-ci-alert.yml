@@ -1,0 +1,71 @@
+name: Dependabot CI alert
+
+# Dependabot PRs merge themselves once CI is green (auto-merge-deps.yml), so a
+# red CI run is the only case that needs a human. The repo is not watched for
+# every PR event any more; instead a failed run opens an issue assigned to the
+# maintainer, which notifies even with "participating" notifications. The issue
+# is closed again when CI turns green or the PR is closed.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  pull_request_target:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  issues: write
+
+env:
+  MAINTAINER: ramteid
+
+jobs:
+  ci-result:
+    name: Open or close alert issue
+    if: >-
+      github.event_name == 'workflow_run'
+      && github.event.workflow_run.event == 'pull_request'
+      && startsWith(github.event.workflow_run.head_branch, 'dependabot/')
+      && contains(fromJSON('["success", "failure"]'), github.event.workflow_run.conclusion)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync alert issue with CI result
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          # The run may not be linked to a PR (e.g. the PR was already closed).
+          [ -n "$PR_NUMBER" ] || exit 0
+          title="CI failed for Dependabot PR #${PR_NUMBER}"
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --label dependencies --state open \
+            --json number,title --jq ".[] | select(.title == \"${title}\") | .number")
+
+          if [ "$CONCLUSION" = "failure" ] && [ -z "$existing" ]; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --label dependencies \
+              --assignee "$MAINTAINER" --title "$title" \
+              --body "CI failed, so the PR cannot be merged: ${RUN_URL}"$'\n\n'"PR: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/pull/${PR_NUMBER}"
+          elif [ "$CONCLUSION" = "success" ] && [ -n "$existing" ]; then
+            gh issue close "$existing" --repo "$GITHUB_REPOSITORY" \
+              --comment "CI is green again: ${RUN_URL}"
+          fi
+
+  pr-closed:
+    name: Close alert issue of a closed PR
+    if: >-
+      github.event_name == 'pull_request_target'
+      && github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close alert issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          title="CI failed for Dependabot PR #${PR_NUMBER}"
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --label dependencies --state open \
+            --json number,title --jq ".[] | select(.title == \"${title}\") | .number")
+          [ -z "$existing" ] || gh issue close "$existing" --repo "$GITHUB_REPOSITORY" \
+            --comment "The pull request was closed."
