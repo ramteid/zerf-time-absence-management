@@ -7,7 +7,8 @@ use crate::repository::{SessionDb, UserDb};
 use crate::AppState;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use argon2::{Algorithm, Argon2, Params, Version};
-use rand_core::{OsRng, RngCore};
+use rand::rand_core::{Rng, UnwrapErr};
+use rand::rngs::SysRng;
 
 const MIN_PW_LEN: usize = 12;
 
@@ -82,7 +83,7 @@ pub fn validate_password_strength(pw: &str) -> AppResult<()> {
 
 pub fn new_token() -> String {
     let mut buf = [0u8; 32];
-    OsRng.fill_bytes(&mut buf);
+    UnwrapErr(SysRng).fill_bytes(&mut buf);
     hex::encode(buf)
 }
 
