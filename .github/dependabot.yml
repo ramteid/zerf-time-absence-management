@@ -17,9 +17,12 @@ updates:
       patch-and-minor:
         update-types: ["patch", "minor"]
 
-  # Base images for the build.
+  # Base images for the build. All Dockerfiles and compose files live under
+  # /docker, not the repo root — Dependabot's docker ecosystem does not
+  # recurse into subdirectories, so "directory" must point there directly or
+  # these base images are never scanned.
   - package-ecosystem: "docker"
-    directory: "/"
+    directory: "/docker"
     schedule:
       interval: "weekly"
       day: "monday"
