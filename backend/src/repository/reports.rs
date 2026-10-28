@@ -63,6 +63,72 @@ impl ReportDb {
         Self { pool }
     }
 
+    /// Establish the first report's history baseline and boundary atomically.
+    ///
+    /// Everything approved for a date before the first reported month at this
+    /// moment is existing history, not a late item: it is marked `'0000-00'`,
+    /// a value no real period can take, so the catch-up path never offers it.
+    /// Drafts and pending requests stay unmarked. Approved after this point,
+    /// they are exactly the late items a later report has to carry.
+    pub async fn initialize_payroll_history(
+        &self,
+        period: &str,
+        first_day: NaiveDate,
+    ) -> AppResult<()> {
+        let mut tx = self.pool.begin().await?;
+        let inserted: Option<String> = sqlx::query_scalar(
+            "INSERT INTO app_settings(key, value) VALUES ('payroll_report_first_period', $1) \
+             ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=CURRENT_TIMESTAMP \
+             WHERE app_settings.value='' RETURNING key",
+        )
+        .bind(period)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if inserted.is_some() {
+            sqlx::query(
+                "UPDATE time_entries SET payroll_reported_period='0000-00' \
+                 WHERE payroll_reported_period IS NULL AND status='approved' AND entry_date < $1",
+            )
+            .bind(first_day)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "UPDATE absences SET payroll_reported_period='0000-00' \
+                 WHERE payroll_reported_period IS NULL \
+                 AND status IN ('approved','cancellation_pending') AND start_date < $1",
+            )
+            .bind(first_day)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Whether a scheduled payroll report has actually gone out since the
+    /// history baseline was set. Until then nothing older than the first
+    /// reported month counts as late; from then on, anything recorded or
+    /// approved for an earlier date belongs in the next report.
+    ///
+    /// A stored content projection proves a delivery made after migration 047.
+    /// A first period that left the queue without being accounted in the day
+    /// ledger was delivered before that ledger existed.
+    pub async fn payroll_history_released(&self) -> AppResult<bool> {
+        Ok(sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM payroll_reported_content) OR EXISTS ( \
+                 SELECT 1 FROM app_settings first_period \
+                 JOIN app_settings queued ON queued.key = 'payroll_report_queue_period' \
+                 WHERE first_period.key = 'payroll_report_first_period' \
+                 AND first_period.value <> '' AND queued.value >= first_period.value \
+                 AND NOT EXISTS (SELECT 1 FROM payroll_report_queue q \
+                                 WHERE q.period = first_period.value) \
+                 AND NOT EXISTS (SELECT 1 FROM payroll_reported_periods p \
+                                 WHERE p.period = first_period.value))",
+        )
+        .fetch_one(&self.pool)
+        .await?)
+    }
+
     /// Check whether `target_id` is a non-admin direct report of `requester_id`.
     pub async fn is_direct_report(&self, target_id: i64, approver_id: i64) -> AppResult<bool> {
         Ok(sqlx::query_scalar::<_, Option<bool>>(
@@ -166,6 +232,7 @@ impl ReportDb {
              AND a.end_date >= $2 AND a.start_date <= $3 \
              AND (($4::text) IS NULL \
                   OR (a.payroll_reported_period IS NOT NULL \
+                      AND a.payroll_reported_period <> '0000-00' \
                       AND a.payroll_reported_period <= $4)) \
              ORDER BY a.start_date, a.id",
         )
@@ -645,6 +712,7 @@ impl ReportDb {
         Ok(sqlx::query_as(
             "SELECT start_date, end_date FROM absences \
              WHERE user_id=$1 AND payroll_reported_period IS NOT NULL \
+             AND payroll_reported_period <> '0000-00' \
              AND start_date < $3 AND end_date >= $2 ORDER BY start_date, id",
         )
         .bind(user_id)
@@ -743,7 +811,7 @@ impl ReportDb {
     ) -> AppResult<u64> {
         let result = sqlx::query(
             "UPDATE absences AS a SET payroll_reported_period=$1 \
-             WHERE a.payroll_reported_period IS NULL \
+             WHERE (a.payroll_reported_period IS NULL OR a.payroll_reported_period = '0000-00') \
              AND a.status IN ('approved','cancellation_pending') \
              AND a.user_id = ANY($4) \
              AND EXISTS (SELECT 1 FROM absence_categories c \
@@ -773,7 +841,7 @@ impl ReportDb {
         let versions: Vec<String> = snapshots.iter().map(|(_, version)| version.clone()).collect();
         let result = sqlx::query(
             "UPDATE absences AS a SET payroll_reported_period=$1 \
-             WHERE a.payroll_reported_period IS NULL \
+             WHERE (a.payroll_reported_period IS NULL OR a.payroll_reported_period = '0000-00') \
              AND EXISTS (SELECT 1 FROM unnest($2::bigint[], $3::text[]) snapshot(id, version) \
                          WHERE snapshot.id = a.id AND snapshot.version = a.xmin::text) \
              AND a.status IN ('approved','cancellation_pending') \

@@ -3450,6 +3450,15 @@ async fn the_first_report_ever_sent_does_not_sweep_up_the_back_catalogue() {
     .await
     .expect("floor");
     assert_eq!(floor, period, "the first queued period becomes the floor");
+    // The same run marks the existing approved history with the baseline, so
+    // it stays out even once a sent report lifts the floor.
+    let ancient_marker: Option<String> =
+        sqlx::query_scalar("SELECT payroll_reported_period FROM time_entries WHERE id=$1")
+            .bind(ancient)
+            .fetch_one(&app.state.pool)
+            .await
+            .expect("read the historical day's marker");
+    assert_eq!(ancient_marker.as_deref(), Some("0000-00"));
 
     // The decisive assertion: a report built now carries nothing from before
     // the floor, however much approved history is sitting there.
@@ -3503,6 +3512,309 @@ async fn the_first_report_ever_sent_does_not_sweep_up_the_back_catalogue() {
             .collect::<Vec<_>>()
     );
 
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn bookings_and_approvals_older_than_the_first_report_are_carried_after_send() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, emp_id, _emp_pw, _, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "older-than-first").await;
+    let lead = login_change_pw(&app, "lead-older-than-first@example.com", &lead_pw).await;
+    let (assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "older-than-first").await;
+    let assistant =
+        login_change_pw(&app, "aushilfe-older-than-first@example.com", &assistant_pw).await;
+    let today = zerf::services::settings::app_today(&app.state.pool).await;
+    let first_period = zerf::background::schedule::previous_period(today);
+    let (first_from, first_to) = zerf::background::schedule::period_bounds(&first_period).unwrap();
+    let (older_from, _) = month_bounds(first_from - Duration::days(1));
+    let mut monday = older_from + Duration::days(7);
+    while monday.weekday() != chrono::Weekday::Mon {
+        monday += Duration::days(1);
+    }
+    let sick = absence_cat(&app.state.pool, "sick").await;
+    let unpaid = absence_cat(&app.state.pool, "unpaid").await;
+    let old_absence = app
+        .state
+        .db
+        .absences
+        .create(emp_id, sick.id, true, monday, monday, None, "approved")
+        .await
+        .expect("approved history before reporting");
+    let pending_absence = app
+        .state
+        .db
+        .absences
+        .create(
+            emp_id,
+            unpaid.id,
+            false,
+            monday + Duration::days(1),
+            monday + Duration::days(1),
+            None,
+            "requested",
+        )
+        .await
+        .expect("old absence awaiting approval");
+    let historical =
+        create_and_submit_entry(&assistant, &monday.format("%Y-%m-%d").to_string(), cat_id).await;
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [historical]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve historical entry: {body}");
+    let pending_entry = create_and_submit_entry(
+        &assistant,
+        &(monday + Duration::days(1)).format("%Y-%m-%d").to_string(),
+        cat_id,
+    )
+    .await;
+
+    app.state
+        .db
+        .reports
+        .initialize_payroll_history(&first_period, first_from)
+        .await
+        .expect("baseline approved history");
+    app.state
+        .db
+        .settings
+        .save_setting(
+            zerf::services::settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+            &first_period,
+        )
+        .await
+        .expect("record queued period");
+    let markers: Vec<(i64, Option<String>)> = sqlx::query_as(
+        "SELECT id, payroll_reported_period FROM time_entries WHERE id=ANY($1) ORDER BY id",
+    )
+    .bind([historical, pending_entry])
+    .fetch_all(&app.state.pool)
+    .await
+    .expect("entry markers");
+    assert_eq!(
+        markers,
+        vec![(historical, Some("0000-00".into())), (pending_entry, None)]
+    );
+    let old_marker: Option<String> =
+        sqlx::query_scalar("SELECT payroll_reported_period FROM absences WHERE id=$1")
+            .bind(old_absence.id)
+            .fetch_one(&app.state.pool)
+            .await
+            .expect("absence marker");
+    assert_eq!(old_marker.as_deref(), Some("0000-00"));
+
+    let content = vec![zerf::repository::PayrollReportedContentRow {
+        user_id: lead_id,
+        employee: "Lead, Lara".into(),
+        kind: "hours".into(),
+        category: None,
+        from_date: None,
+        to_date: None,
+        days: 0.0,
+        minutes: Some(0),
+        medical_certificate_required: None,
+    }];
+    let delivery = app
+        .state
+        .db
+        .reports
+        .record_payroll_report_delivery(
+            &first_period,
+            first_from,
+            first_to,
+            &[],
+            &[],
+            Default::default(),
+            &[],
+            &[],
+            &content,
+        )
+        .await
+        .expect("record first delivery");
+    assert!(delivery.is_some());
+
+    let (status, body) = lead
+        .post(
+            &format!("/api/v1/absences/{}/approve", pending_absence.id),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "approve old absence after send: {body}"
+    );
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [pending_entry]}),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "approve old entry after send: {body}"
+    );
+    let late_day = monday + Duration::days(2);
+    let late_absence = app
+        .state
+        .db
+        .absences
+        .create(emp_id, sick.id, true, late_day, late_day, None, "approved")
+        .await
+        .expect("absence created after send");
+    let late_entry =
+        create_and_submit_entry(&assistant, &late_day.format("%Y-%m-%d").to_string(), cat_id).await;
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [late_entry]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve new old entry: {body}");
+
+    let (next_from, next_to) = month_bounds(first_to + Duration::days(1));
+    let carried = payroll_report::carry_over_boundary(&app.state.pool, next_from)
+        .await
+        .expect("carry boundary")
+        .expect("first report has been delivered");
+    assert!(
+        carried.since <= monday,
+        "dates older than the first report are eligible"
+    );
+    let members =
+        payroll_report::payroll_members(&app.state, next_from, next_to, &[], false, Some(&carried))
+            .await
+            .expect("members");
+    let data = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from: next_from,
+            to: next_to,
+            interim: false,
+            created_on: next_to,
+            carried: Some(carried.clone()),
+        },
+        &members,
+        &config(true, false),
+        &zerf::i18n::Language::from_setting("en"),
+        None,
+    )
+    .await
+    .expect("build next report");
+    let reported_absence_ids: Vec<i64> = data
+        .late_absence_snapshots
+        .iter()
+        .map(|(id, _)| *id)
+        .collect();
+    assert!(reported_absence_ids.contains(&pending_absence.id));
+    assert!(reported_absence_ids.contains(&late_absence.id));
+    assert!(
+        !reported_absence_ids.contains(&old_absence.id),
+        "approved pre-report history is not replayed"
+    );
+    let carried_days: Vec<_> = data
+        .late_entry_rows
+        .iter()
+        .filter(|row| row.user_id == assistant_id)
+        .map(|row| row.date)
+        .collect();
+    assert_eq!(carried_days, vec![monday + Duration::days(1), late_day]);
+    let declared: Vec<_> = data
+        .declared_work_days
+        .iter()
+        .map(|day| (day.user_id, day.date, day.minutes))
+        .collect();
+    let carried_work: Vec<_> = data
+        .carried_work_days
+        .iter()
+        .map(|day| (day.user_id, day.date))
+        .collect();
+    let content = payroll_report::reported_content_rows(&data);
+    let next_period = next_from.format("%Y-%m").to_string();
+    let recorded = app
+        .state
+        .db
+        .reports
+        .record_payroll_report_delivery(
+            &next_period,
+            next_from,
+            next_to,
+            &[],
+            &declared,
+            zerf::repository::PayrollCarryScope {
+                since: Some(carried.since),
+                before: Some(carried.before),
+                owed_periods: &carried.owed_periods,
+                days: &carried_work,
+            },
+            &data.reported_absence_snapshots,
+            &data.late_absence_snapshots,
+            &content,
+        )
+        .await
+        .expect("record next delivery");
+    assert!(recorded.is_some());
+    // Reopening a week sets every entry in it back to draft. Approving an
+    // unchanged pre-report entry again is no news for payroll: it keeps its
+    // baseline, and the next report must not repeat its hours.
+    sqlx::query("UPDATE time_entries SET status='submitted' WHERE id=$1")
+        .bind(historical)
+        .execute(&app.state.pool)
+        .await
+        .expect("reopen baseline entry");
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [historical]}),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "approve baseline entry after send: {body}"
+    );
+    let marker: Option<String> =
+        sqlx::query_scalar("SELECT payroll_reported_period FROM time_entries WHERE id=$1")
+            .bind(historical)
+            .fetch_one(&app.state.pool)
+            .await
+            .expect("read reapproved marker");
+    assert_eq!(
+        marker.as_deref(),
+        Some("0000-00"),
+        "approving a reopened history entry again keeps its baseline"
+    );
+    let remaining = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from: next_from,
+            to: next_to,
+            interim: false,
+            created_on: next_to,
+            carried: Some(carried),
+        },
+        &members,
+        &config(true, false),
+        &zerf::i18n::Language::from_setting("en"),
+        None,
+    )
+    .await
+    .expect("rebuild after delivery");
+    assert!(remaining.late_absence_rows.is_empty());
+    assert!(
+        remaining.late_entry_rows.is_empty(),
+        "nothing is repeated, including the re-approved history day: {:?}",
+        remaining
+            .late_entry_rows
+            .iter()
+            .map(|row| row.date)
+            .collect::<Vec<_>>()
+    );
     app.cleanup().await;
 }
 

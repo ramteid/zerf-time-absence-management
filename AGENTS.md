@@ -553,16 +553,29 @@ Three bounds, each guarding a different way of getting it wrong:
   it. Reading the queue alone let the running month's card offer that whole
   month as catch-up days while its own report was still to come.
 * `since` — the start of the very first period ever queued
-  (`payroll_report_first_period`, written once by `queue_previous_month`).
-  Without it the *first* report an installation ever sends would sweep in every
-  approved entry created between migration 044 and the day payroll reporting was
-  switched on: `queue_previous_month` runs before anything asks
-  "has a report been delivered?", so the "nothing queued yet → carry nothing"
-  branch is already unreachable by then. Installations predating this key fall
-  back to a permissive floor — migration 044 already marked everything that
-  existed for them, so there is no history to protect them from, and a
-  restrictive fallback would silently switch carry-over off for exactly the
-  installations that have been running longest.
+  (`payroll_report_first_period`), but only until a report has actually gone
+  out (`ReportDb::payroll_history_released`); after that it excludes nothing.
+  The existing history is kept out by a marker instead of a date. When the
+  first run sets the key, `ReportDb::initialize_payroll_history` marks every
+  entry and absence already approved for a date before that month with the
+  baseline `'0000-00'` in the same transaction (migration 053 does the same,
+  once, for installations that set the key earlier). A date would also have
+  kept out what genuinely arrives late: a sick note or an assistant's hours for
+  a month before the first report, entered or approved after it was sent.
+  Those rows are unmarked, so the next report carries them. The baseline is
+  not a declaration: the catch-up queries skip it, the regular path may
+  overwrite it with a real period, it raises no cancellation notice, and it
+  never counts as an earlier report for the quota review. Otherwise it behaves
+  exactly like a pre-ledger report marker, because its value is just as
+  unknown. Reopening a week sets every entry in it back to draft, and approving
+  it again keeps the baseline. Clearing it there re-reported the whole week's
+  hours when one shift was fixed. A shift added to such a day is unmarked and
+  carried as the difference over the whole day (the legacy path of
+  `late_entry_deltas`). An edit inside the month stays silent, and a move to
+  another month clears the marker, as for any legacy marker.
+  Installations predating the key fall back to a permissive floor: migration
+  044 already marked everything that existed for them, so there is no history
+  to protect them from.
 
 The scope travels in `ReportWindow::carried`. The live path reads candidate
 person-days through `ReportDb::carried_day_entries_before`, calculates their

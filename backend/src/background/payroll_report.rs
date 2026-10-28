@@ -207,16 +207,22 @@ pub async fn run_now(state: &AppState) -> AppResult<RunSummary> {
 
 /// Queue every month from the last recorded one through the previous month.
 async fn queue_previous_month(state: &AppState, today: NaiveDate) -> AppResult<()> {
-    // Read before the backfill runs: an empty marker here means nothing has
-    // ever been queued before, so whatever this call queues is, by
-    // definition, the earliest period the feature has ever considered. That
-    // period becomes the permanent floor `carry_over_boundary` clamps to, so
-    // the very first report this installation ever sends cannot reach back
-    // into pre-existing history it was never meant to carry.
+    // Establish the baseline before the first queue entry. Existing approved
+    // history is kept out of the first report; later bookings remain unmarked.
     let first_run =
         settings::load_setting(&state.pool, settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY, "")
             .await?
             .is_empty();
+
+    if first_run {
+        let earliest = schedule::previous_period(today);
+        let (first_day, _) = schedule::period_bounds(&earliest)?;
+        state
+            .db
+            .reports
+            .initialize_payroll_history(&earliest, first_day)
+            .await?;
+    }
 
     schedule::queue_periods_through_previous_month(
         state,
@@ -230,23 +236,6 @@ async fn queue_previous_month(state: &AppState, today: NaiveDate) -> AppResult<(
     )
     .await?;
 
-    if first_run {
-        // The floor is set once and never touched again — an idempotent
-        // insert-only write, not tied to whether this particular call ended
-        // up queuing anything (a re-run against an already-populated queue
-        // must not move the floor).
-        let floor =
-            settings::load_setting(&state.pool, settings::PAYROLL_REPORT_FIRST_PERIOD_KEY, "")
-                .await?;
-        if floor.is_empty() {
-            let earliest = schedule::previous_period(today);
-            state
-                .db
-                .settings
-                .save_setting(settings::PAYROLL_REPORT_FIRST_PERIOD_KEY, &earliest)
-                .await?;
-        }
-    }
     Ok(())
 }
 
