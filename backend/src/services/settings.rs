@@ -88,11 +88,9 @@ pub const PAYROLL_REPORT_QUEUE_PERIOD_KEY: &str = "payroll_report_queue_period";
 /// The first period ("YYYY-MM") the payroll report ever queued, set once and
 /// never overwritten, in the same transaction that marks the existing approved
 /// history before it with the `'0000-00'` baseline
-/// (`ReportDb::initialize_payroll_history`). Until a report has actually gone
-/// out, nothing dated before this period's start is carried — see
-/// `services::payroll_report::carry_over_boundary`. Afterwards the baseline
-/// alone keeps that history out, so a booking recorded or approved later for
-/// an even older date still reaches the next report.
+/// (`ReportDb::initialize_payroll_history`). The baseline, not this date, keeps
+/// that history out of every report, so a booking recorded or approved later
+/// for an even older date still reaches the next report.
 pub const PAYROLL_REPORT_FIRST_PERIOD_KEY: &str = "payroll_report_first_period";
 
 /// Newest period ("YYYY-MM") whose held-back payroll report was already

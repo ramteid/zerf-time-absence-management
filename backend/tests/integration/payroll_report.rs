@@ -3370,9 +3370,9 @@ async fn a_sent_months_employee_zero_row_survives_the_marker_based_read() {
 ///
 /// The first scheduled run is the moment `payroll_report_queue_period` stops
 /// being empty, so by the time anything asks "has a report ever been
-/// delivered?" the answer is already yes. Without a floor recorded at that
-/// same moment, the first report would treat every approved entry older than
-/// its own month — however old — as a day that missed its report.
+/// delivered?" the answer is already yes. Without the baseline marker set at
+/// that same moment, the first report would treat every approved entry older
+/// than its own month — however old — as a day that missed its report.
 #[tokio::test]
 async fn the_first_report_ever_sent_does_not_sweep_up_the_back_catalogue() {
     let app = TestApp::spawn().await;
@@ -3423,7 +3423,7 @@ async fn the_first_report_ever_sent_does_not_sweep_up_the_back_catalogue() {
     );
 
     // Now the admin switches the payroll report on and the first scheduled run
-    // happens — queueing the previous month and recording the floor.
+    // happens — queueing the previous month and marking the history before it.
     let (status, _) = admin
         .put(
             "/api/v1/settings/payroll-report",
@@ -3441,17 +3441,17 @@ async fn the_first_report_ever_sent_does_not_sweep_up_the_back_catalogue() {
         .await
         .expect("first scheduled run");
 
-    // The floor is now the first period this installation ever queued.
-    let floor = zerf::services::settings::load_setting(
+    // The first period this installation ever queued is recorded.
+    let first_period = zerf::services::settings::load_setting(
         &app.state.pool,
         zerf::services::settings::PAYROLL_REPORT_FIRST_PERIOD_KEY,
         "",
     )
     .await
-    .expect("floor");
-    assert_eq!(floor, period, "the first queued period becomes the floor");
-    // The same run marks the existing approved history with the baseline, so
-    // it stays out even once a sent report lifts the floor.
+    .expect("first period");
+    assert_eq!(first_period, period);
+    // The same run marks the existing approved history with the baseline,
+    // which is what keeps it out of every report.
     let ancient_marker: Option<String> =
         sqlx::query_scalar("SELECT payroll_reported_period FROM time_entries WHERE id=$1")
             .bind(ancient)
@@ -3460,16 +3460,12 @@ async fn the_first_report_ever_sent_does_not_sweep_up_the_back_catalogue() {
             .expect("read the historical day's marker");
     assert_eq!(ancient_marker.as_deref(), Some("0000-00"));
 
-    // The decisive assertion: a report built now carries nothing from before
-    // the floor, however much approved history is sitting there.
+    // The decisive assertion: a report built now carries none of the history
+    // that was already approved, however old it is.
     let carried = payroll_report::carry_over_boundary(&app.state.pool, from)
         .await
         .expect("carry-over boundary")
         .expect("a period has been queued, so carrying is possible in principle");
-    assert_eq!(
-        carried.since, from,
-        "nothing before the first ever reported month may be carried"
-    );
 
     let members = payroll_report::payroll_members(
         &app.state,
@@ -3818,6 +3814,117 @@ async fn bookings_and_approvals_older_than_the_first_report_are_carried_after_se
     app.cleanup().await;
 }
 
+/// An absence that starts before the first reported month and is filed after
+/// reporting began reaches the first report in full: its earlier days as a
+/// catch-up row, the rest in the month itself. A date limit at the first month
+/// cut it in two, and once the report marked the absence the earlier days were
+/// never reported anywhere.
+#[tokio::test]
+async fn an_absence_reaching_into_the_first_reported_month_keeps_its_earlier_days() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_, _, emp_id, _, _, _) =
+        bootstrap_team_with_suffix(&app, &admin, false, "first-span").await;
+    let today = zerf::services::settings::app_today(&app.state.pool).await;
+    let first_period = zerf::background::schedule::previous_period(today);
+    let (first_from, first_to) =
+        zerf::background::schedule::period_bounds(&first_period).expect("bounds");
+    app.state
+        .db
+        .reports
+        .initialize_payroll_history(&first_period, first_from)
+        .await
+        .expect("mark the history");
+    app.state
+        .db
+        .settings
+        .save_setting(
+            zerf::services::settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+            &first_period,
+        )
+        .await
+        .expect("record the queued period");
+    app.state
+        .db
+        .payroll_queue
+        .enqueue(&first_period)
+        .await
+        .expect("queue the first month");
+
+    // Filed after reporting began: a sick note for the week before the first
+    // month that runs into its first week.
+    let sick = absence_cat(&app.state.pool, "sick").await;
+    let (start, end) = (
+        first_from - Duration::days(7),
+        first_from + Duration::days(6),
+    );
+    let absence = app
+        .state
+        .db
+        .absences
+        .create(emp_id, sick.id, true, start, end, None, "approved")
+        .await
+        .expect("file the sick note");
+
+    let carried = payroll_report::carry_over_boundary(&app.state.pool, first_from)
+        .await
+        .expect("carry-over boundary");
+    let members = payroll_report::payroll_members(
+        &app.state,
+        first_from,
+        first_to,
+        &[],
+        false,
+        carried.as_ref(),
+    )
+    .await
+    .expect("members");
+    let data = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from: first_from,
+            to: first_to,
+            interim: false,
+            created_on: first_to,
+            carried,
+        },
+        &members,
+        &config(false, false),
+        &zerf::i18n::Language::from_setting("en"),
+        None,
+    )
+    .await
+    .expect("build the first report");
+    let regular: Vec<_> = data
+        .absence_rows
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .filter(|row| row.user_id == emp_id)
+        .map(|row| (row.from, row.to))
+        .collect();
+    assert_eq!(regular, vec![(first_from, end)], "the month's own days");
+    let late: Vec<_> = data
+        .late_absence_rows
+        .iter()
+        .filter(|row| row.user_id == emp_id)
+        .map(|row| (row.from, row.to))
+        .collect();
+    assert_eq!(
+        late,
+        vec![(start, first_from - Duration::days(1))],
+        "the days before the first month are reported too"
+    );
+    assert!(
+        data.late_absence_snapshots
+            .iter()
+            .any(|(id, _)| *id == absence.id),
+        "the absence is marked for the days the document declared"
+    );
+
+    app.cleanup().await;
+}
+
 /// One month stuck behind a late approval must not freeze carry-over for the
 /// months after it that were already delivered.
 ///
@@ -3900,15 +4007,6 @@ async fn a_stuck_month_does_not_freeze_carry_over_for_the_months_after_it() {
         )
         .await
         .expect("record the queued period");
-    app.state
-        .db
-        .settings
-        .save_setting(
-            zerf::services::settings::PAYROLL_REPORT_FIRST_PERIOD_KEY,
-            &stuck_period,
-        )
-        .await
-        .expect("record the floor");
 
     let carried = payroll_report::carry_over_boundary(&app.state.pool, reporting_from)
         .await
@@ -4692,6 +4790,213 @@ async fn cancellation_migration_catches_post_marker_cancellations_once() {
         "SELECT id, payroll_cancellation_pending FROM absences WHERE id=ANY($1) ORDER BY id",
     ).bind([older.id, newer.id]).fetch_all(&app.state.pool).await.expect("read flags");
     assert_eq!(flags, vec![(older.id, false), (newer.id, true)]);
+
+    app.cleanup().await;
+}
+
+async fn cancellation_flags(app: &TestApp, ids: &[i64]) -> Vec<(i64, bool)> {
+    sqlx::query_as(
+        "SELECT id, payroll_cancellation_pending FROM absences WHERE id=ANY($1) ORDER BY id",
+    )
+    .bind(ids)
+    .fetch_all(&app.state.pool)
+    .await
+    .expect("read the cancellation notices")
+}
+
+/// A cancellation notice asks payroll to check an absence a sent report
+/// contained. The marker alone is not proof: migration 046 marked every
+/// absence that existed when it ran, planned ones and other categories
+/// included. An admin's revoke withdraws a reported absence just like an
+/// approved cancellation does, so it raises the notice too.
+#[tokio::test]
+async fn only_withdrawing_an_absence_a_sent_report_contained_needs_payroll_review() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_, _, emp_id, _, _, _) =
+        bootstrap_team_with_suffix(&app, &admin, false, "revoke-review").await;
+    let day = anchor_monday();
+    let (from, to) = month_bounds(day);
+    let period = from.format("%Y-%m").to_string();
+    let (next_from, _) = month_bounds(to + Duration::days(1));
+    let next_period = next_from.format("%Y-%m").to_string();
+    // The month of `day` has been reported, the next one has not.
+    app.state
+        .db
+        .settings
+        .save_setting(
+            zerf::services::settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+            &period,
+        )
+        .await
+        .expect("record the reported period");
+    let sick = absence_cat(&app.state.pool, "sick").await;
+    let vacation = absence_cat(&app.state.pool, "vacation").await;
+    let mut absence_ids = Vec::new();
+    for (category_id, date, marker) in [
+        // A sick note the report printed.
+        (sick.id, day, &period),
+        // A holiday the backfill marked: never a payroll category.
+        (vacation.id, day + Duration::days(1), &period),
+        // A sick note the backfill marked for a month not reported yet.
+        (sick.id, next_from + Duration::days(1), &next_period),
+    ] {
+        let absence = app
+            .state
+            .db
+            .absences
+            .create(emp_id, category_id, true, date, date, None, "approved")
+            .await
+            .expect("create the absence");
+        sqlx::query("UPDATE absences SET payroll_reported_period=$1 WHERE id=$2")
+            .bind(marker)
+            .bind(absence.id)
+            .execute(&app.state.pool)
+            .await
+            .expect("set the marker");
+        let (status, body) = admin
+            .post(
+                &format!("/api/v1/absences/{}/revoke", absence.id),
+                &json!({}),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "revoke the absence: {body}");
+        absence_ids.push(absence.id);
+    }
+    let expected = vec![
+        (absence_ids[0], true),
+        (absence_ids[1], false),
+        (absence_ids[2], false),
+    ];
+    assert_eq!(
+        cancellation_flags(&app, &absence_ids).await,
+        expected,
+        "only the sick note a sent report contained needs review"
+    );
+
+    // Migration 052 raised a notice for every cancelled absence with a
+    // marker. Migration 054 keeps only the one a report contained.
+    sqlx::query("UPDATE absences SET payroll_cancellation_pending=TRUE WHERE id=ANY($1)")
+        .bind(&absence_ids)
+        .execute(&app.state.pool)
+        .await
+        .expect("raise every notice");
+    sqlx::raw_sql(include_str!(
+        "../../migrations/054_payroll_cancellation_review_scope.sql"
+    ))
+    .execute(&app.state.pool)
+    .await
+    .expect("apply the migration");
+    assert_eq!(cancellation_flags(&app, &absence_ids).await, expected);
+
+    app.cleanup().await;
+}
+
+/// Somebody archived before their last month's report ran is still in that
+/// report. The send marks every entry of the month as accounted for, so
+/// leaving them out would lose their last hours for good. A booking nobody
+/// approved holds the report back only when the report prints their hours.
+#[tokio::test]
+async fn people_archived_before_the_report_still_get_their_last_month() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, emp_id, emp_pw, _, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "archived-last-month").await;
+    let lead = login_change_pw(&app, "lead-archived-last-month@example.com", &lead_pw).await;
+    let employee = login_change_pw(&app, "emp-archived-last-month@example.com", &emp_pw).await;
+    let (paid_id, paid_pw) = create_assistant(&admin, lead_id, "archived-paid").await;
+    let paid = login_change_pw(&app, "aushilfe-archived-paid@example.com", &paid_pw).await;
+    let (open_id, open_pw) = create_assistant(&admin, lead_id, "archived-open").await;
+    let open = login_change_pw(&app, "aushilfe-archived-open@example.com", &open_pw).await;
+    let day = anchor_monday();
+    let day_iso = day.format("%Y-%m-%d").to_string();
+    let (from, to) = month_bounds(day);
+
+    // One assistant's last shift was approved. The other's was not, and
+    // archiving turns it back into a draft. The employee left a draft too.
+    let approved = create_and_submit_entry(&paid, &day_iso, cat_id).await;
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [approved]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve the last shift: {body}");
+    create_and_submit_entry(&open, &day_iso, cat_id).await;
+    create_and_submit_entry(&employee, &day_iso, cat_id).await;
+    for user_id in [paid_id, open_id, emp_id] {
+        let (status, body) = admin
+            .post(&format!("/api/v1/users/{user_id}/archive"), &json!({}))
+            .await;
+        assert_eq!(status, StatusCode::OK, "archive user {user_id}: {body}");
+    }
+
+    let report_config = config(true, false);
+    let members = payroll_report::payroll_members(&app.state, from, to, &[], false, None)
+        .await
+        .expect("members");
+    for user_id in [paid_id, open_id, emp_id] {
+        assert!(
+            members.iter().any(|member| member.id == user_id),
+            "user {user_id} booked time in the month and belongs to its report"
+        );
+    }
+    let readiness = payroll_report::evaluate_members(
+        &app.state,
+        &members,
+        from,
+        to,
+        |role| {
+            if report_config.includes_hours_for(role) {
+                zerf::services::reports::UnapprovedEntries::AnyUnsettled
+            } else {
+                zerf::services::reports::UnapprovedEntries::NotRequired
+            }
+        },
+        false,
+        zerf::services::reports::PendingAbsences::PayrollRelevant,
+    )
+    .await
+    .expect("readiness");
+    let held: Vec<i64> = readiness
+        .iter()
+        .filter(|member| member.reason_key.is_some())
+        .map(|member| member.user.id)
+        .collect();
+    assert_eq!(
+        held,
+        vec![open_id],
+        "only an unapproved shift whose hours the report prints holds it back"
+    );
+
+    let ready: Vec<_> = readiness
+        .into_iter()
+        .filter(|member| member.reason_key.is_none())
+        .map(|member| member.user)
+        .collect();
+    let data = payroll_report::build_report_data(
+        &app.state,
+        payroll_report::ReportWindow {
+            from,
+            to,
+            interim: false,
+            created_on: to,
+            carried: None,
+        },
+        &ready,
+        &report_config,
+        &zerf::i18n::Language::from_setting("en"),
+        None,
+    )
+    .await
+    .expect("build the report");
+    assert!(
+        data.hours_sections[0]
+            .rows
+            .iter()
+            .any(|row| row.user_id == paid_id && row.minutes == 240),
+        "the archived assistant's last approved shift is printed"
+    );
 
     app.cleanup().await;
 }

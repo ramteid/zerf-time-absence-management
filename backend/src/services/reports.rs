@@ -2426,9 +2426,13 @@ pub async fn month_export_readiness(
 
     let is_historical_only = user.archived_at.is_some() || !user.active || !user.tracks_time;
     if is_historical_only {
-        if reports_db
-            .has_unresolved_time_entries_in_range(user.id, from, judged_to)
-            .await?
+        // Nobody can settle their entries any more, but an unsettled booking
+        // still holds back a document that prints their hours. One that does
+        // not print them has nothing to wait for.
+        if matches!(unapproved, UnapprovedEntries::AnyUnsettled)
+            && reports_db
+                .has_unresolved_time_entries_in_range(user.id, from, judged_to)
+                .await?
         {
             return Ok(MonthExportReadiness::UnresolvedTimeEntries);
         }

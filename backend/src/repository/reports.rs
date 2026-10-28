@@ -63,13 +63,14 @@ impl ReportDb {
         Self { pool }
     }
 
-    /// Establish the first report's history baseline and boundary atomically.
+    /// Record the first reported month and mark the history before it, once
+    /// and atomically.
     ///
     /// Everything approved for a date before the first reported month at this
     /// moment is existing history, not a late item: it is marked `'0000-00'`,
     /// a value no real period can take, so the catch-up path never offers it.
     /// Drafts and pending requests stay unmarked. Approved after this point,
-    /// they are exactly the late items a later report has to carry.
+    /// they are exactly the late items the next report has to carry.
     pub async fn initialize_payroll_history(
         &self,
         period: &str,
@@ -103,30 +104,6 @@ impl ReportDb {
         }
         tx.commit().await?;
         Ok(())
-    }
-
-    /// Whether a scheduled payroll report has actually gone out since the
-    /// history baseline was set. Until then nothing older than the first
-    /// reported month counts as late; from then on, anything recorded or
-    /// approved for an earlier date belongs in the next report.
-    ///
-    /// A stored content projection proves a delivery made after migration 047.
-    /// A first period that left the queue without being accounted in the day
-    /// ledger was delivered before that ledger existed.
-    pub async fn payroll_history_released(&self) -> AppResult<bool> {
-        Ok(sqlx::query_scalar(
-            "SELECT EXISTS (SELECT 1 FROM payroll_reported_content) OR EXISTS ( \
-                 SELECT 1 FROM app_settings first_period \
-                 JOIN app_settings queued ON queued.key = 'payroll_report_queue_period' \
-                 WHERE first_period.key = 'payroll_report_first_period' \
-                 AND first_period.value <> '' AND queued.value >= first_period.value \
-                 AND NOT EXISTS (SELECT 1 FROM payroll_report_queue q \
-                                 WHERE q.period = first_period.value) \
-                 AND NOT EXISTS (SELECT 1 FROM payroll_reported_periods p \
-                                 WHERE p.period = first_period.value))",
-        )
-        .fetch_one(&self.pool)
-        .await?)
     }
 
     /// Check whether `target_id` is a non-admin direct report of `requester_id`.

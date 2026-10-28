@@ -313,14 +313,32 @@ pub async fn payroll_members(
         }
     }
     let mut members = app_state.db.reports.timesheet_members_for_period(to).await?;
-    // The period-scoped query only knows people who are still active and
-    // tracking time, so an assistant who has left since is missing from it.
-    // Their unpaid day is exactly what this is for.
-    let known: std::collections::HashSet<i64> = members.iter().map(|member| member.id).collect();
-    // `known` grows as they are added: somebody holding both a carried day and
-    // a carried absence appears in both lists, and adding them twice would
+    // `known` grows as people are added: somebody holding both a carried day
+    // and a carried absence appears in both lists, and adding them twice would
     // duplicate every row they produce.
-    let mut known = known;
+    let mut known: std::collections::HashSet<i64> =
+        members.iter().map(|member| member.id).collect();
+    // The period-scoped query only knows people who are still active and
+    // tracking time. Somebody who left and was archived before this month's
+    // report ran is missing from it, yet their last month is still owed. Left
+    // out, it would be lost for good: the send marks every entry of the month
+    // as accounted for, so no later report would carry those hours either.
+    let mut departed_ids: Vec<i64> = users_with_entries
+        .union(&users_with_payroll_absences)
+        .copied()
+        .filter(|user_id| !known.contains(user_id))
+        .collect();
+    departed_ids.sort_unstable();
+    for user_id in departed_ids {
+        if let Some(member) = app_state.db.users.find_by_id(user_id).await? {
+            if member.start_date <= to && known.insert(member.id) {
+                members.push(member);
+            }
+        }
+    }
+    // Carried days and absences can belong to people with no activity in this
+    // month at all, such as an assistant who left earlier. Their unpaid day is
+    // exactly what this is for.
     for member in late_members
         .into_iter()
         .chain(late_absence_members)
@@ -388,9 +406,9 @@ pub async fn period_delivered(pool: &crate::db::DatabasePool, period: &str) -> A
 /// Which days from earlier months a report shows in its catch-up section.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CarriedDays {
-    /// The first report starts at its own month. After a delivery this permits
-    /// older dates too; approved pre-existing history has a baseline marker,
-    /// while new bookings and later approvals remain eligible for reporting.
+    /// Never below this date. A report always asks from the very beginning
+    /// ([`NO_CARRY_OVER_FLOOR`]); history from before payroll reporting is kept
+    /// out by its marker instead. Tests narrow it to keep a scenario small.
     pub since: NaiveDate,
     /// Only days before this date — always the reported month's own start,
     /// since everything from there on belongs to its regular sections.
@@ -474,7 +492,7 @@ pub async fn carry_over_boundary(
     }
 
     Ok(Some(CarriedDays {
-        since: carry_over_floor(pool).await?,
+        since: NO_CARRY_OVER_FLOOR,
         // Everything from the reported month onwards belongs to its regular
         // sections, not to the catch-up one.
         before: period_start,
@@ -483,41 +501,15 @@ pub async fn carry_over_boundary(
     }))
 }
 
-/// Keep the first report within its own month. Once a report has been sent,
-/// later approved or recorded history may be carried from any earlier month.
-///
-/// Installations that predate the first-period setting use the legacy marker
-/// backfill and may already have sent reports from before the ledger existed.
-async fn carry_over_floor(pool: &crate::db::DatabasePool) -> AppResult<NaiveDate> {
-    let first_period =
-        settings::load_setting(pool, settings::PAYROLL_REPORT_FIRST_PERIOD_KEY, "").await?;
-    if first_period.is_empty() {
-        // An installation that was already sending payroll reports before this
-        // floor existed. There is nothing to protect it from: migration 044
-        // marked every entry that existed when the carry-over feature arrived,
-        // so no pre-existing history can be mistaken for a late booking. The
-        // floor must therefore be permissive here — a restrictive fallback
-        // would silently switch carry-over off for exactly the installations
-        // that have been running longest.
-        return Ok(NO_CARRY_OVER_FLOOR);
-    }
-    // Once a report has gone out, existing history carries the `'0000-00'`
-    // baseline marker, so the floor is no longer what keeps it out. Lifting it
-    // lets a booking recorded or approved since then reach the next report,
-    // however old its date.
-    if crate::repository::ReportDb::new(pool.clone())
-        .payroll_history_released()
-        .await?
-    {
-        return Ok(NO_CARRY_OVER_FLOOR);
-    }
-    crate::background::schedule::period_bounds(&first_period).map(|(start, _)| start)
-}
-
-/// Lower bound that excludes nothing, for installations predating
-/// [`settings::PAYROLL_REPORT_FIRST_PERIOD_KEY`]. Earlier than any date this
-/// application can hold: a time entry cannot precede its owner's start date,
-/// and no real employment record reaches back this far.
+/// Lower bound that excludes nothing. History from before the payroll report
+/// existed is kept out by markers, never by a date: migrations 044 and 046
+/// marked everything that existed when carry-over arrived, and
+/// `ReportDb::initialize_payroll_history` marks the approved history of a
+/// newer installation with `'0000-00'`. A date would also keep out what really
+/// arrives late for those months, and cut an absence starting before it in
+/// two, losing the earlier part once the report marks it. Earlier than any
+/// date this application can hold: a time entry cannot precede its owner's
+/// start date, and no real employment record reaches back this far.
 const NO_CARRY_OVER_FLOOR: NaiveDate = match NaiveDate::from_ymd_opt(1970, 1, 1) {
     Some(date) => date,
     None => unreachable!(),
@@ -839,10 +831,9 @@ pub async fn build_content(
     // month's report contained" would say the tax office already has it.
     let carried = if sent {
         // An exact match on the mark (`reported_as: Some(period)`) already
-        // scopes this precisely, so `since` only has to be a value the mark
-        // could actually have used — the feature's own floor always is.
+        // scopes this precisely, so `since` must not narrow it.
         Some(CarriedDays {
-            since: carry_over_floor(&app_state.pool).await?,
+            since: NO_CARRY_OVER_FLOOR,
             before: from,
             // Reading history back: the mark alone says what went out, and a
             // month owed *now* has no bearing on what that send did months ago.
