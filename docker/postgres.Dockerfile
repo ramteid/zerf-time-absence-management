@@ -11,7 +11,7 @@
 # To upgrade: (1) take a backup, (2) update this digest, (3) rebuild,
 # (4) wipe the postgres volumes, (5) start postgres (fresh init), (6) restore
 # from the backup with scripts/restore.sh.
-FROM percona/percona-distribution-postgresql:18@sha256:40b133dec71f85dbc391bdf686bbc6b745517c2a9ffe49158ff77809f9bf28e4
+FROM percona/percona-distribution-postgresql:18@sha256:27a1dba816fcc4cec88f216d54e3ec86db4c1d4b16799f49800055c41606e11e
 
 # We need root to install packages and copy our scripts into system paths.
 # The base image switches to USER 26 (postgres) before its ENTRYPOINT;
