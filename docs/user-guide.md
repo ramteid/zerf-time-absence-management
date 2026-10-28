@@ -2079,6 +2079,12 @@ entirely and no longer hold up its delivery.
 Administrators never appear in the payroll report and are not offered in the
 list. Deactivated and deleted accounts are not shown either.
 
+Somebody who leaves is still in the report for the months they worked. If you
+archive an assistant at the end of the month, their last month's hours still
+reach that month's report. Approve their last week before you archive them:
+archiving turns a week still waiting for approval back into a draft, and the
+report then waits for it (see [When it is sent](#when-it-is-sent)).
+
 #### What the PDF contains
 
 - **Absence days**: one row per absence period — person, category, first and last
@@ -2156,16 +2162,16 @@ report.
 This also covers months before the first report Zerf sent. Working time and
 absences that were already approved when the payroll report started are
 treated as settled and are not reported. Anything entered or approved for
-those months later is reported like any other late change, in the first
-report after one has actually been sent. A change to a shift that was
-already approved back then is not reported automatically. Tell payroll about
-such a change yourself.
+those months later is reported like any other late change, in the next report.
+A change to a shift that was already approved back then is not reported
+automatically. Tell payroll about such a change yourself.
 
-If a previously reported absence is later cancelled, the next report lists
-the person, category and original dates under **Cancelled absences**. Payroll
-must check the earlier report and make any correction; the notice does not
-guess how many days were previously declared. A cancellation that was never
-reported needs no notice.
+If a previously reported absence is later cancelled or revoked, the next
+report lists the person, category and original dates under **Cancelled
+absences**. Payroll must check the earlier report and make any correction; the
+notice does not guess how many days were previously declared. An absence that
+was never reported needs no notice when it is cancelled, for example a planned
+absence in a month whose report has not gone out yet, or a holiday.
 
 For a contract without fixed working weekdays, an earlier report can already
 have used part of a week's day quota. When the amount cannot be determined
@@ -2188,7 +2194,10 @@ office receives:
 1. **A booking that exists and is not approved yet**, from somebody whose hours
    the report prints. A draft, an entry waiting for a decision, a rejection
    nobody corrected — each of them is proof that the person worked, and the
-   hours are missing from a report that counts only approved minutes.
+   hours are missing from a report that counts only approved minutes. This also
+   applies to somebody who has been archived since. Nobody can approve their
+   booking any more, so restore the account to settle it. Leaving the person
+   out under **People included** sends the report without any of their hours.
 2. **An undecided absence request the report would print** — a sick or unpaid
    day of an employee or team lead. Those days are in the document, but only
    once they are approved.

@@ -552,30 +552,30 @@ Three bounds, each guarding a different way of getting it wrong:
   month, before the send day, the month just finished is due and absent from
   it. Reading the queue alone let the running month's card offer that whole
   month as catch-up days while its own report was still to come.
-* `since` — the start of the very first period ever queued
-  (`payroll_report_first_period`), but only until a report has actually gone
-  out (`ReportDb::payroll_history_released`); after that it excludes nothing.
-  The existing history is kept out by a marker instead of a date. When the
-  first run sets the key, `ReportDb::initialize_payroll_history` marks every
-  entry and absence already approved for a date before that month with the
-  baseline `'0000-00'` in the same transaction (migration 053 does the same,
-  once, for installations that set the key earlier). A date would also have
-  kept out what genuinely arrives late: a sick note or an assistant's hours for
-  a month before the first report, entered or approved after it was sent.
-  Those rows are unmarked, so the next report carries them. The baseline is
-  not a declaration: the catch-up queries skip it, the regular path may
-  overwrite it with a real period, it raises no cancellation notice, and it
-  never counts as an earlier report for the quota review. Otherwise it behaves
-  exactly like a pre-ledger report marker, because its value is just as
-  unknown. Reopening a week sets every entry in it back to draft, and approving
-  it again keeps the baseline. Clearing it there re-reported the whole week's
-  hours when one shift was fixed. A shift added to such a day is unmarked and
-  carried as the difference over the whole day (the legacy path of
-  `late_entry_deltas`). An edit inside the month stays silent, and a move to
-  another month clears the marker, as for any legacy marker.
-  Installations predating the key fall back to a permissive floor: migration
-  044 already marked everything that existed for them, so there is no history
-  to protect them from.
+* `since` — excludes nothing (`NO_CARRY_OVER_FLOOR`); tests narrow it to keep
+  a scenario small. History from before payroll reporting is kept out by a
+  marker, never by a date. Migrations 044 and 046 marked everything that
+  existed when carry-over arrived. A newer installation gets the baseline
+  `'0000-00'` instead: when the first run records `payroll_report_first_period`,
+  `ReportDb::initialize_payroll_history` marks every entry and absence already
+  approved for a date before that month in the same transaction (migration 053
+  does the same, once, for installations that set the key earlier). A date
+  limit kept out what genuinely arrives late as well: a sick note or an
+  assistant's hours for a month before the first report, entered or approved
+  after reporting began. Those rows are unmarked, so the next report carries
+  them, the very first one included. A date limit also cut an absence starting
+  before it in two: the report printed and marked the in-month part, and the
+  earlier days were never reported. The baseline is not a declaration: the
+  catch-up queries skip it, the regular path may overwrite it with a real
+  period, it raises no cancellation notice, and it never counts as an earlier
+  report for the quota review. Otherwise it behaves exactly like a pre-ledger
+  report marker, because its value is just as unknown. Reopening a week sets
+  every entry in it back to draft, and approving it again keeps the baseline.
+  Clearing it there re-reported the whole week's hours when one shift was
+  fixed. A shift added to such a day is unmarked and carried as the difference
+  over the whole day (the legacy path of `late_entry_deltas`). An edit inside
+  the month stays silent, and a move to another month clears the marker, as for
+  any legacy marker.
 
 The scope travels in `ReportWindow::carried`. The live path reads candidate
 person-days through `ReportDb::carried_day_entries_before`, calculates their
@@ -632,12 +632,19 @@ Member selection applies the same owed-month filter as the row builder, so an ab
 that belongs entirely to a month still queued does not pull somebody into a
 later month's report.
 
-When an absence with a payroll marker is cancelled, migration 052's
-`payroll_cancellation_pending` keeps a review notice until a scheduled report
-actually includes it. The PDF and dashboard show its original dates and ask
-payroll to check earlier declarations without assuming a historical day count.
-The migration also flags cancellations approved after migration 046 installed
-the marker; reapplying it never reopens a notice already sent. Manual sends do
+When an absence a sent report contained is cancelled or revoked, migration
+052's `payroll_cancellation_pending` keeps a review notice until a scheduled
+report actually includes it. The PDF and dashboard show its original dates and
+ask payroll to check earlier declarations without assuming a historical day
+count. A marker alone does not prove the report contained it: migration 046
+marked every absence that existed when it ran, planned ones, other categories
+and assistants' absences included. So `CANCELLATION_NEEDS_PAYROLL_REVIEW`
+(`repository/absences.rs`) also requires what printing requires: a
+payroll-relevant category, an owner who is not an assistant, and a month of the
+absence whose report has gone out. Both the approved cancellation and an
+admin's revoke set it. Migration 052 flagged cancellations approved after
+migration 046 installed the marker; migration 054 cleared those that fail the
+rule. Reapplying either never reopens a notice already sent. Manual sends do
 not settle notices. Archived employees with pending notices remain report
 members, while assistants and excluded people follow the ordinary report rules.
 
@@ -648,6 +655,15 @@ manual review rather than guessing a number. Recorded weekday patterns have no
 weekly quota and continue to use automatic day counts. All rows in this report
 for an affected person are reviewed together so a multi-week range cannot shift
 quota onto a second row.
+
+`payroll_members` also takes people who left: somebody archived before their
+last month's report ran is no longer active, so `timesheet_members_for_period`
+misses them, yet that month still holds their hours and absences. Anyone with
+an entry or a payroll-relevant absence in the month is a member. Leaving them
+out lost their last hours for good, because the send marks every entry of the
+month as accounted for. Nobody can settle an archived person's entries any
+more, so an unsettled one holds the report back only when the report prints
+their hours (`month_export_readiness`), and the hold notice names them.
 
 `payroll_members` takes corrections too, because somebody whose only activity is
 an older changed day has no row in the month now being reported and may since

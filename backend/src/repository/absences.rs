@@ -5,6 +5,33 @@ use serde::Serialize;
 use sqlx::{Postgres, QueryBuilder};
 use std::collections::HashSet;
 
+/// Whether cancelling the `absences` row being updated withdraws something a
+/// sent payroll report contained, so the next report must ask payroll to
+/// check it. Evaluated at the moment of cancellation.
+///
+/// The marker alone is not proof. Migration 046 marked every absence that
+/// existed when it ran, including planned ones, other categories and
+/// assistants' absences, and `'0000-00'` is history from before the first
+/// report. None of those reached a report. So the notice also requires what
+/// printing requires: a payroll-relevant category, an owner whose absences the
+/// report prints, and a month of the absence whose report has gone out.
+const CANCELLATION_NEEDS_PAYROLL_REVIEW: &str = "\
+    (absences.payroll_reported_period IS NOT NULL \
+     AND absences.payroll_reported_period <> '0000-00' \
+     AND EXISTS (SELECT 1 FROM absence_categories c \
+                 WHERE c.id = absences.category_id \
+                 AND (c.auto_approve_past = TRUE OR c.unpaid = TRUE)) \
+     AND EXISTS (SELECT 1 FROM users u \
+                 WHERE u.id = absences.user_id AND lower(btrim(u.role)) <> 'assistant') \
+     AND EXISTS (SELECT 1 FROM app_settings queued, \
+                      generate_series(date_trunc('month', absences.start_date), \
+                                      date_trunc('month', absences.end_date), \
+                                      interval '1 month') AS month(start) \
+                 WHERE queued.key = 'payroll_report_queue_period' \
+                 AND to_char(month.start, 'YYYY-MM') <= queued.value \
+                 AND NOT EXISTS (SELECT 1 FROM payroll_report_queue q \
+                                 WHERE q.period = to_char(month.start, 'YYYY-MM'))))";
+
 /// `Absence` rows expose both `category_id` (the canonical reference) and
 /// `kind` (the slug, populated by joining absence_categories). Frontend code
 /// and business logic that previously branched on `kind == "vacation"` is
@@ -674,14 +701,20 @@ impl AbsenceDb {
         absence_id: i64,
         reviewer_id: i64,
     ) -> AppResult<()> {
-        sqlx::query(
+        // A revoked absence is withdrawn exactly like an approved cancellation,
+        // so payroll has to hear about it the same way.
+        let sql = format!(
             "UPDATE absences SET status='cancelled', reviewed_by=$1, \
-             reviewed_at=CURRENT_TIMESTAMP WHERE id=$2",
-        )
-        .bind(reviewer_id)
-        .bind(absence_id)
-        .execute(tx)
-        .await?;
+             reviewed_at=CURRENT_TIMESTAMP, \
+             payroll_cancellation_pending={CANCELLATION_NEEDS_PAYROLL_REVIEW} \
+             WHERE id=$2"
+        );
+        // AssertSqlSafe: the formatted fragment is a compile-time constant.
+        sqlx::query(sqlx::AssertSqlSafe(sql))
+            .bind(reviewer_id)
+            .bind(absence_id)
+            .execute(tx)
+            .await?;
         Ok(())
     }
 
@@ -704,18 +737,19 @@ impl AbsenceDb {
         absence_id: i64,
         reviewer_id: i64,
     ) -> AppResult<u64> {
-        Ok(sqlx::query(
+        let sql = format!(
             "UPDATE absences SET status='cancelled', reviewed_by=$1, \
              reviewed_at=CURRENT_TIMESTAMP, \
-             payroll_cancellation_pending=(payroll_reported_period IS NOT NULL \
-                                           AND payroll_reported_period <> '0000-00') \
-             WHERE id=$2 AND status='cancellation_pending'",
-        )
-        .bind(reviewer_id)
-        .bind(absence_id)
-        .execute(tx)
-        .await?
-        .rows_affected())
+             payroll_cancellation_pending={CANCELLATION_NEEDS_PAYROLL_REVIEW} \
+             WHERE id=$2 AND status='cancellation_pending'"
+        );
+        // AssertSqlSafe: the formatted fragment is a compile-time constant.
+        Ok(sqlx::query(sqlx::AssertSqlSafe(sql))
+            .bind(reviewer_id)
+            .bind(absence_id)
+            .execute(tx)
+            .await?
+            .rows_affected())
     }
 
     pub async fn reject_cancellation_tx(
