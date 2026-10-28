@@ -2153,6 +2153,14 @@ days belonging to a month that has already been reported are carried, and the
 days belonging to a month whose report is still outstanding are left to that
 report.
 
+This also covers months before the first report Zerf sent. Working time and
+absences that were already approved when the payroll report started are
+treated as settled and are not reported. Anything entered or approved for
+those months later is reported like any other late change, in the first
+report after one has actually been sent. A change to a shift that was
+already approved back then is not reported automatically. Tell payroll about
+such a change yourself.
+
 If a previously reported absence is later cancelled, the next report lists
 the person, category and original dates under **Cancelled absences**. Payroll
 must check the earlier report and make any correction; the notice does not

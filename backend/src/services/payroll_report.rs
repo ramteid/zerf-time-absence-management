@@ -388,14 +388,9 @@ pub async fn period_delivered(pool: &crate::db::DatabasePool, period: &str) -> A
 /// Which days from earlier months a report shows in its catch-up section.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CarriedDays {
-    /// Never below this date. Always the start of the very first period the
-    /// payroll report ever queued (`PAYROLL_REPORT_FIRST_PERIOD_KEY`), fixed
-    /// forever once that first period exists. Without it, an installation's
-    /// first-ever report would treat "nothing has been queued before" as "no
-    /// lower limit at all", sweeping in every approved entry created between
-    /// the `payroll_reported_period` migration and the day payroll reporting
-    /// was actually turned on — which for an org that already used Zerf for
-    /// time tracking could be months of unrelated history.
+    /// The first report starts at its own month. After a delivery this permits
+    /// older dates too; approved pre-existing history has a baseline marker,
+    /// while new bookings and later approvals remain eligible for reporting.
     pub since: NaiveDate,
     /// Only days before this date — always the reported month's own start,
     /// since everything from there on belongs to its regular sections.
@@ -488,15 +483,11 @@ pub async fn carry_over_boundary(
     }))
 }
 
-/// The start of the very first period the payroll report ever queued — the
-/// permanent lower bound nothing may ever be carried past. See
-/// [`CarriedDays::since`] for why this exists.
+/// Keep the first report within its own month. Once a report has been sent,
+/// later approved or recorded history may be carried from any earlier month.
 ///
-/// Falls back to `before` (making the caller's range empty) when the floor is
-/// somehow unset while this is asked for anyway — reachable only if
-/// `PAYROLL_REPORT_QUEUE_PERIOD_KEY` is set without `PAYROLL_REPORT_FIRST_PERIOD_KEY`
-/// (an installation upgraded mid-flight, before either setting existed);
-/// refusing to carry anything is the safe direction to fail in.
+/// Installations that predate the first-period setting use the legacy marker
+/// backfill and may already have sent reports from before the ledger existed.
 async fn carry_over_floor(pool: &crate::db::DatabasePool) -> AppResult<NaiveDate> {
     let first_period =
         settings::load_setting(pool, settings::PAYROLL_REPORT_FIRST_PERIOD_KEY, "").await?;
@@ -508,6 +499,16 @@ async fn carry_over_floor(pool: &crate::db::DatabasePool) -> AppResult<NaiveDate
         // floor must therefore be permissive here — a restrictive fallback
         // would silently switch carry-over off for exactly the installations
         // that have been running longest.
+        return Ok(NO_CARRY_OVER_FLOOR);
+    }
+    // Once a report has gone out, existing history carries the `'0000-00'`
+    // baseline marker, so the floor is no longer what keeps it out. Lifting it
+    // lets a booking recorded or approved since then reach the next report,
+    // however old its date.
+    if crate::repository::ReportDb::new(pool.clone())
+        .payroll_history_released()
+        .await?
+    {
         return Ok(NO_CARRY_OVER_FLOOR);
     }
     crate::background::schedule::period_bounds(&first_period).map(|(start, _)| start)
