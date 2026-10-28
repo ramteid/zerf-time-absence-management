@@ -119,6 +119,12 @@ const TRANSLATIONS = {
     "Working days and hours": "Working days and hours",
     "Corrections to earlier months": "Corrections to earlier months",
     "Reported later": "Reported later",
+    "Cancelled absences": "Cancelled absences",
+    "Review earlier payroll reports and correct any affected declarations.":
+      "Review earlier payroll reports and correct any affected declarations.",
+    "Absences requiring review": "Absences requiring review",
+    "Check earlier reports to determine the absence days for these periods.":
+      "Check earlier reports to determine the absence days for these periods.",
     "Absences recorded after the report for their own month had already been sent. They go into this month's report with the days they actually cover.":
       "Absences recorded after the report for their own month had already been sent. They go into this month's report with the days they actually cover.",
     "Working time that changed after the report for its month was sent. Positive hours add time and negative hours reduce it. This report lists each correction under the day it belongs to.":
@@ -1350,6 +1356,12 @@ const TRANSLATIONS = {
     "Working days and hours": "Arbeitstage und Stunden",
     "Corrections to earlier months": "Korrekturen fr\u00fcherer Monate",
     "Reported later": "Nachtr\u00e4glich gemeldet",
+    "Cancelled absences": "Stornierte Abwesenheiten",
+    "Review earlier payroll reports and correct any affected declarations.":
+      "Fr\u00fchere Lohnmeldungen pr\u00fcfen und betroffene Angaben korrigieren.",
+    "Absences requiring review": "Abwesenheiten zur Pr\u00fcfung",
+    "Check earlier reports to determine the absence days for these periods.":
+      "Fr\u00fchere Meldungen pr\u00fcfen und die Abwesenheitstage f\u00fcr diese Zeitr\u00e4ume bestimmen.",
     "Absences recorded after the report for their own month had already been sent. They go into this month's report with the days they actually cover.":
       "Abwesenheiten, die erst erfasst wurden, nachdem die Meldung f\u00fcr ihren eigenen Monat schon verschickt war. Sie kommen mit den Tagen, die sie tats\u00e4chlich betreffen, in die Meldung dieses Monats.",
     "Working time that changed after the report for its month was sent. Positive hours add time and negative hours reduce it. This report lists each correction under the day it belongs to.":

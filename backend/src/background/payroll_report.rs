@@ -117,7 +117,9 @@ pub async fn run_once(state: &AppState) -> AppResult<()> {
         return Ok(());
     }
     let relevant_categories = payroll_report::payroll_relevant_categories(&state.pool).await?;
-    if config.has_no_content(&relevant_categories) {
+    if config.has_no_content(&relevant_categories)
+        && state.db.reports.pending_payroll_absence_cancellations().await?.is_empty()
+    {
         return Ok(());
     }
 
@@ -163,7 +165,9 @@ pub async fn run_now(state: &AppState) -> AppResult<RunSummary> {
         ));
     }
     let relevant_categories = payroll_report::payroll_relevant_categories(&state.pool).await?;
-    if config.has_no_content(&relevant_categories) {
+    if config.has_no_content(&relevant_categories)
+        && state.db.reports.pending_payroll_absence_cancellations().await?.is_empty()
+    {
         return Err(AppError::BadRequest(
             "Select at least one section for the payroll report.".into(),
         ));
@@ -502,7 +506,7 @@ async fn process_period(
                             ..ReportedScope::default()
                         },
                     )
-                    .await;
+                    .await?;
                 }
                 tracing::info!("Payroll report: period {period} covers nobody; nothing to send");
                 return Ok(SendOutcome::Skipped(SkipReason::CoversNobody));
@@ -547,6 +551,21 @@ async fn process_period(
             let included: Vec<User> = ready.into_iter().map(|member| member.user).collect();
             (included, notice)
         }
+    };
+    // Absence changes use the same per-user locks. Hold them from assembly
+    // through SMTP and accounting so a cancellation cannot invalidate a PDF
+    // after it has been accepted by the mail server.
+    let _absence_locks = if mode == SendMode::Scheduled {
+        let mut transaction = state.db.absences.begin().await?;
+        let mut user_ids: Vec<i64> = included.iter().map(|member| member.id).collect();
+        user_ids.sort_unstable();
+        user_ids.dedup();
+        for user_id in user_ids {
+            crate::repository::AbsenceDb::lock_user_scope_tx(&mut transaction, user_id).await?;
+        }
+        Some(transaction)
+    } else {
+        None
     };
     let mut data = payroll_report::build_report_data(
         state,
@@ -603,12 +622,12 @@ async fn process_period(
                     declared_work_days: &data.declared_work_days,
                     carried_work_days: &data.carried_work_days,
                     period_entries: &period_entries,
-                    reported_absence_ids: &data.reported_absence_ids,
-                    carried_absence_ids: &data.late_absence_ids,
+                    reported_absence_snapshots: &data.reported_absence_snapshots,
+                    carried_absence_snapshots: &data.late_absence_snapshots,
                     content_rows: &reported_content_rows,
                 },
             )
-            .await;
+            .await?;
         }
         tracing::info!("Payroll report: period {period} has nothing to report; nothing sent");
         return Ok(SendOutcome::Skipped(reason));
@@ -709,14 +728,13 @@ async fn process_period(
                 declared_work_days: &data.declared_work_days,
                 carried_work_days: &data.carried_work_days,
                 period_entries: &period_entries,
-                reported_absence_ids: &data.reported_absence_ids,
-                // Exactly the catch-up absences this document declared, taken
-                // off the assembled report rather than asked for a second time.
-                carried_absence_ids: &data.late_absence_ids,
+                reported_absence_snapshots: &data.reported_absence_snapshots,
+                // The exact catch-up absence versions used by this document.
+                carried_absence_snapshots: &data.late_absence_snapshots,
                 content_rows: &reported_content_rows,
             },
         )
-        .await;
+        .await?;
         tracing::info!(
             "Payroll report: sent period {period} to {}",
             config.recipients.join(", ")
@@ -740,11 +758,10 @@ struct ReportedScope<'a> {
     carried_work_days: &'a [PayrollCarriedWorkDay],
     /// Entry rows and versions present before this report was assembled.
     period_entries: &'a [PayrollEntrySnapshot],
-    /// Exact regular absences printed in the assembled document.
-    reported_absence_ids: &'a [i64],
-    /// The catch-up absences the assembled document declared, straight off the
-    /// document itself.
-    carried_absence_ids: &'a [i64],
+    /// Exact regular absence versions used by the assembled document.
+    reported_absence_snapshots: &'a [(i64, String)],
+    /// The catch-up absence versions used by the assembled document.
+    carried_absence_snapshots: &'a [(i64, String)],
     /// Exact rendered rows used to read this delivered document back later.
     content_rows: &'a [PayrollReportedContentRow],
 }
@@ -756,13 +773,13 @@ async fn mark_reported_entries(
     period_end: NaiveDate,
     carried: Option<&payroll_report::CarriedDays>,
     scope: ReportedScope<'_>,
-) {
+) -> AppResult<()> {
     let ReportedScope {
         declared_work_days,
         carried_work_days,
         period_entries,
-        reported_absence_ids,
-        carried_absence_ids,
+        reported_absence_snapshots,
+        carried_absence_snapshots,
         content_rows,
     } = scope;
     let declarations: Vec<(i64, NaiveDate, i64)> = declared_work_days
@@ -790,17 +807,22 @@ async fn mark_reported_entries(
                     owed_periods: carried.map(|c| c.owed_periods.as_slice()).unwrap_or(&[]),
                     days: &carried_days,
                 },
-                reported_absence_ids,
-                carried_absence_ids,
+                reported_absence_snapshots,
+                carried_absence_snapshots,
                 content_rows,
             )
             .await
         {
-            Ok((declared, absences, entries, content)) => {
+            Ok(Some((declared, absences, entries, content))) => {
                 tracing::debug!(
                     "Payroll report: recorded {declared} declared days and {content} content rows, marked {absences} absences and {entries} time entries for {period}"
                 );
-                return;
+                return Ok(());
+            }
+            Ok(None) => {
+                return Err(AppError::Internal(format!(
+                    "Payroll report absence changed while assembling period {period}; delivery remains queued"
+                )));
             }
             Err(e) if attempt < ACCOUNTING_RETRY_ATTEMPTS => {
                 tracing::warn!(
@@ -808,12 +830,10 @@ async fn mark_reported_entries(
                 );
                 tokio::time::sleep(ACCOUNTING_RETRY_DELAY).await;
             }
-            Err(e) => tracing::error!(
-                "Payroll report: could not record period {period} as reported: {e}. \
-                 The period stays queued so nothing is silently paid twice."
-            ),
+            Err(e) => return Err(e),
         }
     }
+    unreachable!("accounting retry loop always returns");
 }
 
 /// Delay between accounting attempts. Short: this only needs to ride out a

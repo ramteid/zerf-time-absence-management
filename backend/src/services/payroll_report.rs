@@ -100,8 +100,8 @@ struct HoursRows {
 
 #[derive(Default)]
 struct AbsenceRows {
-    rows: Vec<PayrollAbsenceRow>,
-    ids: Vec<i64>,
+    rows: Vec<(usize, String, i64, PayrollAbsenceRow)>,
+    snapshots: Vec<(i64, String)>,
 }
 
 pub async fn load_config(pool: &crate::db::DatabasePool) -> AppResult<PayrollReportConfig> {
@@ -251,11 +251,32 @@ pub async fn payroll_members(
     // and has nothing in this month.
     let late_absence_members = match carried {
         Some(carried) if carried.reported_as.is_none() => {
-            app_state
+            let absences = app_state
                 .db
                 .reports
-                .users_with_carried_absences_before(carried.since, carried.before)
-                .await?
+                .unreported_payroll_absences_before(carried.since, carried.before)
+                .await?;
+            let last_carried_day = carried.before.pred_opt().unwrap_or(carried.before);
+            let mut ranges_by_user: std::collections::HashMap<i64, Vec<(NaiveDate, NaiveDate)>> =
+                std::collections::HashMap::new();
+            for (user_id, _, start, end, _, _, _) in absences {
+                ranges_by_user.entry(user_id).or_default().push((start, end));
+            }
+            let mut members = Vec::with_capacity(ranges_by_user.len());
+            for (user_id, ranges) in ranges_by_user {
+                let Some(member) = app_state.db.users.find_by_id(user_id).await? else {
+                    continue;
+                };
+                if ranges.into_iter().any(|(start, end)| {
+                    let first = start.max(carried.since).max(member.start_date);
+                    let last = end.min(last_carried_day);
+                    first <= last
+                        && !reportable_segments(first, last, &carried.owed_periods).is_empty()
+                }) {
+                    members.push(member);
+                }
+            }
+            members
         }
         _ => Vec::new(),
     };
@@ -275,6 +296,22 @@ pub async fn payroll_members(
         .iter()
         .map(|member| member.id)
         .collect();
+    let mut cancellation_members = Vec::new();
+    let mut users_with_cancellations = std::collections::HashSet::new();
+    if !carried.is_some_and(|value| value.reported_as.is_some()) {
+        for (user_id, _, _, _, _, _, _) in app_state
+            .db
+            .reports
+            .pending_payroll_absence_cancellations()
+            .await?
+        {
+            if users_with_cancellations.insert(user_id) {
+                if let Some(member) = app_state.db.users.find_by_id(user_id).await? {
+                    cancellation_members.push(member);
+                }
+            }
+        }
+    }
     let mut members = app_state.db.reports.timesheet_members_for_period(to).await?;
     // The period-scoped query only knows people who are still active and
     // tracking time, so an assistant who has left since is missing from it.
@@ -284,7 +321,11 @@ pub async fn payroll_members(
     // a carried absence appears in both lists, and adding them twice would
     // duplicate every row they produce.
     let mut known = known;
-    for member in late_members.into_iter().chain(late_absence_members) {
+    for member in late_members
+        .into_iter()
+        .chain(late_absence_members)
+        .chain(cancellation_members)
+    {
         if known.insert(member.id) {
             members.push(member);
         }
@@ -309,7 +350,8 @@ pub async fn payroll_members(
                 || users_with_late_entries.contains(&member.id)
                 || (!is_assistant
                     && (users_with_payroll_absences.contains(&member.id)
-                        || users_with_late_absences.contains(&member.id)));
+                        || users_with_late_absences.contains(&member.id)
+                        || users_with_cancellations.contains(&member.id)));
             !crate::roles::is_admin_role(&member.role)
                 && !excluded_user_ids.contains(&member.id)
                 && (!needs_recorded_time || has_relevant_data)
@@ -624,6 +666,32 @@ pub fn reported_content_rows(data: &PayrollReportData) -> Vec<PayrollReportedCon
             medical_certificate_required: absence.medical_certificate_required,
         });
     }
+    for absence in &data.cancelled_absence_rows {
+        rows.push(PayrollReportedContentRow {
+            user_id: absence.user_id,
+            employee: absence.employee.clone(),
+            kind: "absence_cancellation".to_string(),
+            category: Some(absence.category.clone()),
+            from_date: Some(absence.from),
+            to_date: Some(absence.to),
+            days: 0.0,
+            minutes: None,
+            medical_certificate_required: None,
+        });
+    }
+    for absence in &data.absence_review_rows {
+        rows.push(PayrollReportedContentRow {
+            user_id: absence.user_id,
+            employee: absence.employee.clone(),
+            kind: "absence_review".to_string(),
+            category: Some(absence.category.clone()),
+            from_date: Some(absence.from),
+            to_date: Some(absence.to),
+            days: 0.0,
+            minutes: None,
+            medical_certificate_required: absence.medical_certificate_required,
+        });
+    }
     for correction in &data.late_entry_rows {
         rows.push(PayrollReportedContentRow {
             user_id: correction.user_id,
@@ -645,6 +713,8 @@ fn content_kind(kind: &str) -> AppResult<&'static str> {
         "absence" => Ok("absence"),
         "hours" => Ok("hours"),
         "late_absence" => Ok("late_absence"),
+        "absence_cancellation" => Ok("absence_cancellation"),
+        "absence_review" => Ok("absence_review"),
         "late_hours" => Ok("late_hours"),
         _ => Err(crate::error::AppError::Internal(format!(
             "Invalid stored payroll content kind: {kind}"
@@ -662,7 +732,7 @@ fn payroll_content_rows(
 
     for stored in stored_rows {
         let kind = content_kind(&stored.kind)?;
-        if matches!(kind, "absence" | "late_absence") {
+        if matches!(kind, "absence" | "late_absence" | "absence_cancellation" | "absence_review") {
             absence_count += 1;
         }
         if stored.minutes.is_some() {
@@ -1011,8 +1081,8 @@ pub async fn build_report_data(
         settings::load_setting(&app_state.pool, settings::ORGANIZATION_NAME_KEY, "").await?;
 
     let relevant_categories = payroll_relevant_categories(&app_state.pool).await?;
-    let (absence_rows, reported_absence_ids) = if relevant_categories.is_empty() {
-        (None, Vec::new())
+    let mut regular_absences = if relevant_categories.is_empty() {
+        AbsenceRows::default()
     } else {
         let built = build_absence_rows(
             app_state,
@@ -1024,7 +1094,7 @@ pub async fn build_report_data(
             carried.as_ref().and_then(|c| c.reported_as.as_deref()),
         )
         .await?;
-        (Some(built.rows), built.ids)
+        built
     };
 
     // A delivered month reads its hours back from what its own send actually
@@ -1077,8 +1147,8 @@ pub async fn build_report_data(
     // Absence days no report has ever shown. Built whenever the absence
     // section itself exists — the catch-up is pointless if the document has
     // nowhere to print absences at all.
-    let (late_absence_rows, late_absence_ids) = if relevant_categories.is_empty() {
-        (Vec::new(), Vec::new())
+    let mut late_absences = if relevant_categories.is_empty() {
+        AbsenceRows::default()
     } else {
         build_late_absence_rows(
             app_state,
@@ -1089,6 +1159,22 @@ pub async fn build_report_data(
         )
         .await?
     };
+    let (regular_rows, late_absence_rows, absence_review_rows) = finish_absence_rows(
+        app_state,
+        &mut regular_absences,
+        &mut late_absences,
+        from,
+        !carried.as_ref().is_some_and(|value| value.reported_as.is_some()),
+    )
+    .await?;
+    let absence_rows = (!relevant_categories.is_empty()).then_some(regular_rows);
+    let (cancelled_absence_rows, cancellation_snapshots) =
+        if carried.as_ref().is_some_and(|value| value.reported_as.is_some()) {
+            (Vec::new(), Vec::new())
+        } else {
+            build_cancelled_absence_rows(app_state, members, language).await?
+        };
+    regular_absences.snapshots.extend(cancellation_snapshots);
 
     Ok(PayrollReportData {
         // `from` is the first day of the reported month, so it carries the
@@ -1101,9 +1187,11 @@ pub async fn build_report_data(
         late_entry_rows: late_entries.rows,
         declared_work_days,
         carried_work_days: late_entries.carried_work_days,
-        reported_absence_ids,
+        reported_absence_snapshots: regular_absences.snapshots,
         late_absence_rows,
-        late_absence_ids,
+        late_absence_snapshots: late_absences.snapshots,
+        cancelled_absence_rows,
+        absence_review_rows,
         created_on,
         provisional,
     })
@@ -1562,6 +1650,44 @@ fn reportable_segments(
     segments
 }
 
+/// Cancellations are listed for manual review without estimating the days
+/// declared by earlier reports.
+async fn build_cancelled_absence_rows(
+    app_state: &AppState,
+    members: &[User],
+    language: &Language,
+) -> AppResult<(Vec<PayrollAbsenceRow>, Vec<(i64, String)>)> {
+    let printed: std::collections::HashMap<i64, &User> = members
+        .iter()
+        .filter(|member| !is_assistant_role(&member.role))
+        .map(|member| (member.id, member))
+        .collect();
+    let mut rows = Vec::new();
+    let mut snapshots = Vec::new();
+    for (user_id, id, from, to, slug, name, version) in app_state
+        .db
+        .reports
+        .pending_payroll_absence_cancellations()
+        .await?
+    {
+        let Some(member) = printed.get(&user_id) else {
+            continue;
+        };
+        rows.push(PayrollAbsenceRow {
+            user_id,
+            employee: employee_name(member),
+            category: i18n::absence_kind_label(language, &slug, &name),
+            from,
+            to,
+            days: 0.0,
+            medical_certificate_required: None,
+        });
+        snapshots.push((id, version));
+    }
+    rows.sort_by(|a, b| a.employee.cmp(&b.employee).then_with(|| a.from.cmp(&b.from)));
+    Ok((rows, snapshots))
+}
+
 /// Payroll-relevant absence days from earlier months that no report has ever
 /// shown, printed under their own real dates.
 ///
@@ -1582,17 +1708,16 @@ fn reportable_segments(
 /// Assistants are skipped exactly as in [`build_absence_rows`]: they are paid
 /// by the hour, so continued pay does not apply to them.
 ///
-/// Returns the rows and the ids of the absences they came from. The sender
-/// marks exactly those ids, so what was declared and what is recorded as
-/// declared cannot come apart.
+/// Returns the rows and versions of the absences they came from. The sender
+/// marks only those unchanged versions as declared.
 async fn build_late_absence_rows(
     app_state: &AppState,
     carried: Option<&CarriedDays>,
     members: &[User],
     relevant_categories: &[AbsenceCategory],
     language: &Language,
-) -> AppResult<(Vec<PayrollAbsenceRow>, Vec<i64>)> {
-    let empty = || (Vec::new(), Vec::new());
+) -> AppResult<AbsenceRows> {
+    let empty = AbsenceRows::default;
     let Some(carried) = carried else {
         return Ok(empty());
     };
@@ -1638,26 +1763,13 @@ async fn build_late_absence_rows(
         .iter()
         .any(|c| c.medical_certificate_relevant);
 
-    // Workday counting needs the holidays of the span the rows actually cover,
-    // which is earlier than the reported month.
-    let earliest = absences
-        .iter()
-        .map(|(_, _, start, _, _, _)| *start)
-        .min()
-        .unwrap_or(carried.since);
-    let latest = absences
-        .iter()
-        .map(|(_, _, _, end, _, _)| *end)
-        .max()
-        .unwrap_or(carried.before);
-    let holidays = app_state.db.reports.holiday_set(earliest, latest).await?;
-
     // One printable stretch of one catch-up absence, before its days are known.
     // Collected first because the weekly quota has to be applied across every
     // stretch a person is printed for at once, not to each of them separately.
     struct CarriedSegment<'a> {
         member: &'a User,
         absence_id: i64,
+        version: String,
         slug: String,
         category: &'a (String, String, usize, bool),
         medical_certificate_required: bool,
@@ -1666,7 +1778,7 @@ async fn build_late_absence_rows(
     }
 
     let mut segments_to_print: Vec<CarriedSegment> = Vec::new();
-    for (user_id, absence_id, start_date, end_date, slug, _stored_name) in absences {
+    for (user_id, absence_id, start_date, end_date, slug, _stored_name, version) in absences {
         let Some(member) = printed.get(&user_id) else {
             continue;
         };
@@ -1705,6 +1817,7 @@ async fn build_late_absence_rows(
             segments_to_print.push(CarriedSegment {
                 member,
                 absence_id,
+                version: version.clone(),
                 slug: slug.clone(),
                 category,
                 medical_certificate_required,
@@ -1720,63 +1833,14 @@ async fn build_late_absence_rows(
     // The absences this document actually declares something for. They, and
     // only they, are marked afterwards, so the marked set cannot drift from
     // the printed one.
-    let mut declared_ids: Vec<i64> = Vec::new();
-    // Per person, because the quota is theirs: two catch-up stretches landing
-    // in one calendar week cost that week once between them, exactly as the
-    // main table's rows do.
-    let mut indices_by_member: std::collections::HashMap<i64, Vec<usize>> =
-        std::collections::HashMap::new();
-    for (index, segment) in segments_to_print.iter().enumerate() {
-        indices_by_member
-            .entry(segment.member.id)
-            .or_default()
-            .push(index);
-    }
-    let mut days_by_index = vec![0.0; segments_to_print.len()];
-    for indices in indices_by_member.values() {
-        let ranges: Vec<(NaiveDate, NaiveDate)> = indices
-            .iter()
-            .map(|index| (segments_to_print[*index].from, segments_to_print[*index].to))
-            .collect();
-        // The window only has to contain the stretches themselves; days outside
-        // them never consume quota.
-        let (Some(window_start), Some(window_end)) = (
-            ranges.iter().map(|(from, _)| *from).min(),
-            ranges.iter().map(|(_, to)| *to).max(),
-        ) else {
-            continue;
-        };
-        let member_id = segments_to_print[indices[0]].member.id;
-        // The person's own working days decide what a stretch of absence is
-        // worth, so a day they never work claims no continued pay.
-        let schedule =
-            crate::services::work_schedules::contract_schedule(&app_state.pool, member_id).await?;
-        let counted = crate::time_calc::scheduled_days_per_range(
-            &schedule.history,
-            &ranges,
-            schedule.start_date,
-            window_start,
-            window_end,
-            &holidays,
-        );
-        for (index, days) in indices.iter().zip(counted) {
-            days_by_index[*index] = days;
-        }
-    }
-
-    for (segment, days) in segments_to_print.into_iter().zip(days_by_index) {
+    let mut declared_snapshots: Vec<(i64, String)> = Vec::new();
+    for segment in segments_to_print {
         // Declared whatever this stretch's own day count came to: the document
         // counted its week, and an earlier stretch may hold every day that week
         // has. Leaving it undeclared would hand the absence to the next
         // report's catch-up section, which — counting it alone — would give it
         // the days this document deliberately did not.
-        declared_ids.push(segment.absence_id);
-        // A stretch covering only weekends or holidays, or one whose week an
-        // earlier stretch already accounts for, has no payroll effect of its
-        // own — leave it out instead of printing a 0 row.
-        if days <= 0.0 {
-            continue;
-        }
+        declared_snapshots.push((segment.absence_id, segment.version));
         let (_, category_name, category_rank, tracks_medical_certificate) = segment.category;
         rows.push((
             *category_rank,
@@ -1788,32 +1852,18 @@ async fn build_late_absence_rows(
                 category: i18n::absence_kind_label(language, &segment.slug, category_name),
                 from: segment.from,
                 to: segment.to,
-                days,
+                days: 0.0,
                 medical_certificate_required: tracks_medical_certificate
                     .then_some(segment.medical_certificate_required),
             },
         ));
     }
-    declared_ids.sort_unstable();
-    declared_ids.dedup();
-    // Category, then person, then chronological — the order the main absence
-    // table uses, so the reader is not asked to learn a second one, and the
-    // order the illness merge below needs to look only at neighbours.
-    rows.sort_by(|left, right| {
-        left.0
-            .cmp(&right.0)
-            .then_with(|| left.1.cmp(&right.1))
-            .then_with(|| left.2.cmp(&right.2))
-            .then_with(|| left.3.from.cmp(&right.3.from))
-    });
-    // One illness filed as two requests over a weekend is one period, and the
-    // certificate verdict was earned on that whole period. The main table folds
-    // such rows together for exactly that reason; a catch-up row printed
-    // unmerged would carry the same misleading "certificate required" on a span
-    // too short to have earned it. Segments of one absence separated by a month
-    // that still owes its own report are never adjacent, so they cannot be
-    // folded back together here.
-    Ok((merge_continuous_illness_rows(rows, &holidays), declared_ids))
+    declared_snapshots.sort_unstable();
+    declared_snapshots.dedup();
+    Ok(AbsenceRows {
+        rows,
+        snapshots: declared_snapshots,
+    })
 }
 
 /// One row per absence period of a payroll-relevant category, clamped to the
@@ -1847,12 +1897,10 @@ async fn build_absence_rows(
         .iter()
         .any(|c| c.medical_certificate_relevant);
 
-    let holidays = app_state.db.reports.holiday_set(from, to).await?;
-
     // (category rank, display name, user id, row) — the id is carried so
     // merging can group by person rather than by a name two people may share.
     let mut rows: Vec<(usize, String, i64, PayrollAbsenceRow)> = Vec::new();
-    let mut ids = Vec::new();
+    let mut snapshots = Vec::new();
     for member in members {
         // Assistants are paid by the hour: continued pay does not apply to
         // them, so their absences are none of payroll's business. Only their
@@ -1875,39 +1923,27 @@ async fn build_absence_rows(
         // days before the contract started are not payroll-relevant and are
         // hidden everywhere else in the app too.
         #[allow(clippy::type_complexity)]
-        let printable: Vec<(i64, NaiveDate, NaiveDate, String, &(String, String, usize, bool))> =
+        let printable: Vec<(
+            i64,
+            NaiveDate,
+            NaiveDate,
+            String,
+            String,
+            &(String, String, usize, bool),
+        )> =
             absences
                 .into_iter()
-                .filter_map(|(absence_id, start_date, end_date, slug, _stored_name)| {
+                .filter_map(|(absence_id, start_date, end_date, slug, _stored_name, version)| {
                     let category = selected
                         .iter()
                         .find(|(selected_slug, _, _, _)| selected_slug == &slug)?;
                     let row_from = start_date.max(from).max(member.start_date);
                     let row_to = end_date.min(to);
-                    (row_from <= row_to).then_some((absence_id, row_from, row_to, slug, category))
+                    (row_from <= row_to)
+                        .then_some((absence_id, row_from, row_to, slug, version, category))
                 })
                 .collect();
-        // One weekly quota belongs to the person's week, not to each request
-        // inside it: everything this document prints for them is counted
-        // together. Counting each absence alone charged a part-time contract
-        // twice for a week two sick notes happened to share, and the document
-        // then claimed more days than that week can ever hold.
-        let schedule =
-            crate::services::work_schedules::contract_schedule(&app_state.pool, member.id).await?;
-        let counted_days = crate::time_calc::scheduled_days_per_range(
-            &schedule.history,
-            &printable
-                .iter()
-                .map(|(_, row_from, row_to, _, _)| (*row_from, *row_to))
-                .collect::<Vec<_>>(),
-            schedule.start_date,
-            from.max(member.start_date),
-            to,
-            &holidays,
-        );
-        for ((absence_id, row_from, row_to, slug, category), days) in
-            printable.into_iter().zip(counted_days)
-        {
+        for (absence_id, row_from, row_to, slug, version, category) in printable {
             let (_, category_name, category_rank, tracks_medical_certificate) = category;
             // Marked whatever its own day count came to, because the document
             // did account for it: its week was counted, and an earlier row may
@@ -1915,13 +1951,7 @@ async fn build_absence_rows(
             // would hand it to a later report's catch-up section, where —
             // counted on its own, away from the row that absorbed it — it would
             // claim the days this document deliberately did not give it.
-            ids.push(absence_id);
-            // An absence that only covers non-working days (weekend, holiday),
-            // or whose week an earlier row already accounts for, has no payroll
-            // effect of its own — leave it out instead of printing a 0 row.
-            if days <= 0.0 {
-                continue;
-            }
+            snapshots.push((absence_id, version));
             rows.push((
                 *category_rank,
                 employee_name(member),
@@ -1932,7 +1962,7 @@ async fn build_absence_rows(
                     category: i18n::absence_kind_label(language, &slug, category_name),
                     from: row_from,
                     to: row_to,
-                    days,
+                    days: 0.0,
                     medical_certificate_required: tracks_medical_certificate.then(|| {
                         medical_certificate_required
                             .get(&absence_id)
@@ -1944,24 +1974,140 @@ async fn build_absence_rows(
         }
     }
 
-    // Category, then employee, then chronological within one employee. The
-    // chronological part is what lets the merge below look only at neighbours.
-    // Sorting by id before date keeps one person's rows contiguous even when
-    // somebody else shares their name, which is what lets the merge below look
-    // only at its immediate neighbour.
-    rows.sort_by(|left, right| {
+    snapshots.sort_unstable();
+    snapshots.dedup();
+    Ok(AbsenceRows { rows, snapshots })
+}
+
+/// Count every absence row for a person together before splitting the document
+/// into its regular and late sections. A weekly quota can cross the boundary
+/// between those sections, so counting them separately spends it twice.
+async fn finish_absence_rows(
+    app_state: &AppState,
+    regular: &mut AbsenceRows,
+    late: &mut AbsenceRows,
+    period_start: NaiveDate,
+    check_earlier_reports: bool,
+) -> AppResult<(Vec<PayrollAbsenceRow>, Vec<PayrollAbsenceRow>, Vec<PayrollAbsenceRow>)> {
+    let all = regular.rows.iter().chain(&late.rows);
+    let Some(start) = all.clone().map(|row| row.3.from).min() else {
+        return Ok((Vec::new(), Vec::new(), Vec::new()));
+    };
+    let end = all.map(|row| row.3.to).max().expect("rows are not empty");
+    // Workday counting and illness merging need holidays over the actual span.
+    let holidays = app_state.db.reports.holiday_set(start, end).await?;
+    let mut by_member: std::collections::HashMap<i64, Vec<&mut PayrollAbsenceRow>> =
+        std::collections::HashMap::new();
+    for (_, _, user_id, row) in regular.rows.iter_mut().chain(&mut late.rows) {
+        by_member.entry(*user_id).or_default().push(row);
+    }
+    for (user_id, rows) in by_member {
+        // The person's own working days and one weekly quota govern every
+        // stretch in both sections. Only the stretches need to be in the window.
+        let ranges: Vec<_> = rows.iter().map(|row| (row.from, row.to)).collect();
+        let window_start = ranges.iter().map(|range| range.0).min().expect("nonempty");
+        let window_end = ranges.iter().map(|range| range.1).max().expect("nonempty");
+        let schedule =
+            crate::services::work_schedules::contract_schedule(&app_state.pool, user_id).await?;
+        let may_use_quota = rows.iter().any(|row| {
+            let mut day = row.from;
+            while day <= row.to {
+                if schedule.history.on(day).weekly_leave_cap().is_some() {
+                    return true;
+                }
+                let Some(next) = day.succ_opt() else { break };
+                day = next;
+            }
+            false
+        });
+        if check_earlier_reports && may_use_quota {
+            let first_week = crate::time_calc::week_monday(window_start);
+            let earlier = app_state.db.reports
+                .reported_payroll_absence_ranges(user_id, first_week, period_start)
+                .await?;
+            let last_earlier_day = period_start.pred_opt().unwrap_or(period_start);
+            let needs_review = rows.iter().any(|row| {
+                let mut day = row.from;
+                while day <= row.to {
+                    let pattern = schedule.history.on(day);
+                    if pattern.weekly_leave_cap().is_some()
+                        && pattern.covers(day)
+                        && !holidays.contains(&day)
+                    {
+                        let week = crate::time_calc::week_monday(day);
+                        if earlier.iter().any(|(start, end)| {
+                            let last = (*end).min(last_earlier_day);
+                            *start <= last
+                                && crate::time_calc::week_monday(*start) <= week
+                                && crate::time_calc::week_monday(last) >= week
+                        }) {
+                            return true;
+                        }
+                    }
+                    let Some(next) = day.succ_opt() else { break };
+                    day = next;
+                }
+                false
+            });
+            if needs_review {
+                for row in rows {
+                    row.days = -1.0;
+                }
+                continue;
+            }
+        }
+        let counts = crate::time_calc::scheduled_days_per_range(
+            &schedule.history,
+            &ranges,
+            schedule.start_date,
+            window_start,
+            window_end,
+            &holidays,
+        );
+        for (row, days) in rows.into_iter().zip(counts) {
+            row.days = days;
+        }
+    }
+    let mut review = Vec::new();
+    for rows in [&mut regular.rows, &mut late.rows] {
+        let mut retained = Vec::new();
+        for mut row in std::mem::take(rows) {
+            if row.3.days < 0.0 {
+                row.3.days = 0.0;
+                review.push(row);
+            } else {
+                retained.push(row);
+            }
+        }
+        *rows = retained;
+    }
+    review.sort_by(|left, right| {
         left.0
             .cmp(&right.0)
             .then_with(|| left.1.cmp(&right.1))
             .then_with(|| left.2.cmp(&right.2))
             .then_with(|| left.3.from.cmp(&right.3.from))
     });
-    ids.sort_unstable();
-    ids.dedup();
-    Ok(AbsenceRows {
-        rows: merge_continuous_illness_rows(rows, &holidays),
-        ids,
-    })
+    let finish = |rows: &mut Vec<(usize, String, i64, PayrollAbsenceRow)>| {
+        // A row with no days has no payroll effect. Its snapshot is still
+        // recorded so it cannot claim the same quota in a later report.
+        rows.retain(|row| row.3.days > 0.0);
+        // Category, person, then date keeps each illness chain contiguous.
+        rows.sort_by(|left, right| {
+            left.0
+                .cmp(&right.0)
+                .then_with(|| left.1.cmp(&right.1))
+                .then_with(|| left.2.cmp(&right.2))
+                .then_with(|| left.3.from.cmp(&right.3.from))
+        });
+        // Adjacent sick notes share the certificate verdict of their illness.
+        merge_continuous_illness_rows(std::mem::take(rows), &holidays)
+    };
+    Ok((
+        finish(&mut regular.rows),
+        finish(&mut late.rows),
+        merge_continuous_illness_rows(review, &holidays),
+    ))
 }
 
 /// Fold absences that are one continuous illness period into a single row.
@@ -2124,6 +2270,8 @@ pub fn people_in_report(data: &PayrollReportData) -> usize {
             .iter()
             .map(|row| row.employee.as_str()),
     );
+    names.extend(data.cancelled_absence_rows.iter().map(|row| row.employee.as_str()));
+    names.extend(data.absence_review_rows.iter().map(|row| row.employee.as_str()));
     names.len()
 }
 
@@ -2343,9 +2491,11 @@ mod tests {
             late_entry_rows: Vec::new(),
             declared_work_days: Vec::new(),
             carried_work_days: Vec::new(),
-            reported_absence_ids: Vec::new(),
+            reported_absence_snapshots: Vec::new(),
             late_absence_rows: Vec::new(),
-            late_absence_ids: Vec::new(),
+            late_absence_snapshots: Vec::new(),
+            cancelled_absence_rows: Vec::new(),
+            absence_review_rows: Vec::new(),
             created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
             provisional: None,
         };
@@ -2380,9 +2530,11 @@ mod tests {
                 late_entry_rows: Vec::new(),
                 declared_work_days: Vec::new(),
                 carried_work_days: Vec::new(),
-                reported_absence_ids: Vec::new(),
+                reported_absence_snapshots: Vec::new(),
                 late_absence_rows: Vec::new(),
-                late_absence_ids: Vec::new(),
+                late_absence_snapshots: Vec::new(),
+                cancelled_absence_rows: Vec::new(),
+                absence_review_rows: Vec::new(),
                 created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
                 provisional: None,
             }

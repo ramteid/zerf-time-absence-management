@@ -127,8 +127,12 @@ impl ReportDb {
         from: NaiveDate,
         to: NaiveDate,
     ) -> AppResult<Vec<(i64, NaiveDate, NaiveDate, String, String)>> {
-        self.approved_absence_rows_as_reported(user_id, from, to, None)
-            .await
+        Ok(self
+            .approved_absence_rows_as_reported(user_id, from, to, None)
+            .await?
+            .into_iter()
+            .map(|(id, start, end, slug, name, _)| (id, start, end, slug, name))
+            .collect())
     }
 
     /// As [`Self::approved_absence_rows`], but able to answer the narrower
@@ -154,9 +158,9 @@ impl ReportDb {
         from: NaiveDate,
         to: NaiveDate,
         reported_as: Option<&str>,
-    ) -> AppResult<Vec<(i64, NaiveDate, NaiveDate, String, String)>> {
+    ) -> AppResult<Vec<(i64, NaiveDate, NaiveDate, String, String, String)>> {
         Ok(sqlx::query_as(
-            "SELECT a.id, a.start_date, a.end_date, c.slug, c.name \
+            "SELECT a.id, a.start_date, a.end_date, c.slug, c.name, a.xmin::text \
              FROM absences a JOIN absence_categories c ON c.id = a.category_id \
              WHERE a.user_id=$1 AND a.status IN ('approved','cancellation_pending') \
              AND a.end_date >= $2 AND a.start_date <= $3 \
@@ -616,6 +620,40 @@ impl ReportDb {
     /// Payroll-relevant absences that no report has ever shown any part of,
     /// ending before `before` and not before `since`.
     ///
+    /// Cancelled absences that payroll must check against earlier reports.
+    #[allow(clippy::type_complexity)]
+    pub async fn pending_payroll_absence_cancellations(
+        &self,
+    ) -> AppResult<Vec<(i64, i64, NaiveDate, NaiveDate, String, String, String)>> {
+        Ok(sqlx::query_as(
+            "SELECT a.user_id, a.id, a.start_date, a.end_date, c.slug, c.name, a.xmin::text \
+             FROM absences a JOIN absence_categories c ON c.id = a.category_id \
+             WHERE a.status = 'cancelled' AND a.payroll_cancellation_pending = TRUE \
+             ORDER BY a.user_id, a.start_date, a.id",
+        )
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Earlier absences with a payroll marker, for checking a shared week.
+    pub async fn reported_payroll_absence_ranges(
+        &self,
+        user_id: i64,
+        from: NaiveDate,
+        before: NaiveDate,
+    ) -> AppResult<Vec<(NaiveDate, NaiveDate)>> {
+        Ok(sqlx::query_as(
+            "SELECT start_date, end_date FROM absences \
+             WHERE user_id=$1 AND payroll_reported_period IS NOT NULL \
+             AND start_date < $3 AND end_date >= $2 ORDER BY start_date, id",
+        )
+        .bind(user_id)
+        .bind(from)
+        .bind(before)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     /// The absence half of the catch-up path. It exists because
     /// `AbsenceCategory::is_payroll_relevant` is `auto_approve_past OR unpaid`:
     /// a sick-like absence filed for *past* dates is approved on the spot, so it
@@ -631,58 +669,25 @@ impl ReportDb {
     /// drops any that falls in a month still owed — see
     /// `payroll_report::build_late_absence_rows`.
     ///
-    /// Returns (user_id, absence_id, start_date, end_date, slug, category_name),
-    /// the same shape `approved_absence_rows` returns plus the owner, since the
-    /// caller is looking across everybody at once.
+    /// Returns the owner, absence identity, dates, category labels and row
+    /// version. The version lets the sender avoid marking a changed row.
     #[allow(clippy::type_complexity)]
     pub async fn unreported_payroll_absences_before(
         &self,
         since: NaiveDate,
         before: NaiveDate,
-    ) -> AppResult<Vec<(i64, i64, NaiveDate, NaiveDate, String, String)>> {
+    ) -> AppResult<Vec<(i64, i64, NaiveDate, NaiveDate, String, String, String)>> {
         Ok(sqlx::query_as(
-            "SELECT a.user_id, a.id, a.start_date, a.end_date, c.slug, c.name \
+            "SELECT a.user_id, a.id, a.start_date, a.end_date, c.slug, c.name, a.xmin::text \
              FROM absences a \
              JOIN absence_categories c ON c.id = a.category_id \
+             JOIN users u ON u.id = a.user_id \
              WHERE a.payroll_reported_period IS NULL \
              AND a.status IN ('approved','cancellation_pending') \
              AND (c.auto_approve_past=TRUE OR c.unpaid=TRUE) \
              AND a.start_date < $1 AND a.end_date >= $2 \
+             AND a.end_date >= u.start_date \
              ORDER BY a.user_id, a.start_date, a.id",
-        )
-        .bind(before)
-        .bind(since)
-        .fetch_all(&self.pool)
-        .await?)
-    }
-
-    /// People holding a payroll-relevant absence that no report has ever shown
-    /// any part of, ending in the carry-over window.
-    ///
-    /// The absence twin of [`Self::users_with_carried_time_entries_before`],
-    /// and needed for the same reason: somebody who left the organisation is no
-    /// longer active and has no activity in the month now being reported, so
-    /// the period-scoped member query cannot see them. A sick note filed after
-    /// they left — exactly when a last one tends to arrive — would otherwise be
-    /// carried by nobody and reach no report at all.
-    pub async fn users_with_carried_absences_before(
-        &self,
-        since: NaiveDate,
-        before: NaiveDate,
-    ) -> AppResult<Vec<User>> {
-        Ok(sqlx::query_as(
-            "SELECT DISTINCT u.id, u.email, u.password_hash, u.first_name, u.last_name, u.role, \
-             u.weekly_hours, u.workdays_per_week, u.start_date, u.hire_date, u.active, \
-             u.must_change_password, u.created_at, u.allow_reopen_without_approval, \
-             u.allow_submission_without_approval, u.dark_mode, u.tracks_time, u.archived_at, \
-             u.receives_error_notifications \
-             FROM users u \
-             JOIN absences a ON a.user_id = u.id \
-             JOIN absence_categories c ON c.id = a.category_id \
-             WHERE a.payroll_reported_period IS NULL \
-             AND a.status IN ('approved','cancellation_pending') \
-             AND (c.auto_approve_past=TRUE OR c.unpaid=TRUE) \
-             AND a.start_date < $1 AND a.end_date >= $2",
         )
         .bind(before)
         .bind(since)
@@ -702,7 +707,7 @@ impl ReportDb {
     ///
     /// `carried_absence_ids` are the catch-up absences the assembled document
     /// declared, handed over by the builder rather than re-derived here (see
-    /// `PayrollReportData::late_absence_ids`). A carried absence lies wholly
+    /// `PayrollReportData::late_absence_snapshots`). A carried absence lies wholly
     /// before the reported month, so the overlap test can never match it: left
     /// unmarked it would be declared again by every later report, and marked on
     /// a guess that does not match what was printed its days are lost outright.
@@ -756,25 +761,42 @@ impl ReportDb {
         Ok(result.rows_affected())
     }
 
+    /// Mark only the row versions read while assembling the document. A row
+    /// changed while the document was built must remain eligible for a later
+    /// report, rather than having its new values silently marked as declared.
     async fn mark_payroll_reported_absences_exact_tx(
         tx: &mut PgTransaction<'_>,
         period: &str,
-        absence_ids: &[i64],
+        snapshots: &[(i64, String)],
     ) -> AppResult<u64> {
+        let ids: Vec<i64> = snapshots.iter().map(|(id, _)| *id).collect();
+        let versions: Vec<String> = snapshots.iter().map(|(_, version)| version.clone()).collect();
         let result = sqlx::query(
             "UPDATE absences AS a SET payroll_reported_period=$1 \
              WHERE a.payroll_reported_period IS NULL \
-             AND a.id = ANY($2) \
+             AND EXISTS (SELECT 1 FROM unnest($2::bigint[], $3::text[]) snapshot(id, version) \
+                         WHERE snapshot.id = a.id AND snapshot.version = a.xmin::text) \
              AND a.status IN ('approved','cancellation_pending') \
              AND EXISTS (SELECT 1 FROM absence_categories c \
                          WHERE c.id = a.category_id \
                          AND (c.auto_approve_past=TRUE OR c.unpaid=TRUE))",
         )
         .bind(period)
-        .bind(absence_ids)
+        .bind(&ids)
+        .bind(&versions)
         .execute(&mut **tx)
         .await?;
-        Ok(result.rows_affected())
+        let cancellations = sqlx::query(
+            "UPDATE absences AS a SET payroll_cancellation_pending = FALSE \
+             WHERE a.status = 'cancelled' AND a.payroll_cancellation_pending = TRUE \
+             AND EXISTS (SELECT 1 FROM unnest($1::bigint[], $2::text[]) snapshot(id, version) \
+                         WHERE snapshot.id = a.id AND snapshot.version = a.xmin::text)",
+        )
+        .bind(&ids)
+        .bind(&versions)
+        .execute(&mut **tx)
+        .await?;
+        Ok(result.rows_affected() + cancellations.rows_affected())
     }
 
     /// Approved entries on every older day whose declaration can have changed.
@@ -1060,12 +1082,13 @@ impl ReportDb {
     /// rows it accounted for, snapshot its rendered content, and settle its
     /// queue entry.
     ///
-    /// The PDF has already been accepted by SMTP when this runs. Keeping the
+    /// When a PDF is sent, SMTP has accepted it before this runs. Keeping the
     /// declaration ledger, both marker families, and queue deletion in one
     /// transaction means a retry sees either the original document's complete
     /// accounting state or none of it. A transient failure is retried by the
     /// caller; if all attempts fail, the period remains queued rather than
-    /// exposing partially committed accounting state.
+    /// exposing partially committed accounting state. Returns `None` when an
+    /// absence version no longer matches, leaving the whole period queued.
     #[allow(clippy::too_many_arguments)]
     pub async fn record_payroll_report_delivery(
         &self,
@@ -1075,11 +1098,38 @@ impl ReportDb {
         period_entries: &[PayrollEntrySnapshot],
         declared_days: &[(i64, NaiveDate, i64)],
         carried: PayrollCarryScope<'_>,
-        reported_absence_ids: &[i64],
-        carried_absence_ids: &[i64],
+        reported_absence_snapshots: &[(i64, String)],
+        carried_absence_snapshots: &[(i64, String)],
         content_rows: &[PayrollReportedContentRow],
-    ) -> AppResult<(u64, u64, u64, u64)> {
+    ) -> AppResult<Option<(u64, u64, u64, u64)>> {
         let mut tx = self.pool.begin().await?;
+        let mut versions = HashMap::new();
+        for (id, version) in reported_absence_snapshots
+            .iter()
+            .chain(carried_absence_snapshots)
+        {
+            if versions
+                .insert(*id, version.as_str())
+                .is_some_and(|old| old != version.as_str())
+            {
+                return Ok(None);
+            }
+        }
+        let ids: Vec<i64> = versions.keys().copied().collect();
+        let current: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT id, xmin::text FROM absences WHERE id = ANY($1) FOR UPDATE",
+        )
+        .bind(&ids)
+        .fetch_all(&mut *tx)
+        .await?;
+        for (id, version) in current {
+            if versions.remove(&id) != Some(version.as_str()) {
+                return Ok(None);
+            }
+        }
+        if !versions.is_empty() {
+            return Ok(None);
+        }
         sqlx::query(
             "INSERT INTO payroll_reported_periods (period) VALUES ($1) \
              ON CONFLICT (period) DO NOTHING",
@@ -1088,12 +1138,12 @@ impl ReportDb {
         .execute(&mut *tx)
         .await?;
         let declared = Self::record_declared_days_tx(&mut tx, period, declared_days).await?;
-        let mut absence_ids = reported_absence_ids.to_vec();
-        absence_ids.extend_from_slice(carried_absence_ids);
-        absence_ids.sort_unstable();
-        absence_ids.dedup();
+        let mut snapshots = reported_absence_snapshots.to_vec();
+        snapshots.extend_from_slice(carried_absence_snapshots);
+        snapshots.sort_unstable();
+        snapshots.dedup();
         let absences =
-            Self::mark_payroll_reported_absences_exact_tx(&mut tx, period, &absence_ids).await?;
+            Self::mark_payroll_reported_absences_exact_tx(&mut tx, period, &snapshots).await?;
         let entries = TimeEntryDb::mark_payroll_reported_tx(
             &mut tx,
             period,
@@ -1110,7 +1160,7 @@ impl ReportDb {
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;
-        Ok((declared, absences, entries, content))
+        Ok(Some((declared, absences, entries, content)))
     }
 
     /// Legacy readback for approved, work-crediting entries in `[from, to]`
