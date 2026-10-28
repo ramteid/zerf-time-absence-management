@@ -194,6 +194,8 @@ continued pay from a part-time contract than that week can ever hold. A row left
 document did account for it, an earlier row simply held every day the week has,
 and leaving it unmarked would hand it to a later report's catch-up section —
 which, counting it alone, gives it exactly the days this document withheld.
+Regular and late rows are counted together before either section is rendered,
+so a week crossing a month boundary receives the quota only once.
 
 The frontend keeps no calendar of its own. Every page showing a leave-day
 figure — the Absences list, the person report's stat cards, the team report's
@@ -606,11 +608,33 @@ catch-up path never looks at it again. It returns several stretches where it
 has to, and the rows go through `merge_continuous_illness_rows` like the main
 table's, so a catch-up row cannot carry a certificate verdict earned on a
 longer period than it shows. The absences a document declared travel back to
-the sender on the document itself (`PayrollReportData::late_absence_ids`) and
-are exactly what `mark_payroll_reported_absences` marks — deriving that set
-from a second query is what produced the read/mark drift bugs this feature kept
-hitting, where days were either declared twice or marked without ever being
-printed.
+the sender on the document itself (`PayrollReportData::late_absence_snapshots`).
+The sender locks and checks the database versions against the document before
+settling delivery. Scheduled sends hold the absence writers' per-user locks
+from assembly through SMTP and accounting. If a row changes outside those
+locks, the accounting transaction rolls back and the period stays queued.
+If SMTP already accepted the first copy, a retry can send another copy for the
+same period; a rebuilt empty report is settled without another email.
+Member selection applies the same owed-month filter as the row builder, so an absence
+that belongs entirely to a month still queued does not pull somebody into a
+later month's report.
+
+When an absence with a payroll marker is cancelled, migration 052's
+`payroll_cancellation_pending` keeps a review notice until a scheduled report
+actually includes it. The PDF and dashboard show its original dates and ask
+payroll to check earlier declarations without assuming a historical day count.
+The migration also flags cancellations approved after migration 046 installed
+the marker; reapplying it never reopens a notice already sent. Manual sends do
+not settle notices. Archived employees with pending notices remain report
+members, while assistants and excluded people follow the ordinary report rules.
+
+For a count-based schedule, a marked absence in an earlier report can already
+have consumed some of the week's quota. The old marker does not preserve the
+days declared, so `finish_absence_rows` sends affected people's report rows for
+manual review rather than guessing a number. Recorded weekday patterns have no
+weekly quota and continue to use automatic day counts. All rows in this report
+for an affected person are reviewed together so a multi-week range cannot shift
+quota onto a second row.
 
 `payroll_members` takes corrections too, because somebody whose only activity is
 an older changed day has no row in the month now being reported and may since

@@ -58,6 +58,57 @@ const ABSENCE_DAYS_COLUMN: usize = 4;
 /// Index of the `AU` (medical certificate) column in [`ABSENCE_COLUMNS`].
 const ABSENCE_MEDICAL_CERTIFICATE_COLUMN: usize = 5;
 
+const CANCELLED_ABSENCE_COLUMNS: &[Column] = &[
+    Column {
+        header_key: "pdf_payroll_column_employee",
+        width_mm: 60.0,
+        align: Align::Left,
+    },
+    Column {
+        header_key: "pdf_column_category",
+        width_mm: 60.0,
+        align: Align::Left,
+    },
+    Column {
+        header_key: "pdf_payroll_column_from",
+        width_mm: 30.0,
+        align: Align::Left,
+    },
+    Column {
+        header_key: "pdf_payroll_column_to",
+        width_mm: 30.0,
+        align: Align::Left,
+    },
+];
+
+const REVIEW_ABSENCE_COLUMNS: &[Column] = &[
+    Column {
+        header_key: "pdf_payroll_column_employee",
+        width_mm: 50.0,
+        align: Align::Left,
+    },
+    Column {
+        header_key: "pdf_column_category",
+        width_mm: 50.0,
+        align: Align::Left,
+    },
+    Column {
+        header_key: "pdf_payroll_column_from",
+        width_mm: 25.0,
+        align: Align::Left,
+    },
+    Column {
+        header_key: "pdf_payroll_column_to",
+        width_mm: 25.0,
+        align: Align::Left,
+    },
+    Column {
+        header_key: "pdf_payroll_column_medical_certificate",
+        width_mm: 30.0,
+        align: Align::Left,
+    },
+];
+
 /// Hours table: one row per person in the section. All columns are
 /// left-aligned so data rows line up under the (always left-aligned) header
 /// labels — see [`Renderer::draw_table_header`].
@@ -240,22 +291,21 @@ pub struct PayrollReportData {
     /// Exact older person-days printed in the corrections section, including
     /// legacy days whose unknown baseline must not be added to the new ledger.
     pub carried_work_days: Vec<PayrollCarriedWorkDay>,
-    /// Database ids of the regular absence rows this document printed.
-    pub reported_absence_ids: Vec<i64>,
+    /// Database ids and row versions of regular absences accounted for here.
+    pub reported_absence_snapshots: Vec<(i64, String)>,
     /// Absence periods from earlier months that no report ever showed, under
     /// their own real dates. Same "only when non-empty" rule as above.
     pub late_absence_rows: Vec<PayrollAbsenceRow>,
-    /// Database ids of the absences `late_absence_rows` was built from — not
+    /// Database ids and row versions of the absences `late_absence_rows` was built from, not
     /// rendered, and deliberately part of the assembled document rather than
     /// recomputed by the sender.
     ///
-    /// After the report goes out, exactly these absences are marked as
-    /// declared. Deriving that set from a second query instead has gone wrong
-    /// repeatedly in this feature: the reader and the marker drifted apart, and
-    /// days were either declared twice or marked without ever being printed and
-    /// so lost for good. Carrying the ids on the document makes the two the
-    /// same set by construction.
-    pub late_absence_ids: Vec<i64>,
+    /// The sender marks only these unchanged rows as declared.
+    pub late_absence_snapshots: Vec<(i64, String)>,
+    /// Cancellations of earlier reported absences requiring payroll review.
+    pub cancelled_absence_rows: Vec<PayrollAbsenceRow>,
+    /// Absences whose earlier reported weekly quota needs manual review.
+    pub absence_review_rows: Vec<PayrollAbsenceRow>,
     /// The day the document was assembled. Printed under the title and used in
     /// the attachment's filename: the same month can be sent more than once
     /// (an interim snapshot, then the final report), so the recipient needs to
@@ -296,6 +346,26 @@ pub fn render_payroll_report_pdf(data: &PayrollReportData, language: &Language) 
     }
     if !data.late_absence_rows.is_empty() {
         render_late_absence_table(&mut renderer, language, &data.late_absence_rows);
+    }
+    if !data.cancelled_absence_rows.is_empty() {
+        render_absence_review_table(
+            &mut renderer,
+            language,
+            &data.cancelled_absence_rows,
+            "pdf_payroll_cancelled_absences_heading",
+            "pdf_payroll_cancelled_absences_note",
+            false,
+        );
+    }
+    if !data.absence_review_rows.is_empty() {
+        render_absence_review_table(
+            &mut renderer,
+            language,
+            &data.absence_review_rows,
+            "pdf_payroll_absence_review_heading",
+            "pdf_payroll_absence_review_note",
+            true,
+        );
     }
     if !data.late_entry_rows.is_empty() {
         render_late_entry_table(&mut renderer, language, &data.late_entry_rows);
@@ -474,6 +544,40 @@ fn render_late_absence_table(
     }
 }
 
+/// List cancelled absences without guessing a historical day count.
+fn render_absence_review_table(
+    renderer: &mut Renderer,
+    language: &Language,
+    rows: &[PayrollAbsenceRow],
+    heading: &str,
+    note: &str,
+    show_certificate: bool,
+) {
+    renderer.set_columns(if show_certificate {
+        REVIEW_ABSENCE_COLUMNS
+    } else {
+        CANCELLED_ABSENCE_COLUMNS
+    });
+    renderer.draw_section_heading(&i18n::translate(language, heading, &[]));
+    renderer.draw_note(&i18n::translate(language, note, &[]));
+    renderer.draw_table_header();
+    for (index, row) in rows.iter().enumerate() {
+        let mut cells = vec![
+            (0, row.employee.clone()),
+            (1, row.category.clone()),
+            (2, i18n::format_date(language, row.from)),
+            (3, i18n::format_date(language, row.to)),
+        ];
+        if show_certificate {
+            cells.push((
+                4,
+                format_medical_certificate_required(row.medical_certificate_required, language),
+            ));
+        }
+        renderer.draw_row(&cells, index % 2 == 1);
+    }
+}
+
 /// Draw the corrections table, with a line of explanation above it.
 ///
 /// The note matters more than the table: without it the payroll accountant sees
@@ -576,7 +680,12 @@ mod tests {
 
     #[test]
     fn columns_sum_to_content_width() {
-        for (name, columns) in [("absence", ABSENCE_COLUMNS), ("hours", HOURS_COLUMNS)] {
+        for (name, columns) in [
+            ("absence", ABSENCE_COLUMNS),
+            ("absence review", CANCELLED_ABSENCE_COLUMNS),
+            ("absence review with certificate", REVIEW_ABSENCE_COLUMNS),
+            ("hours", HOURS_COLUMNS),
+        ] {
             let total: f32 = columns.iter().map(|column| column.width_mm).sum();
             assert!(
                 (total - super::super::CONTENT_WIDTH_MM).abs() < 0.01,
@@ -638,14 +747,36 @@ mod tests {
             }],
             declared_work_days: Vec::new(),
             carried_work_days: Vec::new(),
-            reported_absence_ids: Vec::new(),
+            reported_absence_snapshots: Vec::new(),
             late_absence_rows: Vec::new(),
-            late_absence_ids: Vec::new(),
+            late_absence_snapshots: Vec::new(),
+            cancelled_absence_rows: vec![PayrollAbsenceRow {
+                user_id: 1,
+                employee: "Smith, John".into(),
+                category: "Sick".into(),
+                from: date(2026, 4, 1),
+                to: date(2026, 4, 2),
+                days: 0.0,
+                medical_certificate_required: None,
+            }],
+            absence_review_rows: vec![PayrollAbsenceRow {
+                user_id: 1,
+                employee: "Smith, John".into(),
+                category: "Sick".into(),
+                from: date(2026, 4, 3),
+                to: date(2026, 4, 4),
+                days: 0.0,
+                medical_certificate_required: Some(true),
+            }],
             created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
             provisional: None,
         };
         let bytes = render_payroll_report_pdf(&data, &language);
         assert!(bytes.starts_with(b"%PDF"));
+        let pdf = String::from_utf8_lossy(&bytes);
+        assert!(pdf.contains("Cancelled absences"));
+        assert!(pdf.contains("Absences - review days"));
+        assert!(pdf.contains("Yes"));
     }
 
     /// A provisional report must render in every language — the notice goes
@@ -662,9 +793,27 @@ mod tests {
                 late_entry_rows: Vec::new(),
                 declared_work_days: Vec::new(),
                 carried_work_days: Vec::new(),
-                reported_absence_ids: Vec::new(),
+                reported_absence_snapshots: Vec::new(),
                 late_absence_rows: Vec::new(),
-                late_absence_ids: Vec::new(),
+                late_absence_snapshots: Vec::new(),
+                cancelled_absence_rows: vec![PayrollAbsenceRow {
+                    user_id: 1,
+                    employee: "Smith, John".into(),
+                    category: "Sick".into(),
+                    from: date(2026, 4, 1),
+                    to: date(2026, 4, 2),
+                    days: 0.0,
+                    medical_certificate_required: None,
+                }],
+                absence_review_rows: vec![PayrollAbsenceRow {
+                    user_id: 1,
+                    employee: "Smith, John".into(),
+                    category: "Sick".into(),
+                    from: date(2026, 4, 3),
+                    to: date(2026, 4, 4),
+                    days: 0.0,
+                    medical_certificate_required: None,
+                }],
                 created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
                 provisional: Some(ProvisionalNotice {
                     included: 8,
@@ -695,9 +844,11 @@ mod tests {
                 late_entry_rows: Vec::new(),
                 declared_work_days: Vec::new(),
                 carried_work_days: Vec::new(),
-                reported_absence_ids: Vec::new(),
+                reported_absence_snapshots: Vec::new(),
                 late_absence_rows: Vec::new(),
-                late_absence_ids: Vec::new(),
+                late_absence_snapshots: Vec::new(),
+                cancelled_absence_rows: Vec::new(),
+                absence_review_rows: Vec::new(),
                 created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
                 provisional: Some(ProvisionalNotice {
                     included: 5,
@@ -725,9 +876,11 @@ mod tests {
             late_entry_rows: Vec::new(),
             declared_work_days: Vec::new(),
             carried_work_days: Vec::new(),
-            reported_absence_ids: Vec::new(),
+            reported_absence_snapshots: Vec::new(),
             late_absence_rows: Vec::new(),
-            late_absence_ids: Vec::new(),
+            late_absence_snapshots: Vec::new(),
+            cancelled_absence_rows: Vec::new(),
+            absence_review_rows: Vec::new(),
             created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
             provisional: None,
         };

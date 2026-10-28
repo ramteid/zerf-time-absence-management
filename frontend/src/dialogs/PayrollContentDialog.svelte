@@ -13,6 +13,12 @@
   $: lateAbsences = (content?.rows ?? []).filter(
     (row) => row.kind === "late_absence",
   );
+  $: cancelledAbsences = (content?.rows ?? []).filter(
+    (row) => row.kind === "absence_cancellation",
+  );
+  $: reviewAbsences = (content?.rows ?? []).filter(
+    (row) => row.kind === "absence_review",
+  );
   $: hours = (content?.rows ?? []).filter((row) => row.kind === "hours");
   $: lateHours = (content?.rows ?? []).filter(
     (row) => row.kind === "late_hours",
@@ -41,7 +47,7 @@
     {/if}
   </div>
 
-  {#if absences.length === 0 && hours.length === 0 && lateHours.length === 0 && lateAbsences.length === 0}
+  {#if absences.length === 0 && hours.length === 0 && lateHours.length === 0 && lateAbsences.length === 0 && cancelledAbsences.length === 0 && reviewAbsences.length === 0}
     <div class="payroll-empty">{$t("Nothing to report for this month.")}</div>
   {:else}
     {#if absences.length > 0}
@@ -92,6 +98,44 @@
             </span>
             <span class="payroll-amount">
               {$t("{days} days").replace("{days}", row.days)}
+            </span>
+          </div>
+        {/each}
+      </div>
+    {/if}
+
+    {#if cancelledAbsences.length > 0}
+      <div class="report-subheading">{$t("Cancelled absences")}</div>
+      <div class="fs-13 text-tertiary mb-12">
+        {$t(
+          "Review earlier payroll reports and correct any affected declarations.",
+        )}
+      </div>
+      <div class="payroll-rows">
+        {#each cancelledAbsences as row, index (`cancelled-absence-${index}`)}
+          <div class="payroll-row">
+            <span class="payroll-name">{row.name}</span>
+            <span class="payroll-detail">
+              {row.category} - {fmtDate(row.from)} - {fmtDate(row.to)}
+            </span>
+          </div>
+        {/each}
+      </div>
+    {/if}
+
+    {#if reviewAbsences.length > 0}
+      <div class="report-subheading">{$t("Absences requiring review")}</div>
+      <div class="fs-13 text-tertiary mb-12">
+        {$t(
+          "Check earlier reports to determine the absence days for these periods.",
+        )}
+      </div>
+      <div class="payroll-rows">
+        {#each reviewAbsences as row, index (`review-absence-${index}`)}
+          <div class="payroll-row">
+            <span class="payroll-name">{row.name}</span>
+            <span class="payroll-detail">
+              {row.category} - {fmtDate(row.from)} - {fmtDate(row.to)}
             </span>
           </div>
         {/each}

@@ -45,6 +45,54 @@ afterEach(() => {
 });
 
 describe("PayrollContentDialog", () => {
+  it("shows a cancelled absence for review without a guessed day count", () => {
+    const target = render({
+      content: content([
+        {
+          name: "Example, Alex",
+          kind: "absence_cancellation",
+          category: "Sick leave",
+          from: "2026-07-14",
+          to: "2026-07-15",
+          days: 0,
+          minutes: null,
+          medical_certificate_required: null,
+        },
+      ]),
+      onClose: () => {},
+    });
+
+    expect(target.textContent).toContain("Cancelled absences");
+    expect(target.textContent).toContain("Review earlier payroll reports");
+    expect(target.textContent).toContain("Example, Alex");
+    expect(target.textContent).toContain("Sick leave");
+    expect(target.textContent).not.toContain("0 days");
+    expect(target.textContent).not.toContain(
+      "Nothing to report for this month.",
+    );
+  });
+
+  it("shows an uncertain earlier-week quota for review", () => {
+    const target = render({
+      content: content([
+        {
+          name: "Example, Alex",
+          kind: "absence_review",
+          category: "Sick leave",
+          from: "2026-07-14",
+          to: "2026-07-15",
+          days: 0,
+          minutes: null,
+          medical_certificate_required: null,
+        },
+      ]),
+      onClose: () => {},
+    });
+    expect(target.textContent).toContain("Absences requiring review");
+    expect(target.textContent).toContain("Check earlier reports");
+    expect(target.textContent).not.toContain("0 days");
+  });
+
   it("lists a positive correction under its affected day", () => {
     const target = render({
       content: content([

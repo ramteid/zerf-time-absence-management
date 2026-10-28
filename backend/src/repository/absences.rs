@@ -706,7 +706,9 @@ impl AbsenceDb {
     ) -> AppResult<u64> {
         Ok(sqlx::query(
             "UPDATE absences SET status='cancelled', reviewed_by=$1, \
-             reviewed_at=CURRENT_TIMESTAMP WHERE id=$2 AND status='cancellation_pending'",
+             reviewed_at=CURRENT_TIMESTAMP, \
+             payroll_cancellation_pending=(payroll_reported_period IS NOT NULL) \
+             WHERE id=$2 AND status='cancellation_pending'",
         )
         .bind(reviewer_id)
         .bind(absence_id)

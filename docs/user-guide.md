@@ -2151,7 +2151,18 @@ under **Reported later**, with the dates they actually cover.
 An absence that runs across a month boundary is split where it has to be. The
 days belonging to a month that has already been reported are carried, and the
 days belonging to a month whose report is still outstanding are left to that
-report. Between the two, every day is declared exactly once.
+report.
+
+If a previously reported absence is later cancelled, the next report lists
+the person, category and original dates under **Cancelled absences**. Payroll
+must check the earlier report and make any correction; the notice does not
+guess how many days were previously declared. A cancellation that was never
+reported needs no notice.
+
+For a contract without fixed working weekdays, an earlier report can already
+have used part of a week's day quota. When the amount cannot be determined
+from that earlier report, the affected absences are listed under **Absences
+requiring review** instead of giving a potentially incorrect day count.
 
 The **Payroll Report** card on the dashboard shows these signed corrections the
 same way, so you can see before the send what the next report will carry.
