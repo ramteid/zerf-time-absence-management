@@ -165,4 +165,25 @@ describe("PayrollContentDialog", () => {
     expect(target.textContent).toContain("Corrections to earlier months");
     expect(target.textContent).toContain("-1:30");
   });
+
+  it("lists who the report is still waiting for before the report rows", () => {
+    const target = render({
+      content: {
+        ...content([]),
+        readiness: {
+          ready: 11,
+          missing: [
+            { name: "Jurij Gugenhan", reason: "time entries not approved yet" },
+          ],
+        },
+      },
+      onClose: () => {},
+    });
+
+    const text = target.textContent;
+    expect(text).toContain("Still missing");
+    expect(text).toContain("Jurij Gugenhan");
+    expect(text).toContain("time entries not approved yet");
+    expect(text).not.toContain("Nothing to report for this month.");
+  });
 });

@@ -361,6 +361,17 @@ dialog footer > * {
   max-width: 520px;
 }
 
+/* Largest dialog variant ("huge" prop): tables and lists on desktop screens.
+   Width is set here, not only max-width, because the base rule fixes 480px. */
+dialog.dialog-huge {
+  width: 1100px;
+  /* Same cap as the base rule (viewport minus margins and safe areas). */
+  max-width: calc(
+    100vw - 24px - env(safe-area-inset-left, 0px) -
+      env(safe-area-inset-right, 0px)
+  );
+}
+
 /* Muted heading above a secondary list section (e.g. archived users). */
 .zf-list-heading {
   margin: 24px 0 8px;

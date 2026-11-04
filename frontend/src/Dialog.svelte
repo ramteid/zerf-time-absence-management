@@ -37,6 +37,8 @@
   export let onClose = null;
   // Wider layout for dialogs with tables or dense forms (e.g. user editor).
   export let wide = false;
+  // Extra-wide layout that uses a desktop screen for wide tables and lists.
+  export let huge = false;
   export let closeDisabled = false;
 
   let dlg;
@@ -197,6 +199,7 @@
   }}
   on:keydown
   class:dialog-wide={wide}
+  class:dialog-huge={huge}
   class:dialog-fallback={fallbackMode}
 >
   <header>

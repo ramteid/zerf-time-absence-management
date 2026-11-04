@@ -611,6 +611,27 @@ pub struct PayrollContent {
     pub people_with_hours: usize,
     pub minutes: i64,
     pub rows: Vec<PayrollContentRow>,
+    /// How far the people the report covers are from being final; `None` when
+    /// the question is moot (report off, or the month already went out).
+    pub readiness: Option<PayrollReadiness>,
+}
+
+/// Who the scheduled send is still waiting for. Uses the very gate the send
+/// uses ([`evaluate_members`]), so the card never promises a send the nightly
+/// run would refuse.
+#[derive(serde::Serialize)]
+pub struct PayrollReadiness {
+    /// Covered people whose month is final.
+    pub ready: usize,
+    /// Covered people holding the report back, with the reason.
+    pub missing: Vec<PayrollMissingPerson>,
+}
+
+#[derive(serde::Serialize)]
+pub struct PayrollMissingPerson {
+    pub name: String,
+    /// Localized, e.g. "time entries not approved yet".
+    pub reason: String,
 }
 
 /// Flatten a finished document into the exact rows its delivered dashboard
@@ -790,6 +811,7 @@ pub async fn build_content(
             people_with_hours: 0,
             minutes: 0,
             rows: Vec::new(),
+            readiness: None,
         });
     }
 
@@ -820,6 +842,7 @@ pub async fn build_content(
             people_with_hours,
             minutes,
             rows,
+            readiness: None,
         });
     }
     // One description of the carried days for the member set and the document
@@ -853,6 +876,45 @@ pub async fn build_content(
     )
     .await?;
 
+    // Same rules as the scheduled send (see `background::payroll_report`):
+    // hours that end up in the PDF need every booking settled, and only
+    // payroll-relevant absence requests hold it. A month already delivered has
+    // nobody left to wait for.
+    let readiness = if sent {
+        None
+    } else {
+        let evaluated = evaluate_members(
+            app_state,
+            &members,
+            from,
+            to,
+            |role| {
+                if config.includes_hours_for(role) {
+                    crate::services::reports::UnapprovedEntries::AnyUnsettled
+                } else {
+                    crate::services::reports::UnapprovedEntries::NotRequired
+                }
+            },
+            false,
+            crate::services::reports::PendingAbsences::PayrollRelevant,
+        )
+        .await?;
+        let ready = evaluated
+            .iter()
+            .filter(|member| member.reason_key.is_none())
+            .count();
+        let missing = evaluated
+            .iter()
+            .filter_map(|member| {
+                member.reason_key.map(|reason_key| PayrollMissingPerson {
+                    name: format!("{} {}", member.user.first_name, member.user.last_name),
+                    reason: crate::i18n::translate(language, reason_key, &[]),
+                })
+            })
+            .collect();
+        Some(PayrollReadiness { ready, missing })
+    };
+
     let data = build_report_data(
         app_state,
         ReportWindow {
@@ -884,6 +946,7 @@ pub async fn build_content(
         people_with_hours,
         minutes,
         rows,
+        readiness,
     })
 }
 

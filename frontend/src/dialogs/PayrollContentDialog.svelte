@@ -7,37 +7,82 @@
   export let content;
   export let onClose;
 
-  // Absences first, then the hours tables, then the catch-up days — the order
-  // the report itself prints.
-  $: absences = (content?.rows ?? []).filter((row) => row.kind === "absence");
-  $: lateAbsences = (content?.rows ?? []).filter(
-    (row) => row.kind === "late_absence",
-  );
-  $: cancelledAbsences = (content?.rows ?? []).filter(
-    (row) => row.kind === "absence_cancellation",
-  );
-  $: reviewAbsences = (content?.rows ?? []).filter(
-    (row) => row.kind === "absence_review",
-  );
-  $: hours = (content?.rows ?? []).filter((row) => row.kind === "hours");
-  $: lateHours = (content?.rows ?? []).filter(
-    (row) => row.kind === "late_hours",
-  );
-
   function signedMinutes(minutes) {
     const formatted = minToHM(minutes ?? 0);
     return (minutes ?? 0) > 0 ? `+${formatted}` : formatted;
   }
+
+  function daysLabel(days) {
+    return $t("{days} days").replace("{days}", days);
+  }
+
+  function categoryAndPeriod(row) {
+    return `${row.category} · ${fmtDate(row.from)} – ${fmtDate(row.to)}`;
+  }
+
+  // One entry per block of the report, in the order the report prints them:
+  // absences first, then the hours tables, then the catch-up days. `detail`
+  // and `amount` turn a row into its two right-hand cells (`amount` may be
+  // absent when the report states no figure, e.g. cancelled absences).
+  const SECTIONS = [
+    {
+      kind: "absence",
+      title: "Absences",
+      detail: categoryAndPeriod,
+      amount: (row) => daysLabel(row.days),
+    },
+    {
+      kind: "hours",
+      title: "Working days and hours",
+      detail: (row) => daysLabel(row.days),
+      amount: (row) => minToHM(row.minutes ?? 0),
+    },
+    {
+      kind: "late_absence",
+      title: "Reported later",
+      hint: "Absences recorded after the report for their own month had already been sent. They go into this month's report with the days they actually cover.",
+      detail: categoryAndPeriod,
+      amount: (row) => daysLabel(row.days),
+    },
+    {
+      kind: "absence_cancellation",
+      title: "Cancelled absences",
+      hint: "Review earlier payroll reports and correct any affected declarations.",
+      detail: categoryAndPeriod,
+    },
+    {
+      kind: "absence_review",
+      title: "Absences requiring review",
+      hint: "Check earlier reports to determine the absence days for these periods.",
+      detail: categoryAndPeriod,
+    },
+    {
+      kind: "late_hours",
+      title: "Corrections to earlier months",
+      hint: "Working time that changed after the report for its month was sent. Positive hours add time and negative hours reduce it. This report lists each correction under the day it belongs to.",
+      detail: (row) => fmtDate(row.from),
+      amount: (row) => signedMinutes(row.minutes),
+    },
+  ];
+
+  // What the scheduled send is still waiting for goes first: it is the thing
+  // a reader opening the list most likely wants to resolve.
+  $: missing = content?.readiness?.missing ?? [];
+
+  $: sections = SECTIONS.map((section) => ({
+    ...section,
+    rows: (content?.rows ?? []).filter((row) => row.kind === section.kind),
+  })).filter((section) => section.rows.length > 0);
 </script>
 
-<Dialog title={$t("Payroll Report")} {onClose}>
+<Dialog title={$t("Payroll Report")} {onClose} huge>
   <svelte:fragment slot="title">
     <span class="flex-1">
       {$t("Payroll Report")} · {content.period_label}
     </span>
   </svelte:fragment>
 
-  <div class="fs-13 text-secondary mb-12">
+  <p class="payroll-intro">
     {#if content.in_progress}
       {$t("What this month is shaping up to report.")}
     {:else if content.sent}
@@ -45,120 +90,50 @@
     {:else}
       {$t("What this month's report will contain.")}
     {/if}
-  </div>
+  </p>
 
-  {#if absences.length === 0 && hours.length === 0 && lateHours.length === 0 && lateAbsences.length === 0 && cancelledAbsences.length === 0 && reviewAbsences.length === 0}
+  {#if sections.length === 0 && missing.length === 0}
     <div class="payroll-empty">{$t("Nothing to report for this month.")}</div>
   {:else}
-    {#if absences.length > 0}
-      <div class="report-subheading">{$t("Absences")}</div>
-      <div class="payroll-rows">
-        {#each absences as row, index (`absence-${index}`)}
-          <div class="payroll-row">
-            <span class="payroll-name">{row.name}</span>
-            <span class="payroll-detail">
-              {row.category} · {fmtDate(row.from)} – {fmtDate(row.to)}
-            </span>
-            <span class="payroll-amount">
-              {$t("{days} days").replace("{days}", row.days)}
-            </span>
-          </div>
-        {/each}
-      </div>
-    {/if}
-
-    {#if hours.length > 0}
-      <div class="report-subheading">{$t("Working days and hours")}</div>
-      <div class="payroll-rows">
-        {#each hours as row, index (`hours-${index}`)}
-          <div class="payroll-row">
-            <span class="payroll-name">{row.name}</span>
-            <span class="payroll-detail">
-              {$t("{days} days").replace("{days}", row.days)}
-            </span>
-            <span class="payroll-amount">{minToHM(row.minutes ?? 0)}</span>
-          </div>
-        {/each}
-      </div>
-    {/if}
-
-    {#if lateAbsences.length > 0}
-      <div class="report-subheading">{$t("Reported later")}</div>
-      <div class="fs-13 text-tertiary mb-12">
-        {$t(
-          "Absences recorded after the report for their own month had already been sent. They go into this month's report with the days they actually cover.",
-        )}
-      </div>
-      <div class="payroll-rows">
-        {#each lateAbsences as row, index (`late-absence-${index}`)}
-          <div class="payroll-row">
-            <span class="payroll-name">{row.name}</span>
-            <span class="payroll-detail">
-              {row.category} · {fmtDate(row.from)} – {fmtDate(row.to)}
-            </span>
-            <span class="payroll-amount">
-              {$t("{days} days").replace("{days}", row.days)}
-            </span>
-          </div>
-        {/each}
-      </div>
-    {/if}
-
-    {#if cancelledAbsences.length > 0}
-      <div class="report-subheading">{$t("Cancelled absences")}</div>
-      <div class="fs-13 text-tertiary mb-12">
-        {$t(
-          "Review earlier payroll reports and correct any affected declarations.",
-        )}
-      </div>
-      <div class="payroll-rows">
-        {#each cancelledAbsences as row, index (`cancelled-absence-${index}`)}
-          <div class="payroll-row">
-            <span class="payroll-name">{row.name}</span>
-            <span class="payroll-detail">
-              {row.category} - {fmtDate(row.from)} - {fmtDate(row.to)}
-            </span>
-          </div>
-        {/each}
-      </div>
-    {/if}
-
-    {#if reviewAbsences.length > 0}
-      <div class="report-subheading">{$t("Absences requiring review")}</div>
-      <div class="fs-13 text-tertiary mb-12">
-        {$t(
-          "Check earlier reports to determine the absence days for these periods.",
-        )}
-      </div>
-      <div class="payroll-rows">
-        {#each reviewAbsences as row, index (`review-absence-${index}`)}
-          <div class="payroll-row">
-            <span class="payroll-name">{row.name}</span>
-            <span class="payroll-detail">
-              {row.category} - {fmtDate(row.from)} - {fmtDate(row.to)}
-            </span>
-          </div>
-        {/each}
-      </div>
-    {/if}
-
-    {#if lateHours.length > 0}
-      <div class="report-subheading">{$t("Corrections to earlier months")}</div>
-      <div class="fs-13 text-tertiary mb-12">
-        {$t(
-          "Working time that changed after the report for its month was sent. Positive hours add time and negative hours reduce it. This report lists each correction under the day it belongs to.",
-        )}
-      </div>
-      <div class="payroll-rows">
-        {#each lateHours as row, index (`late-${index}`)}
-          <div class="payroll-row">
-            <span class="payroll-name">{row.name}</span>
-            <span class="payroll-detail">{fmtDate(row.from)}</span>
-            <span class="payroll-amount">{signedMinutes(row.minutes)}</span>
-          </div>
-        {/each}
-      </div>
-    {/if}
+    <div class="payroll-sections">
+      {#if missing.length > 0}
+        <section class="payroll-section">
+          <h3 class="payroll-heading">{$t("Still missing")}</h3>
+          <p class="payroll-hint">
+            {$t(
+              "The report is sent automatically once all of these are settled.",
+            )}
+          </p>
+          <ul class="payroll-rows">
+            {#each missing as person, index (`missing-${index}`)}
+              <li class="payroll-row no-amount">
+                <span class="payroll-name">{person.name}</span>
+                <span class="payroll-detail">{person.reason}</span>
+              </li>
+            {/each}
+          </ul>
+        </section>
+      {/if}
+      {#each sections as section (section.kind)}
+        <section class="payroll-section">
+          <h3 class="payroll-heading">{$t(section.title)}</h3>
+          {#if section.hint}
+            <p class="payroll-hint">{$t(section.hint)}</p>
+          {/if}
+          <ul class="payroll-rows">
+            {#each section.rows as row, index (`${section.kind}-${index}`)}
+              <li class="payroll-row" class:no-amount={!section.amount}>
+                <span class="payroll-name">{row.name}</span>
+                <span class="payroll-detail">{section.detail(row)}</span>
+                {#if section.amount}
+                  <span class="payroll-amount">{section.amount(row)}</span>
+                {/if}
+              </li>
+            {/each}
+          </ul>
+        </section>
+      {/each}
+    </div>
   {/if}
 
   <svelte:fragment slot="footer">
@@ -167,54 +142,110 @@
 </Dialog>
 
 <style>
-  .report-subheading {
-    font-size: 0.8125rem;
-    font-weight: 400;
-    color: var(--text-tertiary);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin: 12px 0 6px;
+  /* One vertical rhythm: 28px between blocks, 4px between a heading and its
+     hint, 12px before a list. */
+  .payroll-intro {
+    margin: 0;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
   }
 
-  .payroll-rows {
+  /* Wins over the dialog body's generic 14px gap; margins do not collapse in
+     its flex column, so the intro carries no bottom margin of its own. */
+  .payroll-sections {
+    margin-top: 20px;
     display: flex;
     flex-direction: column;
-    max-height: 50vh;
-    overflow-y: auto;
+    gap: 28px;
   }
 
+  .payroll-heading {
+    margin: 0;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+  }
+
+  .payroll-hint {
+    margin: 4px 0 0;
+    max-width: 70ch;
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    color: var(--text-tertiary);
+  }
+
+  /* The lists are never height-capped: the dialog body scrolls as a whole. */
+  .payroll-rows {
+    list-style: none;
+    margin: 12px 0 0;
+    padding: 0;
+    border-top: 1px solid var(--border);
+  }
+
+  /* Three real columns shared by every row of a list: person, details,
+     figure. Long names wrap instead of being cut off. */
   .payroll-row {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.6fr) minmax(7rem, auto);
+    column-gap: 24px;
     align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 8px 4px;
+    padding: 10px 8px;
     border-bottom: 1px solid var(--border);
   }
 
+  .payroll-row.no-amount {
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 2.6fr);
+  }
+
   .payroll-name {
-    /* Long names truncate instead of pushing the figures out of the dialog. */
     min-width: 0;
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
   }
 
   .payroll-detail {
+    min-width: 0;
+    overflow-wrap: anywhere;
     color: var(--text-tertiary);
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
   }
 
   .payroll-amount {
-    font-variant-numeric: tabular-nums;
+    text-align: right;
     white-space: nowrap;
+    font-variant-numeric: tabular-nums;
   }
 
   .payroll-empty {
-    padding: 24px;
+    padding: 32px 24px;
     text-align: center;
     color: var(--text-tertiary);
     font-size: 0.875rem;
+  }
+
+  /* Phone: name and figure share the first line, the details wrap below. */
+  @media (max-width: 640px) {
+    .payroll-row,
+    .payroll-row.no-amount {
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas:
+        "name amount"
+        "detail detail";
+      row-gap: 2px;
+      padding: 10px 2px;
+    }
+
+    .payroll-name {
+      grid-area: name;
+    }
+
+    .payroll-detail {
+      grid-area: detail;
+    }
+
+    .payroll-amount {
+      grid-area: amount;
+    }
   }
 </style>

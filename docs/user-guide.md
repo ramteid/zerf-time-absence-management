@@ -2144,6 +2144,12 @@ assistants' always, everybody else's when *List employees' working hours* is
 switched on. A day that no report prints stays outstanding, so if you switch
 that setting on later, changes recorded since are still there to be reported.
 
+While a report has not been sent yet, the **Payroll Report** card shows a ring
+with how many of the people it covers are ready. Everyone still holding the
+report back is listed with the reason, for example time entries that are not
+approved yet or an undecided absence request. The same list opens at the top of
+the card's details. The report goes out automatically once nobody is left on it.
+
 The **Payroll Report** card for a month that has already been sent shows exactly
 what that report contained, not what it would look like if it were assembled
 again today — nothing recorded or approved afterwards creeps into a delivered

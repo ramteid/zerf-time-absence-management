@@ -1344,6 +1344,11 @@ const TRANSLATIONS = {
     "{absences} absences · {people} people with hours":
       "{absences} Abwesenheiten · {people} Personen mit Stunden",
     "still running": "l\u00e4uft noch",
+    "{ready} of {total} ready": "{ready} von {total} bereit",
+    "Ready to send": "Bereit zum Versand",
+    "Still missing": "Es fehlt noch",
+    "The report is sent automatically once all of these are settled.":
+      "Die Meldung wird automatisch versendet, sobald alles hiervon erledigt ist.",
     sent: "versendet",
     "What this month is shaping up to report.":
       "Was sich f\u00fcr diesen Monat abzeichnet.",

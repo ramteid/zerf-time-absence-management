@@ -1,6 +1,7 @@
 <script>
   import { t } from "../../i18n.js";
   import Icon from "../../Icons.svelte";
+  import StatusDonut from "../../lib/ui/StatusDonut.svelte";
   import { appTodayDate, fmtMonthName, minToHM } from "../../format.js";
 
   // Payload of GET /reports/payroll-content, or null while it loads.
@@ -21,6 +22,12 @@
   // history, not something anybody still has to act on.
   $: done = !!content?.sent;
   $: hasRows = (content?.rows?.length ?? 0) > 0;
+  // Who the nightly send is still waiting for; absent once the month has gone
+  // out (or there is nobody to wait for).
+  $: readiness = content?.readiness ?? null;
+  $: missingCount = readiness?.missing?.length ?? 0;
+  $: coveredCount = (readiness?.ready ?? 0) + missingCount;
+  $: showRing = !!readiness && coveredCount > 0;
   $: hasHourRows = (content?.rows ?? []).some((row) => row.minutes != null);
 </script>
 
@@ -45,14 +52,45 @@
   <button
     class="payroll-body payroll-card-button"
     on:click={onOpen}
-    disabled={!content || !hasRows}
+    disabled={!content || (!hasRows && missingCount === 0)}
   >
-    <div>
-      <div class="payroll-headline">
-        {$t("{absences} absences · {people} people with hours")
-          .replace("{absences}", content?.absence_count ?? 0)
-          .replace("{people}", content?.people_with_hours ?? 0)}
-      </div>
+    {#if showRing}
+      <StatusDonut ready={readiness.ready} notSubmitted={missingCount} />
+    {/if}
+    <div class="payroll-text">
+      {#if showRing}
+        <div class="payroll-headline">
+          {#if missingCount === 0}
+            {$t("Ready to send")}
+          {:else}
+            {$t("{ready} of {total} ready")
+              .replace("{ready}", readiness.ready)
+              .replace("{total}", coveredCount)}
+          {/if}
+        </div>
+        {#if missingCount > 0}
+          <ul class="payroll-missing">
+            {#each readiness.missing as person, index (`missing-${index}`)}
+              <li>
+                <span class="payroll-missing-dot"></span>
+                <span class="payroll-missing-name">{person.name}</span>
+                <span class="payroll-missing-reason">{person.reason}</span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+        <div class="payroll-figures">
+          {$t("{absences} absences · {people} people with hours")
+            .replace("{absences}", content?.absence_count ?? 0)
+            .replace("{people}", content?.people_with_hours ?? 0)}
+        </div>
+      {:else}
+        <div class="payroll-headline">
+          {$t("{absences} absences · {people} people with hours")
+            .replace("{absences}", content?.absence_count ?? 0)
+            .replace("{people}", content?.people_with_hours ?? 0)}
+        </div>
+      {/if}
       <div class="payroll-sub">
         {content?.period_label ?? ""}
         {#if hasHourRows}
@@ -128,6 +166,53 @@
   .payroll-headline {
     font-size: 1.125rem;
     font-weight: 600;
+  }
+
+  .payroll-text {
+    min-width: 0;
+  }
+
+  .payroll-missing {
+    list-style: none;
+    margin: 6px 0;
+    padding: 0;
+    font-size: 0.8125rem;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .payroll-missing li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 6px;
+    min-width: 0;
+  }
+
+  /* Same red as the ring's missing arc (StatusDonut). */
+  .payroll-missing-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--danger);
+    flex-shrink: 0;
+    align-self: center;
+  }
+
+  .payroll-missing-name {
+    font-weight: 500;
+    overflow-wrap: anywhere;
+  }
+
+  .payroll-missing-reason {
+    color: var(--text-tertiary);
+    overflow-wrap: anywhere;
+  }
+
+  .payroll-figures {
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
   }
 
   .payroll-sub {
