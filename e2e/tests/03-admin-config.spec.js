@@ -131,11 +131,19 @@ test("admin: add a manual holiday", async ({ page }) => {
   // Pick a future date that isn't already a seeded public holiday so the
   // create can't hit the holidays.holiday_date UNIQUE constraint (see
   // freeHolidayDate for the full rationale).
-  await setDate(page, "holiday-date", await freeHolidayDate(page.request, 60));
+  const holidayDate = await freeHolidayDate(page.request, 60);
+  await setDate(page, "holiday-date", holidayDate);
   await page.locator("#holiday-name").fill("E2E Company Holiday");
   await page.getByRole("button", { name: "Add" }).click();
 
   await expect(page.getByText("Holiday added.")).toBeVisible();
+  // The list shows one calendar year at a time. 60 days out lands in the next
+  // year from the end of October on, so step to the holiday's year first.
+  const yearLabel = page.locator(".year-label");
+  if (Number(await yearLabel.textContent()) < Number(holidayDate.slice(0, 4))) {
+    await page.locator(".zf-nav-slider button").last().click();
+    await expect(yearLabel).toHaveText(holidayDate.slice(0, 4));
+  }
   await expect(page.getByText("E2E Company Holiday")).toBeVisible();
   // Per the user guide, holidays are excluded both from absence workday
   // counts and from the daily work target — this test only proves the
