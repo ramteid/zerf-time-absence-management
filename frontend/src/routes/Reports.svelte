@@ -197,15 +197,72 @@
   // the picker bound far enough to show the linked dates.
   $: maxDate = reportMaxDate($path, today);
 
-  let activeTab = "employee"; // "employee" | "team"
-  let periodMode = "month";
+  // Mobile browsers discard background tabs and reload them on return, which
+  // wipes component state. The filter is therefore mirrored into
+  // sessionStorage (per browser tab, gone when the tab is closed) and restored
+  // here. Storage can be blocked or empty, so every access is guarded.
+  const FILTER_STORAGE_KEY = "zerf.reports.filter";
+
+  function loadSavedFilter() {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(FILTER_STORAGE_KEY));
+      // Never restore another account's choices (shared device, re-login).
+      if (!saved || saved.ownerId !== $currentUser?.id) return null;
+      const dateOrEmpty = (value) =>
+        value === "" || isValidIsoDate(value) ? value : "";
+      return {
+        activeTab: saved.activeTab === "team" ? "team" : "employee",
+        periodMode: saved.periodMode === "range" ? "range" : "month",
+        month: /^\d{4}-\d{2}$/.test(saved.month) ? saved.month : null,
+        from: dateOrEmpty(saved.from),
+        to: dateOrEmpty(saved.to),
+        selectedUserId: Number.isSafeInteger(saved.selectedUserId)
+          ? saved.selectedUserId
+          : null,
+        path: typeof saved.path === "string" ? saved.path : null,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function saveFilter() {
+    if (!$currentUser?.id) return;
+    try {
+      sessionStorage.setItem(
+        FILTER_STORAGE_KEY,
+        JSON.stringify({
+          ownerId: $currentUser.id,
+          activeTab,
+          periodMode,
+          month,
+          from,
+          to,
+          selectedUserId,
+          path: $path,
+        }),
+      );
+    } catch {
+      // Storage unavailable: the page simply works without restoring.
+    }
+  }
+
+  const savedFilter = loadSavedFilter();
+  // The URL a restored filter belonged to. If a reload lands on that same
+  // deep link, the restored filter wins over the link's original values once.
+  let restoredFilterPath = savedFilter?.path ?? null;
+
+  let activeTab = savedFilter?.activeTab ?? "employee"; // "employee" | "team"
+  let periodMode = savedFilter?.periodMode ?? "month";
   // Derived from `today` directly rather than from the reactive
   // `currentMonthStr`, which is still undefined while these initialisers run —
   // seeding `month` from it left the first render with a blank period.
-  let month = isoMonthOf(today);
-  let from = "";
-  let to = "";
-  let selectedUserId = tracksOwnTime($currentUser) ? $currentUser.id : null;
+  let month = savedFilter?.month ?? isoMonthOf(today);
+  let from = savedFilter?.from ?? "";
+  let to = savedFilter?.to ?? "";
+  let selectedUserId =
+    savedFilter?.selectedUserId ??
+    (tracksOwnTime($currentUser) ? $currentUser.id : null);
   let dismissedUnavailableDeepLinkPath = "";
 
   // Deep-link support: Calendar rows and a pending approval's WeekReviewDialog
@@ -215,6 +272,10 @@
   // Reports never calls go() for its own filter changes, so $path stays put
   // afterwards and this won't fight manual filter edits made later.
   function applyDeepLink(currentPath) {
+    if (restoredFilterPath === currentPath) {
+      restoredFilterPath = null;
+      return;
+    }
     const deepLink = reportDeepLink(currentPath);
     if (!deepLink) return;
     dismissedUnavailableDeepLinkPath = "";
@@ -261,6 +322,9 @@
     latestUsersLoadRequest += 1;
   });
 
+  // A restored filter only outranks its own deep link until the URL changes.
+  $: if (restoredFilterPath && $path !== restoredFilterPath)
+    restoredFilterPath = null;
   $: if ($path.startsWith("/reports?")) applyDeepLink($path);
 
   $: if (isSelfOnlyReportsView) selectedUserId = $currentUser.id;
@@ -335,6 +399,8 @@
   $: if (maxRangeEnd && to > maxRangeEnd) to = maxRangeEnd;
 
   $: period = { mode: periodMode, month, from, to };
+
+  $: saveFilter(activeTab, periodMode, month, from, to, selectedUserId, $path);
 
   function selectReportUser() {
     dismissedUnavailableDeepLinkPath = $path;

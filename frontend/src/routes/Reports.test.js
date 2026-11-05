@@ -165,6 +165,7 @@ describe("Reports", () => {
   let scrollIntoView;
 
   beforeEach(() => {
+    sessionStorage.clear();
     target = document.createElement("div");
     document.body.appendChild(target);
     originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
@@ -228,6 +229,49 @@ describe("Reports", () => {
         (b) => b.textContent.trim() === "Show",
       ),
     ).toBe(false);
+  }, 20000);
+
+  it("restores the saved filter after the browser reloads the page", async () => {
+    sessionStorage.setItem(
+      "zerf.reports.filter",
+      JSON.stringify({
+        ownerId: 1,
+        activeTab: "employee",
+        periodMode: "month",
+        month: "2024-03",
+        from: "",
+        to: "",
+        selectedUserId: 1,
+        path: "/reports",
+      }),
+    );
+    component = mount(Reports, { target });
+    await waitFor(() => target.querySelector(".stat-cards"));
+
+    const saved = JSON.parse(sessionStorage.getItem("zerf.reports.filter"));
+    expect(saved.month).toBe("2024-03");
+  }, 20000);
+
+  it("ignores a saved filter that belongs to another account", async () => {
+    sessionStorage.setItem(
+      "zerf.reports.filter",
+      JSON.stringify({
+        ownerId: 99,
+        activeTab: "employee",
+        periodMode: "month",
+        month: "2024-03",
+        from: "",
+        to: "",
+        selectedUserId: 99,
+        path: "/reports",
+      }),
+    );
+    component = mount(Reports, { target });
+    await waitFor(() => target.querySelector(".stat-cards"));
+
+    const saved = JSON.parse(sessionStorage.getItem("zerf.reports.filter"));
+    expect(saved.ownerId).toBe(1);
+    expect(saved.month).not.toBe("2024-03");
   }, 20000);
 
   it("hides the tab bar and employee picker for a user without team-report access", async () => {
