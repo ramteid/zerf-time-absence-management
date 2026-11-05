@@ -296,7 +296,7 @@ impl AbsenceDb {
     ) -> AppResult<Vec<Absence>> {
         Ok(QueryBuilder::<Postgres>::new(format!(
             "{ABS_SELECT} WHERE a.user_id=$1 AND a.end_date >= $2 AND a.start_date <= $3 \
-             ORDER BY a.start_date DESC"
+             ORDER BY a.start_date, a.id"
         ))
         .build_query_as::<Absence>()
         .bind(user_id)
@@ -341,7 +341,7 @@ impl AbsenceDb {
                 builder.push(" AND a.status = ").push_bind(s.to_owned());
             }
         }
-        builder.push(" ORDER BY a.start_date DESC");
+        builder.push(" ORDER BY a.start_date, a.id");
         Ok(builder
             .build_query_as::<Absence>()
             .fetch_all(&self.pool)

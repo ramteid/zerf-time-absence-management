@@ -106,6 +106,18 @@ export function dedupeAbsences(absences) {
   });
 }
 
+// Oldest absence first, newest last. Used wherever lists are merged in the
+// browser (e.g. team + own absences), so the order never depends on which
+// list was appended first. ISO dates compare correctly as strings.
+export function sortAbsencesOldestFirst(absences) {
+  return [...(absences || [])].sort(
+    (a, b) =>
+      String(a.start_date).localeCompare(String(b.start_date)) ||
+      String(a.end_date).localeCompare(String(b.end_date)) ||
+      a.id - b.id,
+  );
+}
+
 export function absenceKindTotals(absences) {
   const costTypeBySlug = slugToCostType();
   const totals = {};

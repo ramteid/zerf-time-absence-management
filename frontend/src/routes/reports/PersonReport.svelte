@@ -50,6 +50,7 @@
   import {
     absenceKindTotals,
     dedupeAbsences,
+    sortAbsencesOldestFirst,
   } from "../../lib/domain/reports.js";
   import { findUserById } from "../../lib/domain/users.js";
 
@@ -120,8 +121,10 @@
           (
             (await getAbsenceReport({ from: absenceFrom, to: absenceTo })) || []
           ).filter((a) => a.user_id === targetUserId);
-    return dedupeAbsences(raw).filter(
-      (a) => a.status !== "rejected" && a.status !== "cancelled",
+    return sortAbsencesOldestFirst(
+      dedupeAbsences(raw).filter(
+        (a) => a.status !== "rejected" && a.status !== "cancelled",
+      ),
     );
   }
 

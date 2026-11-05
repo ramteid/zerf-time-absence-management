@@ -30,6 +30,7 @@
     teamCategoryMinutes,
     teamCategoryRowTotal,
     dedupeAbsences,
+    sortAbsencesOldestFirst,
   } from "../../lib/domain/reports.js";
   import { tracksOwnTime } from "../../rolePolicy.js";
 
@@ -264,8 +265,12 @@
           ? getUserAbsencesInRange({ from: absenceFrom, to: absenceTo })
           : Promise.resolve([]),
       ]);
-      let raw = dedupeAbsences([...(teamRaw || []), ...ownRaw]).filter(
-        (a) => a.status !== "rejected" && a.status !== "cancelled",
+      // Team and own absences are two lists; sort the merged result so the
+      // oldest absence is on top and the newest at the bottom.
+      let raw = sortAbsencesOldestFirst(
+        dedupeAbsences([...(teamRaw || []), ...ownRaw]).filter(
+          (a) => a.status !== "rejected" && a.status !== "cancelled",
+        ),
       );
       if (raw.length === 0) {
         if (isCurrentAbsenceRequest(key, requestId)) {

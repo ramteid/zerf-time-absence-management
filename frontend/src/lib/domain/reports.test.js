@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   categoryColumnsFromTeamReport,
   dedupeAbsences,
+  sortAbsencesOldestFirst,
   filterCategories,
   filterTeamCategoryColumns,
   leaveAccountUsage,
@@ -46,6 +47,16 @@ describe("reports domain helpers", () => {
       { id: 1 },
       { id: 2 },
     ]);
+  });
+
+  it("sorts absences oldest first, newest last", () => {
+    const sorted = sortAbsencesOldestFirst([
+      { id: 3, start_date: "2026-05-10", end_date: "2026-05-12" },
+      { id: 1, start_date: "2026-03-02", end_date: "2026-03-06" },
+      { id: 4, start_date: "2026-03-02", end_date: "2026-03-03" },
+      { id: 2, start_date: "2026-04-01", end_date: "2026-04-01" },
+    ]);
+    expect(sorted.map((a) => a.id)).toEqual([4, 1, 2, 3]);
   });
 
   it("matches leave-account report usage by category id, not display name", () => {
