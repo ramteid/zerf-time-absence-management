@@ -482,7 +482,9 @@
         role: normalizedRole,
         weekly_hours: normalizedWeeklyHours,
         ...(isAssistantRole ? {} : { work_weekdays }),
-        ...(weeklyHoursChanged && !isAssistantRole ? { weekly_hours_from } : {}),
+        ...(weeklyHoursChanged && !isAssistantRole
+          ? { weekly_hours_from }
+          : {}),
         leave_accounts,
         start_date,
         // Always send explicitly: `null` clears it back to the start_date

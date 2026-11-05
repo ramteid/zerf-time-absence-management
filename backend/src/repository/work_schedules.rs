@@ -420,6 +420,21 @@ impl WorkScheduleDb {
         .bind(created_by)
         .execute(&mut *tx)
         .await?;
+        // A row that repeats the hours of the row before it records no change.
+        // That is what a correction back to the earlier value leaves behind, and
+        // the admin expects the mistaken entry to be gone, not duplicated. The
+        // oldest row has no predecessor and is never touched.
+        sqlx::query(
+            "DELETE FROM user_weekly_hours WHERE id IN ( \
+                 SELECT id FROM ( \
+                     SELECT id, weekly_hours, \
+                            LAG(weekly_hours) OVER (ORDER BY valid_from) AS before_hours \
+                     FROM user_weekly_hours WHERE user_id = $1 \
+                 ) ordered WHERE before_hours IS NOT NULL AND weekly_hours = before_hours)",
+        )
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
         sqlx::query(
             "UPDATE users SET weekly_hours = ( \
                  SELECT weekly_hours FROM user_weekly_hours \

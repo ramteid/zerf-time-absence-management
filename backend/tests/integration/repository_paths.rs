@@ -3354,5 +3354,20 @@ async fn weekly_hours_changes_are_dated_and_not_retroactive() {
     assert_eq!(rows.len(), 2, "replaced, not added: {rows:?}");
     assert_eq!(rows[1].weekly_hours, 25.0);
 
+    // Correcting the same date back to the earlier hours removes the mistaken
+    // entry instead of leaving two rows that say the same thing.
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{user_id}"),
+            &json!({"weekly_hours": 20.0, "weekly_hours_from": iso(change)}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "correct back to the old hours: {body}");
+    let rows = schedules.list_hours_for_user(user_id).await.unwrap();
+    assert_eq!(rows.len(), 1, "the mistaken entry is gone: {rows:?}");
+    assert_eq!((rows[0].valid_from, rows[0].weekly_hours), (start, 20.0));
+    let (_, detail) = admin.get(&format!("/api/v1/users/{user_id}")).await;
+    assert_eq!(detail["weekly_hours"].as_f64(), Some(20.0));
+
     app.cleanup().await;
 }
