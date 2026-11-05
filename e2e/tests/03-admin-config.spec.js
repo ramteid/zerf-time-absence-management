@@ -116,11 +116,17 @@ test("admin: add a second leave-account category", async ({ page }) => {
   );
   expect(account?.base_days).toBe(5);
 
-  const row = page.locator(".zf-card > div", { hasText: LEAVE_ACCOUNT_CATEGORY });
+  const row = page.locator(".zf-card > div", {
+    hasText: LEAVE_ACCOUNT_CATEGORY,
+  });
   await row.getByRole("button").first().click();
   await expect(dialog.locator("#abscat-cost-type-vacation")).toBeDisabled();
-  await expect(dialog.locator("#abscat-leave-account-default-days")).toHaveValue("5");
-  await expect(dialog.locator("#abscat-leave-account-carryover-expiry")).toHaveValue("01-01");
+  await expect(
+    dialog.locator("#abscat-leave-account-default-days"),
+  ).toHaveValue("5");
+  await expect(
+    dialog.locator("#abscat-leave-account-carryover-expiry"),
+  ).toHaveValue("01-01");
   await dialog.getByRole("button", { name: "Cancel" }).click();
 });
 
