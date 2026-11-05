@@ -3281,3 +3281,78 @@ async fn an_admin_can_state_which_weekdays_a_contract_works() {
 
     app.cleanup().await;
 }
+
+/// Changing the weekly hours after the start date is recorded as a dated
+/// change. The weeks already worked keep the hours they were worked under, a
+/// late entry can be dated back, and nothing can start before the contract or
+/// in the future.
+#[tokio::test]
+async fn weekly_hours_changes_are_dated_and_not_retroactive() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let schedules = &app.state.db.work_schedules;
+    let start = reference_date() - Duration::days(400);
+    let iso = |date: chrono::NaiveDate| date.format("%Y-%m-%d").to_string();
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "hours@example.com",
+                "first_name": "Hanna", "last_name": "Hours",
+                "role": "employee", "weekly_hours": 20.0,
+                "start_date": iso(start),
+                "approver_ids": [1],
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create: {body}");
+    let user_id = id(&body);
+    assert!(
+        schedules.list_hours_for_user(user_id).await.unwrap().is_empty(),
+        "no history until the hours change"
+    );
+
+    // Change effective on a past date.
+    let change = reference_date() - Duration::days(100);
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{user_id}"),
+            &json!({"weekly_hours": 30.0, "weekly_hours_from": iso(change)}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "change hours: {body}");
+    let rows = schedules.list_hours_for_user(user_id).await.unwrap();
+    assert_eq!(rows.len(), 2, "starting row plus the change: {rows:?}");
+    assert_eq!((rows[0].valid_from, rows[0].weekly_hours), (start, 20.0));
+    assert_eq!((rows[1].valid_from, rows[1].weekly_hours), (change, 30.0));
+
+    let (_, detail) = admin.get(&format!("/api/v1/users/{user_id}")).await;
+    assert_eq!(detail["weekly_hours"].as_f64(), Some(30.0), "current hours");
+    assert_eq!(detail["weekly_hours_history"].as_array().map(Vec::len), Some(2));
+
+    // Before the contract start, and in the future, are refused.
+    for bad in [start - Duration::days(1), reference_date() + Duration::days(30)] {
+        let (st, body) = admin
+            .put(
+                &format!("/api/v1/users/{user_id}"),
+                &json!({"weekly_hours": 10.0, "weekly_hours_from": iso(bad)}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "date {bad} must be refused: {body}");
+    }
+
+    // The same date again replaces that row.
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{user_id}"),
+            &json!({"weekly_hours": 25.0, "weekly_hours_from": iso(change)}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "correct the change: {body}");
+    let rows = schedules.list_hours_for_user(user_id).await.unwrap();
+    assert_eq!(rows.len(), 2, "replaced, not added: {rows:?}");
+    assert_eq!(rows[1].weekly_hours, 25.0);
+
+    app.cleanup().await;
+}

@@ -312,6 +312,20 @@ That alignment is dated from the day the change is made, never from the contract
 start, and it leaves a pattern that already works that many days untouched so an
 admin's hand-picked weekdays survive an unrelated save.
 
+**Weekly hours are dated too.** `user_weekly_hours` (migration 055) works like the
+weekday history: `time_calc::WeeklyHoursHistory::on(date)` is asked per day by
+the range report, the flextime ledger and `flextime_cost_minutes`, so a raise
+from 20 to 30 hours never gives the weeks already worked a 30-hour target.
+`users.weekly_hours` stays the value in force today (the latest row) for
+everything that needs only the current contract. There is no backfill: the
+first change writes the old value as a starting row at the contract start
+(`WorkScheduleDb::record_hours_tx`), but only if the old value was above zero,
+so a first target (assistant promoted to employee) still reads the new hours
+for the whole past, as before. The admin chooses the effective date
+(`weekly_hours_from`): not before the contract start, not in the future; the
+same date again replaces that row. Contracts without a work target get zero
+hours (`services::work_schedules::weekly_hours_for`).
+
 Assistants and irregular contracts get no pattern, and their fallback has to
 keep reading exactly as the app reads today. `WorkSchedule::weekly_leave_cap` is
 what makes that true rather than merely intended: a recorded pattern needs no
@@ -826,6 +840,7 @@ The admin's SMTP test sends no message and needs none.
 | `user_leave_accounts` | Per-user base entitlement for each leave-account absence category |
 | `user_leave_account_year_overrides` | Per-user leave-account entitlement overrides by year |
 | `user_work_weekdays` | Dated history of which weekdays a contract places work on |
+| `user_weekly_hours` | Dated history of weekly contract hours (migration 055); no rows means `users.weekly_hours` for all time |
 
 Notable constraints: non-admin users must have an approver; users cannot approve themselves; vacation range <= 1 year; time entry end_time >= start_time; at most one `opening_balance` row and at most one reversal per row in `flextime_adjustments`.
 

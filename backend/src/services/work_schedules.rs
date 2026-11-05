@@ -8,7 +8,7 @@
 use crate::db::DatabasePool;
 use crate::error::AppResult;
 use crate::repository::WorkScheduleDb;
-use crate::time_calc::{WorkSchedule, WorkScheduleHistory};
+use crate::time_calc::{WeeklyHoursHistory, WorkSchedule, WorkScheduleHistory};
 use chrono::NaiveDate;
 
 /// One contract's working-day timeline together with the day it begins.
@@ -19,6 +19,8 @@ use chrono::NaiveDate;
 /// way every view in the app hides content stored before a start date.
 pub struct ContractSchedule {
     pub history: WorkScheduleHistory,
+    /// The weekly hours in force on each day, asked per day like `history`.
+    pub weekly_hours: WeeklyHoursHistory,
     pub start_date: NaiveDate,
 }
 
@@ -85,8 +87,38 @@ pub async fn contract_schedule(
         contract.workdays_per_week,
     )
     .await?;
+    let weekly_hours = weekly_hours_for(
+        pool,
+        user_id,
+        &contract.role,
+        contract.tracks_time,
+        contract.weekly_hours,
+    )
+    .await?;
     Ok(ContractSchedule {
         history,
+        weekly_hours,
         start_date: contract.start_date,
     })
+}
+
+/// The weekly hours a calculation must apply on each day of this contract.
+///
+/// A contract with no work target carries no minutes whatever its stored hours
+/// (legacy data holds non-zero hours on assistants), so it gets zero for all
+/// time. Everybody else reads their recorded changes, falling back to the
+/// current hours when none were ever recorded.
+pub async fn weekly_hours_for(
+    pool: &DatabasePool,
+    user_id: i64,
+    role: &str,
+    tracks_time: bool,
+    current_weekly_hours: f64,
+) -> AppResult<WeeklyHoursHistory> {
+    if !crate::roles::has_work_target(role, tracks_time) {
+        return Ok(WeeklyHoursHistory::constant(0.0));
+    }
+    WorkScheduleDb::new(pool.clone())
+        .hours_history_for_user(user_id, current_weekly_hours)
+        .await
 }

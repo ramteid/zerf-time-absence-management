@@ -398,6 +398,47 @@ impl WorkScheduleHistory {
     }
 }
 
+/// A person's weekly contract hours over time.
+///
+/// The counterpart of [`WorkScheduleHistory`] for the *amount* of work rather
+/// than its weekdays, and dated for the same reason: every target is recomputed
+/// on each query, so one stored value would re-judge the whole past the moment
+/// the contract changed. Asked per day, never once for a range.
+#[derive(Debug, Clone)]
+pub struct WeeklyHoursHistory {
+    /// Ascending by the date each value starts applying.
+    entries: Vec<(NaiveDate, f64)>,
+    /// Used when nothing was ever recorded: the person's current hours, which
+    /// is what every report read before this history existed.
+    fallback: f64,
+}
+
+impl WeeklyHoursHistory {
+    pub fn new(entries: Vec<(NaiveDate, f64)>, fallback: f64) -> Self {
+        let mut entries = entries;
+        entries.sort_by_key(|(valid_from, _)| *valid_from);
+        Self { entries, fallback }
+    }
+
+    /// One value for all time.
+    pub fn constant(weekly_hours: f64) -> Self {
+        Self::new(Vec::new(), weekly_hours)
+    }
+
+    /// The hours in force on `date`: the latest entry that had already begun.
+    /// A date before the first entry reads the first entry, so a contract start
+    /// moved earlier never leaves days without hours.
+    pub fn on(&self, date: NaiveDate) -> f64 {
+        self.entries
+            .iter()
+            .rev()
+            .find(|(valid_from, _)| *valid_from <= date)
+            .or_else(|| self.entries.first())
+            .map(|(_, hours)| *hours)
+            .unwrap_or(self.fallback)
+    }
+}
+
 /// The days `ranges` cost against a leave account.
 ///
 /// One working day covered by an absence costs one leave day. For a contract
@@ -563,6 +604,21 @@ pub fn parse_stored_time(value: &str) -> AppResult<NaiveTime> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn weekly_hours_follow_the_date_they_took_effect() {
+        let d = |m, day| NaiveDate::from_ymd_opt(2030, m, day).unwrap();
+        let history = WeeklyHoursHistory::new(vec![(d(6, 1), 30.0), (d(1, 1), 20.0)], 99.0);
+        assert_eq!(history.on(d(5, 31)), 20.0, "the past keeps its hours");
+        assert_eq!(history.on(d(6, 1)), 30.0, "valid_from is the first day");
+        assert_eq!(history.on(d(12, 31)), 30.0);
+        assert_eq!(
+            history.on(NaiveDate::from_ymd_opt(2029, 1, 1).unwrap()),
+            20.0,
+            "before the first entry reads the first entry"
+        );
+        assert_eq!(WeeklyHoursHistory::constant(12.5).on(d(3, 3)), 12.5);
+    }
+
     use super::*;
     use chrono::NaiveDate;
     use std::collections::HashSet;

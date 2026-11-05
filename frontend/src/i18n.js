@@ -256,6 +256,12 @@ const TRANSLATIONS = {
     "Working days": "Working days",
     "Pick at least one weekday this person works.":
       "Pick at least one weekday this person works.",
+    "New hours apply from": "New hours apply from",
+    "Weeks before this date keep the hours they were worked with.":
+      "Weeks before this date keep the hours they were worked with.",
+    "Weekly hours history": "Weekly hours history",
+    "The new weekly hours must start between the contract start and today.":
+      "The new weekly hours must start between the contract start and today.",
     "A day that is not ticked carries no target hours, costs no leave day, and any time booked on it counts as overtime.":
       "A day that is not ticked carries no target hours, costs no leave day, and any time booked on it counts as overtime.",
     "Workdays per week": "Workdays per week",
@@ -608,6 +614,12 @@ const TRANSLATIONS = {
     "Working days": "Arbeitstage",
     "Pick at least one weekday this person works.":
       "Wähle mindestens einen Wochentag aus, an dem diese Person arbeitet.",
+    "New hours apply from": "Neue Stunden gelten ab",
+    "Weeks before this date keep the hours they were worked with.":
+      "Wochen vor diesem Datum behalten die Stunden, mit denen sie gearbeitet wurden.",
+    "Weekly hours history": "Verlauf der Wochenstunden",
+    "The new weekly hours must start between the contract start and today.":
+      "Die neuen Wochenstunden müssen zwischen Vertragsbeginn und heute beginnen.",
     "A day that is not ticked carries no target hours, costs no leave day, and any time booked on it counts as overtime.":
       "Ein Tag ohne Haken hat keine Sollzeit, kostet keinen Urlaubstag, und dort gebuchte Zeit zählt als Überstunden.",
     "Workdays per week": "Arbeitstage pro Woche",

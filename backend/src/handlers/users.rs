@@ -180,8 +180,17 @@ pub async fn get_one(
         .rfind(|row| row.valid_from <= today)
         .map(|row| row.weekdays)
         .unwrap_or_default();
+    // Every recorded change of weekly hours, so the form can show the contract
+    // history in plain words. Empty when the hours never changed.
+    let weekly_hours_history = app_state
+        .db
+        .work_schedules
+        .list_hours_for_user(user.id)
+        .await
+        .unwrap_or_default();
     let user_json = serde_json::json!({
         "id": user.id,
+        "weekly_hours_history": weekly_hours_history,
         "email": user.email,
         "first_name": user.first_name,
         "last_name": user.last_name,
@@ -332,6 +341,12 @@ pub struct UpdateUser {
     pub last_name: Option<String>,
     pub role: Option<String>,
     pub weekly_hours: Option<f64>,
+    /// First day the new `weekly_hours` apply to. Omitted means today. Earlier
+    /// weeks keep the hours they were worked under; a past date is allowed so a
+    /// change entered late can still be dated correctly. Never before the
+    /// contract start and never in the future.
+    #[serde(default)]
+    pub weekly_hours_from: Option<chrono::NaiveDate>,
     pub workdays_per_week: Option<i16>,
     /// The weekdays this contract works, as ISO numbers. Omitted leaves the
     /// recorded pattern alone; supplied, it is recorded as a change taking
@@ -695,6 +710,36 @@ pub async fn update(
         // contract start, which would re-judge every week already worked — and
         // never before the contract began.
         let today = crate::services::settings::app_today(&app_state.pool).await;
+        // Contract hours are a dated history too: a change from 20 to 30 hours
+        // must not give the weeks already worked a 30-hour target.
+        crate::repository::WorkScheduleDb::extend_earliest_hours_to_tx(
+            &mut transaction,
+            user_id,
+            start_date_now,
+        )
+        .await?;
+        if let Some(new_hours) = body.weekly_hours {
+            if new_hours != previous_user.weekly_hours {
+                let latest_allowed = today.max(start_date_now);
+                let hours_from = body.weekly_hours_from.unwrap_or(latest_allowed);
+                if hours_from < start_date_now || hours_from > latest_allowed {
+                    return Err(AppError::BadRequest(
+                        "The new weekly hours must start between the contract start and today."
+                            .into(),
+                    ));
+                }
+                crate::repository::WorkScheduleDb::record_hours_tx(
+                    &mut transaction,
+                    user_id,
+                    start_date_now,
+                    previous_user.weekly_hours,
+                    hours_from,
+                    new_hours,
+                    Some(requester.id),
+                )
+                .await?;
+            }
+        }
         if let Some(days) = &requested_weekdays {
             // Days named by hand are recorded as they are, dated from today, so
             // the weeks already worked keep the pattern they were worked under.

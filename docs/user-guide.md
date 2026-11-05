@@ -1762,6 +1762,22 @@ the correct days and then ask an administrator to adjust the earlier period.
 Assistants have no working days and no target hours. They are paid for the
 hours they are present.
 
+### Changing the weekly hours
+
+A contract can change after the start date, for example from 20 to 30 hours a
+week. Open the user, enter the new weekly hours and choose **New hours apply
+from**. The date can be today or earlier, but not before the start date and not
+in the future.
+
+- Weeks before that date keep the hours they were worked with. Nothing in the
+  past is recalculated with the new hours.
+- From that date on, the daily target and the flextime balance use the new
+  hours.
+- The form shows a **Weekly hours history** once there has been a change, so
+  you can see which hours applied from when.
+- If you entered a wrong date, save again with the same date and the right
+  hours. This replaces that change.
+
 ### Updating a user
 
 Only provided fields are changed when updating a user. The same rules as

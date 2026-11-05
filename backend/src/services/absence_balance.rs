@@ -657,7 +657,6 @@ pub async fn carryover_remaining_days(input: CarryoverRemainingInput<'_>) -> App
 async fn flextime_cost_minutes(
     pool: &crate::db::DatabasePool,
     schedule: &crate::services::work_schedules::ContractSchedule,
-    weekly_hours: f64,
     from: NaiveDate,
     to: NaiveDate,
 ) -> AppResult<i64> {
@@ -672,7 +671,8 @@ async fn flextime_cost_minutes(
     while day <= to {
         let day_schedule = schedule.history.on(day);
         if day_schedule.covers(day) && !holidays.contains(&day) {
-            minutes += day_schedule.day_minutes(weekly_hours);
+            // The hours in force on this very day, not today's.
+            minutes += day_schedule.day_minutes(schedule.weekly_hours.on(day));
         }
         day += Duration::days(1);
     }
@@ -782,7 +782,6 @@ pub async fn validate_flextime_balance(
         committed_cost_min += flextime_cost_minutes(
             pool,
             &schedule,
-            user.weekly_hours,
             effective_start,
             *range_end,
         )
@@ -801,7 +800,7 @@ pub async fn validate_flextime_balance(
         // pending commitments do not already breach the floor.
         0
     } else {
-        flextime_cost_minutes(pool, &schedule, user.weekly_hours, proposed_start, end_date).await?
+        flextime_cost_minutes(pool, &schedule, proposed_start, end_date).await?
     };
 
     if current_balance_min - committed_cost_min - proposed_cost_min < floor_min {
@@ -1045,6 +1044,7 @@ mod tests {
         };
         crate::services::work_schedules::ContractSchedule {
             history,
+            weekly_hours: crate::time_calc::WeeklyHoursHistory::constant(40.0),
             start_date: long_ago,
         }
     }

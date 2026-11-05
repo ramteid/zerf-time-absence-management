@@ -7,7 +7,7 @@
 
 use crate::db::DatabasePool;
 use crate::error::{AppError, AppResult};
-use crate::time_calc::{WorkSchedule, WorkScheduleHistory};
+use crate::time_calc::{WeeklyHoursHistory, WorkSchedule, WorkScheduleHistory};
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
 use sqlx::FromRow;
@@ -23,6 +23,13 @@ pub struct WorkWeekdays {
     pub weekdays: Vec<i16>,
     pub created_at: DateTime<Utc>,
     pub created_by: Option<i64>,
+}
+
+/// One dated statement of a person's weekly contract hours.
+#[derive(Clone, Debug, FromRow, Serialize)]
+pub struct WeeklyHoursRow {
+    pub valid_from: NaiveDate,
+    pub weekly_hours: f64,
 }
 
 #[derive(Clone)]
@@ -41,6 +48,7 @@ pub struct ContractShape {
     pub role: String,
     pub tracks_time: bool,
     pub workdays_per_week: i16,
+    pub weekly_hours: f64,
     pub start_date: NaiveDate,
 }
 
@@ -336,10 +344,121 @@ impl WorkScheduleDb {
         .rows_affected())
     }
 
+    // ── Weekly contract hours (migration 055) ───────────────────────────────
+
+    /// Every recorded change of weekly hours for one person, oldest first.
+    pub async fn list_hours_for_user(&self, user_id: i64) -> AppResult<Vec<WeeklyHoursRow>> {
+        Ok(sqlx::query_as::<_, WeeklyHoursRow>(
+            "SELECT valid_from, weekly_hours FROM user_weekly_hours \
+             WHERE user_id = $1 ORDER BY valid_from",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// The hours timeline for one person; `current_hours` answers when no
+    /// change was ever recorded.
+    pub async fn hours_history_for_user(
+        &self,
+        user_id: i64,
+        current_hours: f64,
+    ) -> AppResult<WeeklyHoursHistory> {
+        let rows = self.list_hours_for_user(user_id).await?;
+        Ok(WeeklyHoursHistory::new(
+            rows.into_iter().map(|row| (row.valid_from, row.weekly_hours)).collect(),
+            current_hours,
+        ))
+    }
+
+    /// Record the hours in force from `valid_from` on, inside the caller's
+    /// transaction. Writing the same date again replaces that day's value.
+    ///
+    /// When the person has no history yet, `previous_hours` is first written as
+    /// the starting row dated `contract_start`, so the weeks already worked keep
+    /// the hours they were worked under. A `previous_hours` of zero (assistant,
+    /// or a contract that had no target) writes no starting row: the whole past
+    /// then simply reads the new hours, as it always did for a first target.
+    ///
+    /// Finally `users.weekly_hours` is set to the latest row, the value in force
+    /// today, so everything that needs only the current contract stays correct
+    /// even when an earlier date was corrected.
+    pub async fn record_hours_tx(
+        tx: &mut sqlx::PgConnection,
+        user_id: i64,
+        contract_start: NaiveDate,
+        previous_hours: f64,
+        valid_from: NaiveDate,
+        new_hours: f64,
+        created_by: Option<i64>,
+    ) -> AppResult<()> {
+        if !(0.0..=168.0).contains(&new_hours) {
+            return Err(AppError::BadRequest("Invalid weekly_hours.".into()));
+        }
+        if previous_hours > 0.0 {
+            sqlx::query(
+                "INSERT INTO user_weekly_hours (user_id, valid_from, weekly_hours, created_by) \
+                 SELECT $1, $2, $3, $4 \
+                 WHERE NOT EXISTS (SELECT 1 FROM user_weekly_hours WHERE user_id = $1)",
+            )
+            .bind(user_id)
+            .bind(contract_start.min(valid_from))
+            .bind(previous_hours)
+            .bind(created_by)
+            .execute(&mut *tx)
+            .await?;
+        }
+        sqlx::query(
+            "INSERT INTO user_weekly_hours (user_id, valid_from, weekly_hours, created_by) \
+             VALUES ($1, $2, $3, $4) \
+             ON CONFLICT (user_id, valid_from) DO UPDATE \
+               SET weekly_hours = EXCLUDED.weekly_hours, created_by = EXCLUDED.created_by",
+        )
+        .bind(user_id)
+        .bind(valid_from)
+        .bind(new_hours)
+        .bind(created_by)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "UPDATE users SET weekly_hours = ( \
+                 SELECT weekly_hours FROM user_weekly_hours \
+                 WHERE user_id = $1 ORDER BY valid_from DESC LIMIT 1 \
+             ) WHERE id = $1",
+        )
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+        Ok(())
+    }
+
+    /// Pull the oldest hours row back to `new_start` when the contract start
+    /// moves earlier, as [`Self::extend_earliest_to_tx`] does for weekdays.
+    pub async fn extend_earliest_hours_to_tx(
+        tx: &mut sqlx::PgConnection,
+        user_id: i64,
+        new_start: NaiveDate,
+    ) -> AppResult<u64> {
+        Ok(sqlx::query(
+            "UPDATE user_weekly_hours SET valid_from = $2 \
+             WHERE id = ( \
+                 SELECT id FROM user_weekly_hours \
+                 WHERE user_id = $1 ORDER BY valid_from, id LIMIT 1 \
+             ) AND valid_from > $2 \
+               AND NOT EXISTS ( \
+                 SELECT 1 FROM user_weekly_hours WHERE user_id = $1 AND valid_from = $2)",
+        )
+        .bind(user_id)
+        .bind(new_start)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected())
+    }
+
     /// The contract facts behind one person's working-day timeline.
     pub async fn contract_for_user(&self, user_id: i64) -> AppResult<ContractShape> {
         Ok(sqlx::query_as::<_, ContractShape>(
-            "SELECT role, tracks_time, workdays_per_week, start_date \
+            "SELECT role, tracks_time, workdays_per_week, weekly_hours, start_date \
              FROM users WHERE id = $1",
         )
         .bind(user_id)

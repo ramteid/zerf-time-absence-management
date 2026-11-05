@@ -339,11 +339,14 @@ async fn build_range_with_user_core(
     // A contract with no work target carries no minutes on any day. Role is the
     // canonical source for that, never the stored hours: legacy and imported
     // data contain non-zero weekly hours on assistants.
-    let target_weekly_hours = if crate::roles::has_work_target(&user.role, user.tracks_time) {
-        user.weekly_hours
-    } else {
-        0.0
-    };
+    let weekly_hours_history = crate::services::work_schedules::weekly_hours_for(
+        pool,
+        user_id,
+        &user.role,
+        user.tracks_time,
+        user.weekly_hours,
+    )
+    .await?;
     let today = crate::services::settings::app_today(pool).await;
 
     // Load auto-break config once for this report; None means feature is off.
@@ -435,7 +438,9 @@ async fn build_range_with_user_core(
             current_date,
             user.start_date,
             holiday.is_some() || absence_blocks_target,
-            target_weekly_hours,
+            // The hours in force on this day: a contract change must not
+            // re-judge the weeks worked before it.
+            weekly_hours_history.on(current_date),
         );
         // `target` is the same figure capped at today: a day still ahead, or one
         // in a week the balance pipelines have not approved, asks nothing yet.
@@ -607,6 +612,14 @@ pub async fn build_flextime_for_user(
         &user.role,
         user.tracks_time,
         user.workdays_per_week,
+    )
+    .await?;
+    let weekly_hours_history = crate::services::work_schedules::weekly_hours_for(
+        pool,
+        target_user_id,
+        &user.role,
+        user.tracks_time,
+        user.weekly_hours,
     )
     .await?;
 
@@ -789,7 +802,7 @@ pub async fn build_flextime_for_user(
             current_date,
             user.start_date,
             holiday.is_some() || absence_blocks_target || week_not_approved,
-            user.weekly_hours,
+            weekly_hours_history.on(current_date),
         );
         let actual = if before_start || week_not_approved {
             0
