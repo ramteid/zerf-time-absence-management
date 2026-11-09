@@ -2142,7 +2142,9 @@ may be shortened, deleted, or moved to another day.
 
 The next report compares each affected day's current approved net minutes with
 the total already declared for that day. Only a nonzero difference appears in
-**Corrections to earlier months**, under the day it affects. Positive hours add
+**Corrections to earlier months**, with the period it affects. Consecutive days
+of the same person within one month are combined into one period with their
+summed hours, and the table has no total row. Positive hours add
 time; negative hours reduce or reverse it. Moving a shift between months can
 therefore produce a negative correction on the old day and a positive one on
 the new day. Automatic breaks are recalculated across the whole current day

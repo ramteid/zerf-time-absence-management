@@ -243,7 +243,7 @@ static LANGUAGES: &[LangDef] = &[
             ("pdf_payroll_cancelled_absences_note", "These absences have been cancelled. Please check whether they were included in earlier payroll reports and correct any affected declarations. No day count is assumed here."),
             ("pdf_payroll_absence_review_heading", "Absences - review days against earlier reports"),
             ("pdf_payroll_absence_review_note", "An earlier report may already include absence days in the same week. Please check the earlier declarations and determine the days to report for these periods."),
-            ("pdf_payroll_late_entries_note", "These values correct working time for months whose report was already sent. Positive hours add time and negative hours reduce it. Each correction is listed under the affected workday, so please adjust that month."),
+            ("pdf_payroll_late_entries_note", "These values correct working time for months whose report was already sent. Positive hours add time and negative hours reduce it. Consecutive days are combined into one period, so please adjust the affected months."),
             ("pdf_payroll_column_employee", "Employee"),
             ("pdf_payroll_column_from", "From"),
             ("pdf_payroll_column_to", "To"),
@@ -254,7 +254,6 @@ static LANGUAGES: &[LangDef] = &[
             ("pdf_payroll_column_medical_certificate", "eAU"),
             ("pdf_payroll_medical_certificate_yes", "Yes"),
             ("pdf_payroll_medical_certificate_no", "No"),
-            ("pdf_payroll_total", "Total"),
             ("pdf_payroll_no_rows", "No entries in this period."),
         ],
     },
@@ -444,7 +443,7 @@ static LANGUAGES: &[LangDef] = &[
             ("pdf_payroll_cancelled_absences_note", "Diese Abwesenheiten wurden storniert. Bitte pr\u{00fc}fen, ob sie in fr\u{00fc}heren Lohnmeldungen enthalten waren, und betroffene Angaben korrigieren. Eine Tageszahl wird hier nicht angenommen."),
             ("pdf_payroll_absence_review_heading", "Abwesenheiten - Tage anhand fr\u{00fc}herer Meldungen pr\u{00fc}fen"),
             ("pdf_payroll_absence_review_note", "Eine fr\u{00fc}here Meldung kann bereits Abwesenheitstage in derselben Woche enthalten. Bitte die fr\u{00fc}heren Angaben pr\u{00fc}fen und die zu meldenden Tage f\u{00fc}r diese Zeitr\u{00e4}ume bestimmen."),
-            ("pdf_payroll_late_entries_note", "Diese Werte korrigieren Arbeitszeit in Monaten, deren Meldung bereits versendet wurde. Positive Stunden erh\u{00f6}hen die gemeldete Zeit, negative Stunden mindern sie. Jede Korrektur steht beim betroffenen Arbeitstag - bitte den jeweiligen Monat entsprechend anpassen."),
+            ("pdf_payroll_late_entries_note", "Diese Werte korrigieren Arbeitszeit in Monaten, deren Meldung bereits versendet wurde. Positive Stunden erh\u{00f6}hen die gemeldete Zeit, negative Stunden mindern sie. Aufeinanderfolgende Tage sind zu einem Zeitraum zusammengefasst - bitte die betroffenen Monate entsprechend anpassen."),
             ("pdf_payroll_column_employee", "Person"),
             ("pdf_payroll_column_from", "Von"),
             ("pdf_payroll_column_to", "Bis"),
@@ -455,7 +454,6 @@ static LANGUAGES: &[LangDef] = &[
             ("pdf_payroll_column_medical_certificate", "eAU"),
             ("pdf_payroll_medical_certificate_yes", "Ja"),
             ("pdf_payroll_medical_certificate_no", "Nein"),
-            ("pdf_payroll_total", "Gesamt"),
             ("pdf_payroll_no_rows", "Keine Eintr\u{00e4}ge in diesem Zeitraum."),
         ],
     },
@@ -1268,7 +1266,10 @@ mod tests {
     #[test]
     fn no_reply_notice_closes_the_email_in_both_languages() {
         assert_eq!(
-            email_with_no_reply_notice(&Language::from_setting("de"), "Hallo\n\n04/27/2026 09:00\n"),
+            email_with_no_reply_notice(
+                &Language::from_setting("de"),
+                "Hallo\n\n04/27/2026 09:00\n"
+            ),
             "Hallo\n\n04/27/2026 09:00\n\n\
              Bitte nicht antworten! Diese E-Mail wurde automatisch vom System versendet."
         );
@@ -1584,7 +1585,11 @@ mod tests {
                     text.body
                 );
             }
-            assert!(!text.body.contains('{'), "unresolved placeholder: {}", text.body);
+            assert!(
+                !text.body.contains('{'),
+                "unresolved placeholder: {}",
+                text.body
+            );
         }
     }
 

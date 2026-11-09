@@ -399,33 +399,6 @@ impl<'a> Renderer<'a> {
         self.y += ROW_HEIGHT_MM;
     }
 
-    /// Draw a highlighted total row: bold label at the left margin, bold values
-    /// aligned under their own columns.
-    fn draw_total_row(&mut self, label: &str, cells: &[(usize, String)]) {
-        self.ensure_space(ROW_HEIGHT_MM, true);
-        self.fill_rect(
-            MARGIN_LEFT_MM,
-            self.y,
-            CONTENT_WIDTH_MM,
-            ROW_HEIGHT_MM,
-            TOTAL_FILL,
-        );
-        let baseline = self.y + 3.8;
-        self.draw_text(
-            label,
-            MARGIN_LEFT_MM + 1.0,
-            baseline,
-            PdfFont::Bold,
-            7.5,
-            TITLE_COLOR,
-        );
-        for (column_index, text) in cells {
-            let x = self.aligned_x(*column_index, text, 7.5);
-            self.draw_text(text, x, baseline, PdfFont::Bold, 7.5, TITLE_COLOR);
-        }
-        self.y += ROW_HEIGHT_MM;
-    }
-
     /// Draw a label/value summary line (e.g. a flextime balance), with the
     /// value aligned under `value_column`. Unlike data rows this does not
     /// redraw the table header on overflow — it sits below the table, just like
@@ -454,22 +427,49 @@ impl<'a> Renderer<'a> {
     }
 
     /// Draw a plain, non-tabular note line (e.g. "no entries in this period").
+    /// Draw an explanatory note, wrapped onto as many lines as the content
+    /// width requires.
     fn draw_note(&mut self, text: &str) {
-        self.ensure_space(ROW_HEIGHT_MM, false);
-        let baseline = self.y + 3.8;
-        self.draw_text(
-            text,
-            MARGIN_LEFT_MM + 1.0,
-            baseline,
-            PdfFont::Regular,
-            7.5,
-            SUMMARY_TEXT,
-        );
-        self.y += ROW_HEIGHT_MM;
+        for line in wrap_note(text) {
+            self.ensure_space(ROW_HEIGHT_MM, false);
+            let baseline = self.y + 3.8;
+            self.draw_text(
+                &line,
+                MARGIN_LEFT_MM + 1.0,
+                baseline,
+                PdfFont::Regular,
+                NOTE_FONT_SIZE_PT,
+                SUMMARY_TEXT,
+            );
+            self.y += ROW_HEIGHT_MM;
+        }
     }
 }
 
 // -- Helper functions ----------------------------------------------------------
+
+const NOTE_FONT_SIZE_PT: f32 = 7.5;
+/// Conservative average glyph width of Helvetica prose in ems. Notes contain
+/// letters, which `glyph_width_1000` does not measure, so wrapping uses this
+/// estimate and errs on the short side.
+const NOTE_AVERAGE_GLYPH_EM: f32 = 0.55;
+
+/// Split `text` at word boundaries into lines that fit the content width.
+fn wrap_note(text: &str) -> Vec<String> {
+    let glyph_width_mm = NOTE_AVERAGE_GLYPH_EM * NOTE_FONT_SIZE_PT * (25.4 / 72.0);
+    let max_chars = ((CONTENT_WIDTH_MM - 2.0) / glyph_width_mm) as usize;
+    let mut lines: Vec<String> = Vec::new();
+    for word in text.split_whitespace() {
+        match lines.last_mut() {
+            Some(line) if line.chars().count() + 1 + word.chars().count() <= max_chars => {
+                line.push(' ');
+                line.push_str(word);
+            }
+            _ => lines.push(word.to_string()),
+        }
+    }
+    lines
+}
 
 /// Convert millimetres to PDF user-space points (1 pt = 1/72 in).
 fn mm_to_pt(mm: f32) -> f32 {
@@ -552,6 +552,15 @@ fn text_width_mm(text: &str, size_pt: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wrap_note_keeps_every_line_within_the_limit_and_loses_no_words() {
+        let text = "word ".repeat(100);
+        let lines = wrap_note(&text);
+        assert!(lines.len() > 1);
+        assert!(lines.iter().all(|line| line.chars().count() <= 125));
+        assert_eq!(lines.join(" "), text.trim());
+    }
 
     #[test]
     fn format_minutes_matches_frontend_min_to_hm() {
