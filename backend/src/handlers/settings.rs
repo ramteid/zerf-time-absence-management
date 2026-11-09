@@ -221,7 +221,8 @@ pub async fn update_admin_settings(
             let has_tier2_deduction = body.auto_break_deduction_minutes_2.is_some();
             if has_tier2_threshold != has_tier2_deduction {
                 return Err(AppError::BadRequest(
-                    "Please enter both second threshold and second deduction, or leave both empty.".into(),
+                    "Please enter both second threshold and second deduction, or leave both empty."
+                        .into(),
                 ));
             }
             if has_tier2_threshold {
@@ -382,7 +383,8 @@ pub async fn update_admin_settings(
     save_if_some!(
         transaction,
         settings::ALLOW_TEAM_LEAD_MANAGE_ASSISTANTS_KEY,
-        body.allow_team_lead_manage_assistants.map(|v| if v { "true" } else { "false" }.to_string())
+        body.allow_team_lead_manage_assistants
+            .map(|v| if v { "true" } else { "false" }.to_string())
     );
     save_if_some!(
         transaction,
@@ -526,12 +528,20 @@ pub async fn update_smtp_settings(
     // `update_payroll_report_settings`, which blocks turning it back on
     // until SMTP is configured again).
     let payroll_report_disabled_by_smtp = if !body.smtp_enabled {
-        let payroll_was_enabled =
-            load_setting(&app_state.pool, settings::PAYROLL_REPORT_ENABLED_KEY, "false").await?
-                == "true";
+        let payroll_was_enabled = load_setting(
+            &app_state.pool,
+            settings::PAYROLL_REPORT_ENABLED_KEY,
+            "false",
+        )
+        .await?
+            == "true";
         if payroll_was_enabled {
-            save_setting_tx(&mut transaction, settings::PAYROLL_REPORT_ENABLED_KEY, "false")
-                .await?;
+            save_setting_tx(
+                &mut transaction,
+                settings::PAYROLL_REPORT_ENABLED_KEY,
+                "false",
+            )
+            .await?;
         }
         payroll_was_enabled
     } else {

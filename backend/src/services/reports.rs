@@ -698,7 +698,12 @@ pub async fn build_flextime_for_user(
     // a range that reaches past it (this endpoint's `to` is caller-supplied
     // and not itself clamped) — every other balance view caps the same way.
     let adjustment_by_day: HashMap<NaiveDate, i64> = adjustments_db
-        .totals_by_date(target_user_id, user.start_date, from, to.min(effective_through))
+        .totals_by_date(
+            target_user_id,
+            user.start_date,
+            from,
+            to.min(effective_through),
+        )
         .await?
         .into_iter()
         .collect();
@@ -747,7 +752,8 @@ pub async fn build_flextime_for_user(
     // Expand absence ranges into a per-day map so each day can look up its kind in O(1).
     // If two absences overlap (possible via race/manual DB), prioritize the one that removes target.
     let mut absence_by_day: HashMap<NaiveDate, String> = HashMap::new();
-    for (_absence_id, absence_start, absence_end, absence_kind, _absence_name) in approved_absences {
+    for (_absence_id, absence_start, absence_end, absence_kind, _absence_name) in approved_absences
+    {
         let mut day = absence_start.max(from);
         while day <= absence_end.min(to) {
             let existing = absence_by_day.get(&day);
@@ -816,10 +822,7 @@ pub async fn build_flextime_for_user(
         // cutoff, and are folded into `diff_min` so that "yesterday's balance
         // plus today's diff" stays the definition of the running total — the
         // opening/closing balances in the PDF and CSV are derived that way.
-        let adjustment = adjustment_by_day
-            .get(&current_date)
-            .copied()
-            .unwrap_or(0);
+        let adjustment = adjustment_by_day.get(&current_date).copied().unwrap_or(0);
         let day_diff_min = actual - target + adjustment;
         cumulative_min += day_diff_min;
         flextime_days.push(FlextimeDay {
@@ -1250,7 +1253,10 @@ pub async fn approved_weeks(
         current_monday += Duration::days(7);
     }
 
-    Ok(ApprovedWeeks { mondays, cutoff_date })
+    Ok(ApprovedWeeks {
+        mondays,
+        cutoff_date,
+    })
 }
 
 /// Determine the cutoff date for flextime balance calculation: the Sunday of
@@ -1263,9 +1269,11 @@ pub async fn flex_balance_cutoff_date(
     user_start_date: NaiveDate,
     workdays_per_week: i16,
 ) -> AppResult<NaiveDate> {
-    Ok(approved_weeks(pool, user_id, user_start_date, workdays_per_week)
-        .await?
-        .cutoff_date)
+    Ok(
+        approved_weeks(pool, user_id, user_start_date, workdays_per_week)
+            .await?
+            .cutoff_date,
+    )
 }
 
 /// Returns true when every week in `complete_week_mondays` is considered submitted.
@@ -1439,15 +1447,9 @@ pub async fn build_month(
     let user = crate::services::users::repo_user_to_auth_user(repo_user);
     let submission_exempt = !crate::roles::has_submission_obligation(&user.role, user.weekly_hours);
     let mut report = build_range_with_user(pool, &user, from, to, month).await?;
-    let (all_submitted, all_approved) = submission_status_for_month(
-        pool,
-        user_id,
-        from,
-        to,
-        user.start_date,
-        submission_exempt,
-    )
-    .await?;
+    let (all_submitted, all_approved) =
+        submission_status_for_month(pool, user_id, from, to, user.start_date, submission_exempt)
+            .await?;
     report.weeks_all_submitted = Some(all_submitted);
     report.weeks_all_approved = Some(all_approved);
     // A month is a closed period: its boundary weeks are judged on the days
@@ -1815,8 +1817,13 @@ pub async fn build_overtime_rows_for_year(
         return Ok((vec![], repo_user.start_date - Duration::days(1)));
     }
     let user = crate::services::users::repo_user_to_auth_user(repo_user);
-    let approved =
-        approved_weeks(pool, target_user_id, user.start_date, user.workdays_per_week).await?;
+    let approved = approved_weeks(
+        pool,
+        target_user_id,
+        user.start_date,
+        user.workdays_per_week,
+    )
+    .await?;
     let rows = build_overtime_rows_with_cutoff(pool, &user, year, &approved).await?;
     Ok((rows, approved.cutoff_date))
 }
@@ -1921,8 +1928,8 @@ async fn build_overtime_rows_with_cutoff(
             let month_label = format!("{:04}-{:02}", prior_year, prior_month);
             let month_report =
                 month_contribution_up_to_cutoff(pool, user, &month_label, approved).await?;
-            cumulative_min += month_report.diff_min
-                + adjustment_by_month.get(&month_label).copied().unwrap_or(0);
+            cumulative_min +=
+                month_report.diff_min + adjustment_by_month.get(&month_label).copied().unwrap_or(0);
         }
     }
 
@@ -1989,8 +1996,7 @@ pub async fn cumulative_at_month_end(
     let cutoff_year = approved.cutoff_date.year();
     // Beyond the cutoff year there is nothing left to accumulate, so the last
     // row of the cutoff's own year already holds the final worked balance.
-    let rows =
-        build_overtime_rows_with_cutoff(pool, user, year.min(cutoff_year), approved).await?;
+    let rows = build_overtime_rows_with_cutoff(pool, user, year.min(cutoff_year), approved).await?;
     let Some(last_row) = rows.last() else {
         return Ok(adjustments_through_month_end);
     };
@@ -2007,8 +2013,9 @@ pub async fn cumulative_at_month_end(
         let adjustments_through_last_row = adjustments_db
             .sum_through(target_user_id, user_start_date, last_row_end)
             .await?;
-        return Ok(last_row.cumulative_min - adjustments_through_last_row
-            + adjustments_through_month_end);
+        return Ok(
+            last_row.cumulative_min - adjustments_through_last_row + adjustments_through_month_end
+        );
     }
 
     let key = format!("{:04}-{:02}", year, month);
@@ -2049,8 +2056,12 @@ pub async fn flextime_adjustments_in_range(
 
 /// Last calendar day of `year-month`.
 fn month_end_date(year: i32, month: u32) -> AppResult<NaiveDate> {
-    NaiveDate::from_ymd_opt(year, month, crate::time_calc::last_day_of_month(year, month))
-        .ok_or_else(|| AppError::BadRequest("date".into()))
+    NaiveDate::from_ymd_opt(
+        year,
+        month,
+        crate::time_calc::last_day_of_month(year, month),
+    )
+    .ok_or_else(|| AppError::BadRequest("date".into()))
 }
 
 /// Checks whether the working weeks overlapping the given month have been
@@ -2238,15 +2249,8 @@ async fn attach_week_submission_counts(
     if !crate::roles::has_submission_obligation(&user.role, user.weekly_hours) {
         return Ok(());
     }
-    let (submitted, total) = weeks_submission_counts(
-        pool,
-        user.id,
-        from,
-        to,
-        user.start_date,
-        judged,
-    )
-    .await?;
+    let (submitted, total) =
+        weeks_submission_counts(pool, user.id, from, to, user.start_date, judged).await?;
     report.weeks_submitted = Some(submitted);
     report.weeks_total = Some(total);
     Ok(())
@@ -2958,7 +2962,9 @@ mod tests {
         let monday = NaiveDate::from_ymd_opt(2026, 5, 4).unwrap();
         let long_ago = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
         // Tuesday to Friday covered by an absence; Monday untouched.
-        let away: HashSet<NaiveDate> = (1..5).map(|offset| monday + Duration::days(offset)).collect();
+        let away: HashSet<NaiveDate> = (1..5)
+            .map(|offset| monday + Duration::days(offset))
+            .collect();
 
         assert!(
             week_is_accounted_for(
@@ -2994,8 +3000,9 @@ mod tests {
     fn week_is_accounted_for_accepts_a_week_with_a_single_status_day() {
         let monday = NaiveDate::from_ymd_opt(2026, 5, 4).unwrap();
         let long_ago = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
-        let full_week: HashSet<NaiveDate> =
-            (0..5).map(|offset| monday + Duration::days(offset)).collect();
+        let full_week: HashSet<NaiveDate> = (0..5)
+            .map(|offset| monday + Duration::days(offset))
+            .collect();
 
         assert!(week_is_accounted_for(
             monday,
@@ -3039,8 +3046,9 @@ mod tests {
         ));
 
         // Mon-Fri excused by holidays: nothing was due, so the week is fine.
-        let workweek: HashSet<NaiveDate> =
-            (0..5).map(|offset| monday + Duration::days(offset)).collect();
+        let workweek: HashSet<NaiveDate> = (0..5)
+            .map(|offset| monday + Duration::days(offset))
+            .collect();
         assert!(week_is_accounted_for(
             monday,
             &workweek,
@@ -3096,8 +3104,9 @@ mod tests {
     fn week_is_accounted_for_ignores_the_contracted_day_count() {
         let monday = NaiveDate::from_ymd_opt(2026, 5, 4).unwrap();
         let long_ago = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
-        let two_days: HashSet<NaiveDate> =
-            (0..2).map(|offset| monday + Duration::days(offset)).collect();
+        let two_days: HashSet<NaiveDate> = (0..2)
+            .map(|offset| monday + Duration::days(offset))
+            .collect();
 
         for workdays_per_week in [3, 5] {
             assert!(week_is_accounted_for(

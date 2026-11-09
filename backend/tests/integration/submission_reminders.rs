@@ -696,7 +696,6 @@ async fn submission_reminders_treat_cancellation_pending_absence_as_covered_week
     app.cleanup().await;
 }
 
-
 /// Both month-boundary passes only fire on something genuinely missing, and
 /// they divide the audience between them: an assistant is asked about the
 /// bookings they never handed in, because that is the only evidence the app
@@ -725,12 +724,7 @@ async fn month_end_reminders_split_assistants_from_contract_employees() {
         )
         .await;
     assert_eq!(status, StatusCode::OK, "create assistant: {body}");
-    let assistant = login_change_pw(
-        &app,
-        "aushilfe-month-end@example.com",
-        &temp_pw(&body),
-    )
-    .await;
+    let assistant = login_change_pw(&app, "aushilfe-month-end@example.com", &temp_pw(&body)).await;
 
     // The reminder names a deadline, and takes it from the payroll send day.
     for (key, value) in [
@@ -841,7 +835,6 @@ async fn month_end_reminders_split_assistants_from_contract_employees() {
     app.cleanup().await;
 }
 
-
 /// December 2029 ends on a Monday, so its last day sits in the week
 /// 31.12.–06.01. Asking for that week on the 1st would mean asking somebody to
 /// hand in a week they are still working; from its Friday the ask is fair, and
@@ -865,12 +858,7 @@ async fn the_straddling_week_is_only_asked_for_from_its_friday() {
         let pool = pool.clone();
         async move {
             zerf::services::reports::unsubmitted_weeks_in_month(
-                &pool,
-                emp_id,
-                december.0,
-                december.1,
-                start_date,
-                today,
+                &pool, emp_id, december.0, december.1, start_date, today,
             )
             .await
             .expect("missing weeks")
@@ -907,7 +895,9 @@ async fn the_straddling_week_is_only_asked_for_from_its_friday() {
         )
         .await;
     assert_eq!(status, StatusCode::OK, "book the month's last day");
-    let (status, body) = emp.get("/api/v1/time-entries?from=2029-12-31&to=2029-12-31").await;
+    let (status, body) = emp
+        .get("/api/v1/time-entries?from=2029-12-31&to=2029-12-31")
+        .await;
     assert_eq!(status, StatusCode::OK);
     let entry_ids: Vec<i64> = body
         .as_array()
@@ -928,7 +918,6 @@ async fn the_straddling_week_is_only_asked_for_from_its_friday() {
 
     app.cleanup().await;
 }
-
 
 /// Three rules in one run, on the calendar that actually causes the trouble:
 /// December 2029 ends on a Monday, so its last day sits in the week
@@ -1070,7 +1059,10 @@ async fn reminders_only_chase_what_is_genuinely_missing() {
         chrono::NaiveDate::from_ymd_opt(2030, 1, 10).unwrap(),
     );
     assert!(
-        reminder["body"].as_str().unwrap_or_default().contains(&deadline),
+        reminder["body"]
+            .as_str()
+            .unwrap_or_default()
+            .contains(&deadline),
         "the reminder names the configured deadline {deadline}: {reminder}"
     );
 

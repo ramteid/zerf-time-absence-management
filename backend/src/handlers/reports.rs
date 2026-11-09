@@ -5,8 +5,7 @@ use crate::roles::is_assistant_role;
 use crate::services::reports::{
     active_reportable_team_members, all_weeks_submitted_for_month, assert_can_access_user,
     build_flextime_for_user, build_month, build_month_without_submission_status,
-    build_overtime_rows_for_year, build_range, build_range_for_page,
-    build_team_timesheet_sections,
+    build_overtime_rows_for_year, build_range, build_range_for_page, build_team_timesheet_sections,
     build_timesheet_section, csv_response, flextime_adjustments_in_range,
     flextime_adjustments_through, month_bounds, parse_report_time, pdf_response,
     sort_categories_desc, validate_range, CategoryTotal, FlextimeDay, LeaveAccountCategory,
@@ -288,15 +287,14 @@ pub async fn team(
                     // at today. Counting "up to today" and "from tomorrow" as two
                     // windows applies the weekly cap to each of them, so a week
                     // off that happens to straddle today was billed twice.
-                    let counted_days =
-                        crate::services::absence_balance::counted_workdays_for_user(
-                            &pool,
-                            team_member.id,
-                            ranges,
-                            absence_count_start,
-                            month_end,
-                        )
-                        .await?;
+                    let counted_days = crate::services::absence_balance::counted_workdays_for_user(
+                        &pool,
+                        team_member.id,
+                        ranges,
+                        absence_count_start,
+                        month_end,
+                    )
+                    .await?;
                     let taken_days = counted_days
                         .iter()
                         .filter(|day| **day <= leave_taken_end)
@@ -334,10 +332,7 @@ pub async fn team(
                     let (overtime_rows, cutoff_date) =
                         build_overtime_rows_for_year(&pool, team_member.id, month_start.year())
                             .await?;
-                    let balance_min = match overtime_rows
-                        .iter()
-                        .find(|r| r.month == query_month)
-                    {
+                    let balance_min = match overtime_rows.iter().find(|r| r.month == query_month) {
                         Some(row) => row.cumulative_min,
                         // No row for the month: the member had not started yet,
                         // or the month is still ahead of today. Either way no

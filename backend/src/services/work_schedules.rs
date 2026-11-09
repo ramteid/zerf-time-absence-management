@@ -72,10 +72,7 @@ pub async fn history_for(
 /// reached from queries rather than from a loaded user. Callers that already
 /// have the person's role and hours should use [`history_for`] and spend no
 /// second query on the contract.
-pub async fn contract_schedule(
-    pool: &DatabasePool,
-    user_id: i64,
-) -> AppResult<ContractSchedule> {
+pub async fn contract_schedule(pool: &DatabasePool, user_id: i64) -> AppResult<ContractSchedule> {
     let contract = WorkScheduleDb::new(pool.clone())
         .contract_for_user(user_id)
         .await?;

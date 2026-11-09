@@ -4455,7 +4455,11 @@ async fn a_sick_note_filed_after_its_month_was_reported_reaches_the_next_report(
             &[emp_id],
             // Exactly what the document above declared — the send path takes
             // this list straight off the assembled report.
-            &data.late_absence_snapshots.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            &data
+                .late_absence_snapshots
+                .iter()
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>(),
         )
         .await
         .expect("mark what this report carried");
@@ -4592,7 +4596,10 @@ async fn an_absence_changed_during_report_assembly_is_not_marked_as_declared() {
             .fetch_one(&app.state.pool)
             .await
             .expect("read the marker");
-    assert_eq!(marked, None, "the changed days remain eligible for a later report");
+    assert_eq!(
+        marked, None,
+        "the changed days remain eligible for a later report"
+    );
     let settled: bool = sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM payroll_reported_periods WHERE period=$1)",
     )
@@ -4653,10 +4660,20 @@ async fn a_reported_absence_cancelled_later_is_sent_for_manual_review_once() {
         .state
         .db
         .absences
-        .create(emp_id, sick.id, true, day + Duration::days(1), day + Duration::days(1), None, "approved")
+        .create(
+            emp_id,
+            sick.id,
+            true,
+            day + Duration::days(1),
+            day + Duration::days(1),
+            None,
+            "approved",
+        )
         .await
         .expect("create an absence after the earlier report");
-    let (status, body) = employee.delete(&format!("/api/v1/absences/{}", unreported.id)).await;
+    let (status, body) = employee
+        .delete(&format!("/api/v1/absences/{}", unreported.id))
+        .await;
     assert_eq!(status, StatusCode::OK, "request cancellation: {body}");
     let (status, body) = lead
         .post(
@@ -4665,15 +4682,19 @@ async fn a_reported_absence_cancelled_later_is_sent_for_manual_review_once() {
         )
         .await;
     assert_eq!(status, StatusCode::OK, "approve cancellation: {body}");
-    let pending_unreported: bool = sqlx::query_scalar(
-        "SELECT payroll_cancellation_pending FROM absences WHERE id=$1",
-    )
-    .bind(unreported.id)
-    .fetch_one(&app.state.pool)
-    .await
-    .expect("read the cancellation marker");
-    assert!(!pending_unreported, "an absence never sent needs no cancellation notice");
-    let (status, body) = employee.delete(&format!("/api/v1/absences/{}", absence.id)).await;
+    let pending_unreported: bool =
+        sqlx::query_scalar("SELECT payroll_cancellation_pending FROM absences WHERE id=$1")
+            .bind(unreported.id)
+            .fetch_one(&app.state.pool)
+            .await
+            .expect("read the cancellation marker");
+    assert!(
+        !pending_unreported,
+        "an absence never sent needs no cancellation notice"
+    );
+    let (status, body) = employee
+        .delete(&format!("/api/v1/absences/{}", absence.id))
+        .await;
     assert_eq!(status, StatusCode::OK, "request cancellation: {body}");
     let (status, body) = lead
         .post(
@@ -4692,7 +4713,12 @@ async fn a_reported_absence_cancelled_later_is_sent_for_manual_review_once() {
         .await
         .expect("carry-over boundary");
     let members = payroll_report::payroll_members(
-        &app.state, next_from, next_to, &[], false, carried.as_ref(),
+        &app.state,
+        next_from,
+        next_to,
+        &[],
+        false,
+        carried.as_ref(),
     )
     .await
     .expect("members");
@@ -4715,13 +4741,28 @@ async fn a_reported_absence_cancelled_later_is_sent_for_manual_review_once() {
     .await
     .expect("build the report");
     assert_eq!(data.cancelled_absence_rows.len(), 1);
-    assert_eq!((data.cancelled_absence_rows[0].from, data.cancelled_absence_rows[0].to), (day, day));
-    assert_eq!(data.cancelled_absence_rows[0].days, 0.0, "no historical day count is guessed");
+    assert_eq!(
+        (
+            data.cancelled_absence_rows[0].from,
+            data.cancelled_absence_rows[0].to
+        ),
+        (day, day)
+    );
+    assert_eq!(
+        data.cancelled_absence_rows[0].days, 0.0,
+        "no historical day count is guessed"
+    );
     assert_eq!(payroll_report::people_in_report(&data), 1);
     let pdf = zerf::report_pdf::render_payroll_report_pdf(&data, &language);
     let pdf_text = String::from_utf8_lossy(&pdf);
-    assert!(pdf_text.contains("Cancelled absences"), "the notice is rendered in the PDF");
-    assert!(pdf_text.contains("Emilpayroll-cancellation"), "the affected person is named");
+    assert!(
+        pdf_text.contains("Cancelled absences"),
+        "the notice is rendered in the PDF"
+    );
+    assert!(
+        pdf_text.contains("Emilpayroll-cancellation"),
+        "the affected person is named"
+    );
     let content = payroll_report::reported_content_rows(&data);
     assert_eq!(content[0].kind, "absence_cancellation");
 
@@ -4731,36 +4772,55 @@ async fn a_reported_absence_cancelled_later_is_sent_for_manual_review_once() {
         .db
         .reports
         .record_payroll_report_delivery(
-            &next_period, next_from, next_to, &[], &[], Default::default(),
-            &data.reported_absence_snapshots, &data.late_absence_snapshots, &content,
+            &next_period,
+            next_from,
+            next_to,
+            &[],
+            &[],
+            Default::default(),
+            &data.reported_absence_snapshots,
+            &data.late_absence_snapshots,
+            &content,
         )
         .await
         .expect("record the delivery");
     assert!(recorded.is_some(), "the notice was marked after delivery");
-    let pending: bool = sqlx::query_scalar(
-        "SELECT payroll_cancellation_pending FROM absences WHERE id=$1",
-    )
-    .bind(absence.id)
-    .fetch_one(&app.state.pool)
-    .await
-    .expect("read the cancellation marker");
+    let pending: bool =
+        sqlx::query_scalar("SELECT payroll_cancellation_pending FROM absences WHERE id=$1")
+            .bind(absence.id)
+            .fetch_one(&app.state.pool)
+            .await
+            .expect("read the cancellation marker");
     assert!(!pending, "the same cancellation must not be reported twice");
-    let stored = app.state.db.reports.payroll_reported_content(&next_period).await.expect("read delivered content");
+    let stored = app
+        .state
+        .db
+        .reports
+        .payroll_reported_content(&next_period)
+        .await
+        .expect("read delivered content");
     assert_eq!(stored.len(), 1);
     assert_eq!(stored[0].kind, "absence_cancellation");
-    assert_eq!((stored[0].from_date, stored[0].to_date), (Some(day), Some(day)));
-    sqlx::raw_sql(include_str!("../../migrations/052_payroll_absence_cancellations.sql"))
-        .execute(&app.state.pool)
-        .await
-        .expect("rerun the migration");
-    let pending_after_migration: bool = sqlx::query_scalar(
-        "SELECT payroll_cancellation_pending FROM absences WHERE id=$1",
-    )
-    .bind(absence.id)
-    .fetch_one(&app.state.pool)
+    assert_eq!(
+        (stored[0].from_date, stored[0].to_date),
+        (Some(day), Some(day))
+    );
+    sqlx::raw_sql(include_str!(
+        "../../migrations/052_payroll_absence_cancellations.sql"
+    ))
+    .execute(&app.state.pool)
     .await
-    .expect("read the cancellation marker again");
-    assert!(!pending_after_migration, "rerunning the migration must not repeat a notice");
+    .expect("rerun the migration");
+    let pending_after_migration: bool =
+        sqlx::query_scalar("SELECT payroll_cancellation_pending FROM absences WHERE id=$1")
+            .bind(absence.id)
+            .fetch_one(&app.state.pool)
+            .await
+            .expect("read the cancellation marker again");
+    assert!(
+        !pending_after_migration,
+        "rerunning the migration must not repeat a notice"
+    );
 
     app.cleanup().await;
 }
@@ -4773,10 +4833,28 @@ async fn cancellation_migration_catches_post_marker_cancellations_once() {
         bootstrap_team_with_suffix(&app, &admin, false, "cancellation-backfill").await;
     let day = anchor_monday();
     let sick = absence_cat(&app.state.pool, "sick").await;
-    let older = app.state.db.absences.create(emp_id, sick.id, true, day, day, None, "cancelled")
-        .await.expect("create old cancellation");
-    let newer = app.state.db.absences.create(emp_id, sick.id, true, day + Duration::days(1), day + Duration::days(1), None, "cancelled")
-        .await.expect("create newer cancellation");
+    let older = app
+        .state
+        .db
+        .absences
+        .create(emp_id, sick.id, true, day, day, None, "cancelled")
+        .await
+        .expect("create old cancellation");
+    let newer = app
+        .state
+        .db
+        .absences
+        .create(
+            emp_id,
+            sick.id,
+            true,
+            day + Duration::days(1),
+            day + Duration::days(1),
+            None,
+            "cancelled",
+        )
+        .await
+        .expect("create newer cancellation");
     sqlx::query(
         "UPDATE absences SET payroll_reported_period='2029-12', \
          reviewed_at=(SELECT installed_on FROM _sqlx_migrations WHERE version=46) - interval '1 second' \
@@ -4785,14 +4863,28 @@ async fn cancellation_migration_catches_post_marker_cancellations_once() {
     sqlx::query(
         "UPDATE absences SET payroll_reported_period='2029-12', reviewed_at=CURRENT_TIMESTAMP \
          WHERE id=$1",
-    ).bind(newer.id).execute(&app.state.pool).await.expect("set newer marker");
+    )
+    .bind(newer.id)
+    .execute(&app.state.pool)
+    .await
+    .expect("set newer marker");
     sqlx::query("ALTER TABLE absences DROP COLUMN payroll_cancellation_pending")
-        .execute(&app.state.pool).await.expect("restore the pre-migration schema");
-    sqlx::raw_sql(include_str!("../../migrations/052_payroll_absence_cancellations.sql"))
-        .execute(&app.state.pool).await.expect("apply cancellation migration");
+        .execute(&app.state.pool)
+        .await
+        .expect("restore the pre-migration schema");
+    sqlx::raw_sql(include_str!(
+        "../../migrations/052_payroll_absence_cancellations.sql"
+    ))
+    .execute(&app.state.pool)
+    .await
+    .expect("apply cancellation migration");
     let flags: Vec<(i64, bool)> = sqlx::query_as(
         "SELECT id, payroll_cancellation_pending FROM absences WHERE id=ANY($1) ORDER BY id",
-    ).bind([older.id, newer.id]).fetch_all(&app.state.pool).await.expect("read flags");
+    )
+    .bind([older.id, newer.id])
+    .fetch_all(&app.state.pool)
+    .await
+    .expect("read flags");
     assert_eq!(flags, vec![(older.id, false), (newer.id, true)]);
 
     app.cleanup().await;
@@ -5237,13 +5329,7 @@ async fn a_sick_note_spanning_the_month_boundary_declares_its_earlier_days() {
     app.state
         .db
         .reports
-        .mark_payroll_reported_absences(
-            &earlier_period,
-            earlier_from,
-            earlier_to,
-            &[emp_id],
-            &[],
-        )
+        .mark_payroll_reported_absences(&earlier_period, earlier_from, earlier_to, &[emp_id], &[])
         .await
         .expect("mark the earlier month");
     app.state
@@ -5629,7 +5715,10 @@ async fn a_sick_note_running_into_a_month_still_owed_still_declares_the_reported
         "the days no report will ever print unless this one does"
     );
     assert_eq!(
-        data.late_absence_snapshots.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+        data.late_absence_snapshots
+            .iter()
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>(),
         vec![absence.id],
         "and the document records the absence it declared, so the send marks \
          exactly that"
@@ -5645,7 +5734,11 @@ async fn a_sick_note_running_into_a_month_still_owed_still_declares_the_reported
             reporting_from,
             reporting_to,
             &[emp_id],
-            &data.late_absence_snapshots.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            &data
+                .late_absence_snapshots
+                .iter()
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>(),
         )
         .await
         .expect("mark what this report declared");
@@ -6669,8 +6762,7 @@ async fn payroll_delivery_accounting_is_atomic() {
         "the database kind constraint must reject invalid rendered content"
     );
     assert!(
-        !app
-            .state
+        !app.state
             .db
             .reports
             .payroll_period_accounted(&period)
@@ -7150,11 +7242,12 @@ async fn payroll_delivery_marks_only_the_absences_in_the_assembled_document() {
         )
         .await
         .expect("create absence after document assembly");
-    let assembled_version: String = sqlx::query_scalar("SELECT xmin::text FROM absences WHERE id=$1")
-        .bind(assembled.id)
-        .fetch_one(&app.state.pool)
-        .await
-        .expect("read the assembled absence version");
+    let assembled_version: String =
+        sqlx::query_scalar("SELECT xmin::text FROM absences WHERE id=$1")
+            .bind(assembled.id)
+            .fetch_one(&app.state.pool)
+            .await
+            .expect("read the assembled absence version");
 
     app.state
         .db
@@ -7222,16 +7315,23 @@ async fn submissions_tile_requires_the_straddling_weeks_in_month_day_too() {
         prior_week_monday.month(),
         "the reference date must place both weeks in one month"
     );
-    let entry_id =
-        create_and_submit_entry(&employee, &prior_week_monday.format("%Y-%m-%d").to_string(), cat_id)
-            .await;
+    let entry_id = create_and_submit_entry(
+        &employee,
+        &prior_week_monday.format("%Y-%m-%d").to_string(),
+        cat_id,
+    )
+    .await;
     let (status, body) = lead
         .post(
             "/api/v1/time-entries/batch-approve",
             &json!({"ids": [entry_id]}),
         )
         .await;
-    assert_eq!(status, StatusCode::OK, "approve the prior week's day: {body}");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "approve the prior week's day: {body}"
+    );
 
     // The straddling week's Monday is left completely untouched: no entry,
     // no absence.
@@ -7914,7 +8014,11 @@ async fn payroll_declared_days_correction_survives_the_person_being_archived() {
             &json!({"ids": [late_shift]}),
         )
         .await;
-    assert_eq!(status, StatusCode::OK, "approve the forgotten shift: {body}");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "approve the forgotten shift: {body}"
+    );
     let (status, body) = admin
         .post(&format!("/api/v1/users/{assistant_id}/archive"), &json!({}))
         .await;
@@ -8037,7 +8141,10 @@ async fn payroll_declared_days_unrelated_stray_draft_does_not_block_a_different_
     assert_eq!(status, StatusCode::OK, "create the forgotten shift: {body}");
     let forgotten_id = id(&body);
     let (status, body) = assistant
-        .post("/api/v1/time-entries/submit", &json!({"ids": [forgotten_id]}))
+        .post(
+            "/api/v1/time-entries/submit",
+            &json!({"ids": [forgotten_id]}),
+        )
         .await;
     assert_eq!(status, StatusCode::OK, "submit the forgotten shift: {body}");
     let (status, body) = lead
@@ -8046,7 +8153,11 @@ async fn payroll_declared_days_unrelated_stray_draft_does_not_block_a_different_
             &json!({"ids": [forgotten_id]}),
         )
         .await;
-    assert_eq!(status, StatusCode::OK, "approve the forgotten shift: {body}");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "approve the forgotten shift: {body}"
+    );
 
     // An entirely unrelated draft, on a *different* already-reported day, that
     // nobody ever resubmits. Its own month is a different month than the one
@@ -8107,14 +8218,13 @@ async fn payroll_declared_days_unrelated_stray_draft_does_not_block_a_different_
 
     // Resubmitting and approving the stray draft brings its own day's booking
     // in too, without changing what was already shown for worked_day.
-    let stray_entries: Vec<i64> = sqlx::query_scalar(
-        "SELECT id FROM time_entries WHERE user_id=$1 AND entry_date=$2",
-    )
-    .bind(assistant_id)
-    .bind(stray_day)
-    .fetch_all(&app.state.pool)
-    .await
-    .expect("find the stray entry");
+    let stray_entries: Vec<i64> =
+        sqlx::query_scalar("SELECT id FROM time_entries WHERE user_id=$1 AND entry_date=$2")
+            .bind(assistant_id)
+            .bind(stray_day)
+            .fetch_all(&app.state.pool)
+            .await
+            .expect("find the stray entry");
     let (status, body) = assistant
         .post(
             "/api/v1/time-entries/submit",
@@ -8503,7 +8613,15 @@ async fn payroll_late_and_regular_absences_share_the_weekly_quota() {
     app.state
         .db
         .absences
-        .create(user_id, sick.id, true, previous_day, previous_day, None, "approved")
+        .create(
+            user_id,
+            sick.id,
+            true,
+            previous_day,
+            previous_day,
+            None,
+            "approved",
+        )
         .await
         .expect("late absence");
     app.state
@@ -8567,68 +8685,156 @@ async fn payroll_late_and_regular_absences_share_the_weekly_quota() {
 async fn a_late_absence_sharing_a_previously_reported_quota_requires_review() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
-    let (status, body) = admin.post("/api/v1/users", &json!({
-        "email": "reported-quota-review@example.com",
-        "first_name": "Pia", "last_name": "Review",
-        "role": "employee", "weekly_hours": 24, "workdays_per_week": 3,
-        "start_date": "2024-01-01", "approver_ids": [1],
-    })).await;
+    let (status, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "reported-quota-review@example.com",
+                "first_name": "Pia", "last_name": "Review",
+                "role": "employee", "weekly_hours": 24, "workdays_per_week": 3,
+                "start_date": "2024-01-01", "approver_ids": [1],
+            }),
+        )
+        .await;
     assert_eq!(status, StatusCode::OK, "create employee: {body}");
     let user_id = id(&body);
     sqlx::query("DELETE FROM user_work_weekdays WHERE user_id=$1")
-        .bind(user_id).execute(&app.state.pool).await.expect("use count-based schedule");
-    let monday = [3i64, 4, 2, 5].into_iter()
+        .bind(user_id)
+        .execute(&app.state.pool)
+        .await
+        .expect("use count-based schedule");
+    let monday = [3i64, 4, 2, 5]
+        .into_iter()
         .map(|weeks| next_monday(-7 * weeks))
         .find(|day| (*day + Duration::days(4)).month() == day.month())
         .expect("week inside one month");
     let (from, to) = month_bounds(monday);
     let period = from.format("%Y-%m").to_string();
     let sick = absence_cat(&app.state.pool, "sick").await;
-    app.state.db.absences.create(user_id, sick.id, true, monday, monday + Duration::days(2), None, "approved")
-        .await.expect("create originally reported absence");
-    app.state.db.reports.mark_payroll_reported_absences(&period, from, to, &[user_id], &[])
-        .await.expect("mark original report");
-    let late = app.state.db.absences.create(
-        user_id, sick.id, true, monday + Duration::days(3), monday + Duration::days(4), None, "approved",
-    ).await.expect("create late absence");
+    app.state
+        .db
+        .absences
+        .create(
+            user_id,
+            sick.id,
+            true,
+            monday,
+            monday + Duration::days(2),
+            None,
+            "approved",
+        )
+        .await
+        .expect("create originally reported absence");
+    app.state
+        .db
+        .reports
+        .mark_payroll_reported_absences(&period, from, to, &[user_id], &[])
+        .await
+        .expect("mark original report");
+    let late = app
+        .state
+        .db
+        .absences
+        .create(
+            user_id,
+            sick.id,
+            true,
+            monday + Duration::days(3),
+            monday + Duration::days(4),
+            None,
+            "approved",
+        )
+        .await
+        .expect("create late absence");
     let (next_from, next_to) = month_bounds(to + Duration::days(1));
-    let members = app.state.db.reports.timesheet_members_for_period(next_to).await.expect("members");
+    let members = app
+        .state
+        .db
+        .reports
+        .timesheet_members_for_period(next_to)
+        .await
+        .expect("members");
     let data = payroll_report::build_report_data(
         &app.state,
         payroll_report::ReportWindow {
-            from: next_from, to: next_to, interim: false, created_on: next_to,
+            from: next_from,
+            to: next_to,
+            interim: false,
+            created_on: next_to,
             carried: Some(payroll_report::CarriedDays {
-                since: from, before: next_from, owed_periods: Vec::new(), reported_as: None,
+                since: from,
+                before: next_from,
+                owed_periods: Vec::new(),
+                reported_as: None,
             }),
         },
-        &members, &config(false, false), &zerf::i18n::Language::from_setting("en"), None,
-    ).await.expect("build report");
-    assert!(data.late_absence_rows.is_empty(), "do not guess a second day count");
+        &members,
+        &config(false, false),
+        &zerf::i18n::Language::from_setting("en"),
+        None,
+    )
+    .await
+    .expect("build report");
+    assert!(
+        data.late_absence_rows.is_empty(),
+        "do not guess a second day count"
+    );
     assert_eq!(data.absence_review_rows.len(), 1);
     assert_eq!(
-        (data.absence_review_rows[0].from, data.absence_review_rows[0].to),
+        (
+            data.absence_review_rows[0].from,
+            data.absence_review_rows[0].to
+        ),
         (monday + Duration::days(3), monday + Duration::days(4)),
     );
-    assert!(data.late_absence_snapshots.iter().any(|(id, _)| *id == late.id));
-    assert_eq!(payroll_report::reported_content_rows(&data)[0].kind, "absence_review");
+    assert!(data
+        .late_absence_snapshots
+        .iter()
+        .any(|(id, _)| *id == late.id));
+    assert_eq!(
+        payroll_report::reported_content_rows(&data)[0].kind,
+        "absence_review"
+    );
     assert_eq!(payroll_report::people_in_report(&data), 1);
     let pdf = zerf::report_pdf::render_payroll_report_pdf(
-        &data, &zerf::i18n::Language::from_setting("en"),
+        &data,
+        &zerf::i18n::Language::from_setting("en"),
     );
     assert!(String::from_utf8_lossy(&pdf).contains("Absences - review days"));
     let content = payroll_report::reported_content_rows(&data);
     let next_period = next_from.format("%Y-%m").to_string();
-    let recorded = app.state.db.reports.record_payroll_report_delivery(
-        &next_period, next_from, next_to, &[], &[], Default::default(),
-        &data.reported_absence_snapshots, &data.late_absence_snapshots, &content,
-    ).await.expect("record the review notice");
+    let recorded = app
+        .state
+        .db
+        .reports
+        .record_payroll_report_delivery(
+            &next_period,
+            next_from,
+            next_to,
+            &[],
+            &[],
+            Default::default(),
+            &data.reported_absence_snapshots,
+            &data.late_absence_snapshots,
+            &content,
+        )
+        .await
+        .expect("record the review notice");
     assert!(recorded.is_some());
-    let marker: Option<String> = sqlx::query_scalar(
-        "SELECT payroll_reported_period FROM absences WHERE id=$1",
-    ).bind(late.id).fetch_one(&app.state.pool).await.expect("read marker");
+    let marker: Option<String> =
+        sqlx::query_scalar("SELECT payroll_reported_period FROM absences WHERE id=$1")
+            .bind(late.id)
+            .fetch_one(&app.state.pool)
+            .await
+            .expect("read marker");
     assert_eq!(marker.as_deref(), Some(next_period.as_str()));
-    let stored = app.state.db.reports.payroll_reported_content(&next_period)
-        .await.expect("read sent document");
+    let stored = app
+        .state
+        .db
+        .reports
+        .payroll_reported_content(&next_period)
+        .await
+        .expect("read sent document");
     assert_eq!(stored[0].kind, "absence_review");
     app.cleanup().await;
 }
@@ -8737,8 +8943,13 @@ async fn an_absence_absorbed_by_its_week_is_still_marked_as_reported() {
         "the week is spent on the sick note; the unpaid leave prints nothing"
     );
     assert!(
-        data.reported_absence_snapshots.iter().any(|(id, _)| *id == sick_absence.id)
-            && data.reported_absence_snapshots.iter().any(|(id, _)| *id == unpaid_absence.id),
+        data.reported_absence_snapshots
+            .iter()
+            .any(|(id, _)| *id == sick_absence.id)
+            && data
+                .reported_absence_snapshots
+                .iter()
+                .any(|(id, _)| *id == unpaid_absence.id),
         "both absences were accounted for and must be marked: {:?}",
         data.reported_absence_snapshots
     );

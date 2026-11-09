@@ -435,7 +435,10 @@ async fn approved_hours_of_a_pending_day_are_readable_by_the_approver() {
     );
     let afternoon_id = id(&body);
     let (st, body) = employee
-        .post("/api/v1/time-entries/submit", &json!({"ids": [afternoon_id]}))
+        .post(
+            "/api/v1/time-entries/submit",
+            &json!({"ids": [afternoon_id]}),
+        )
         .await;
     assert_eq!(st, StatusCode::OK, "submit the afternoon shift: {body}");
 
@@ -493,7 +496,10 @@ async fn approving_a_second_shift_credits_the_whole_days_break() {
     // More than six hours of work costs 30 minutes of break.
     for (key, value) in [
         (zerf::services::settings::AUTO_BREAK_ENABLED_KEY, "true"),
-        (zerf::services::settings::AUTO_BREAK_THRESHOLD_HOURS_KEY, "6"),
+        (
+            zerf::services::settings::AUTO_BREAK_THRESHOLD_HOURS_KEY,
+            "6",
+        ),
         (
             zerf::services::settings::AUTO_BREAK_DEDUCTION_MINUTES_KEY,
             "30",

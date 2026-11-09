@@ -266,7 +266,10 @@ const DELETE_RETRY_ATTEMPTS: u32 = 3;
 /// email to go out again on the next poll. Public so integration tests can
 /// exercise it directly (`process_pending`'s own success branch needs a real
 /// SMTP accept to reach it, which the test suite has no way to fake).
-pub async fn delete_with_retry(email_queue: &crate::repository::EmailQueueDb, id: i64) -> AppResult<()> {
+pub async fn delete_with_retry(
+    email_queue: &crate::repository::EmailQueueDb,
+    id: i64,
+) -> AppResult<()> {
     // The first DELETE_RETRY_ATTEMPTS - 1 tries get a short backoff between
     // them; the final try's Result is returned directly so the caller sees
     // exactly why the delete kept failing.

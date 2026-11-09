@@ -80,7 +80,16 @@ pub async fn notify_approvers(
     actor_id: i64,
 ) {
     for &id in recipient_ids {
-        notify_absence(app_state, language, id, event, params.clone(), absence_id, actor_id).await;
+        notify_absence(
+            app_state,
+            language,
+            id,
+            event,
+            params.clone(),
+            absence_id,
+            actor_id,
+        )
+        .await;
     }
 }
 
@@ -1611,8 +1620,8 @@ pub async fn fill_counted_days(
         let account = absence
             .leave_account_category_id
             .unwrap_or(absence.category_id);
-        let alone = matches!(absence.status.as_str(), "rejected" | "cancelled")
-            .then_some(absence.id);
+        let alone =
+            matches!(absence.status.as_str(), "rejected" | "cancelled").then_some(absence.id);
         groups
             .entry((absence.user_id, account, alone))
             .or_default()

@@ -133,7 +133,8 @@ pub async fn workdays_for_ranges_in_window(
     // Collect clamped ranges.
     let mut clamped: Vec<(NaiveDate, NaiveDate)> = Vec::new();
     for (start_date, end_date) in ranges {
-        if let Some((cs, ce)) = clamp_range_to_window(*start_date, *end_date, window_start, window_end)
+        if let Some((cs, ce)) =
+            clamp_range_to_window(*start_date, *end_date, window_start, window_end)
         {
             clamped.push((cs, ce));
         }
@@ -432,25 +433,14 @@ pub async fn carryover_days_into_year(
             )
             .await?;
         let base_usage = if let Some(expiry) = expiry_date {
-            let (pre_usage, post_usage) = usage_split_at_expiry(
-                pool,
-                user.id,
-                &source_ranges,
-                year_from,
-                year_to,
-                expiry,
-            )
-            .await?;
+            let (pre_usage, post_usage) =
+                usage_split_at_expiry(pool, user.id, &source_ranges, year_from, year_to, expiry)
+                    .await?;
             post_usage + (pre_usage - incoming_carryover as f64).max(0.0)
         } else {
-            let total_usage = workdays_for_ranges_in_window(
-                pool,
-                user.id,
-                &source_ranges,
-                year_from,
-                year_to,
-            )
-            .await?;
+            let total_usage =
+                workdays_for_ranges_in_window(pool, user.id, &source_ranges, year_from, year_to)
+                    .await?;
             (total_usage - incoming_carryover as f64).max(0.0)
         };
 
@@ -779,13 +769,8 @@ pub async fn validate_flextime_balance(
             // Range was entirely before the cutoff and is already accounted for.
             continue;
         }
-        committed_cost_min += flextime_cost_minutes(
-            pool,
-            &schedule,
-            effective_start,
-            *range_end,
-        )
-        .await?;
+        committed_cost_min +=
+            flextime_cost_minutes(pool, &schedule, effective_start, *range_end).await?;
     }
 
     // (3) Post-cutoff portion of the proposed range. Same reasoning as (2):
@@ -917,7 +902,10 @@ async fn validate_leave_account_year(
     if today > expiry {
         // Expired: only post-expiry days count against base entitlement,
         // but base consumption includes pre-expiry minus original carryover.
-        if exceeds_leave_account_budget(base_used_before_expiry + post_existing + post_proposed, effective_entitlement as f64) {
+        if exceeds_leave_account_budget(
+            base_used_before_expiry + post_existing + post_proposed,
+            effective_entitlement as f64,
+        ) {
             return Err(AppError::BadRequest(
                 "Not enough remaining leave-account days.".into(),
             ));

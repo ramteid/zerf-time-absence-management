@@ -291,8 +291,7 @@ async fn load_reply_to(
     reply_to_user_id: Option<i64>,
 ) -> Option<crate::repository::EmailContact> {
     let user_id = reply_to_user_id?;
-    let (address, first_name, last_name) =
-        state.db.notifications.get_user_email(user_id).await?;
+    let (address, first_name, last_name) = state.db.notifications.get_user_email(user_id).await?;
     if !crate::email::is_valid_address(&address) {
         tracing::warn!(
             target: "zerf::notifications",

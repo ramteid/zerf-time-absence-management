@@ -2597,8 +2597,15 @@ async fn work_schedule_history_repository_workflow() {
     // roster that already existed when it ran).
     let rows = schedules.list_for_user(user_id).await.expect("list");
     assert_eq!(rows.len(), 1, "one starting pattern: {rows:?}");
-    assert_eq!(rows[0].valid_from, chrono::NaiveDate::from_ymd_opt(2026, 7, 1).unwrap());
-    assert_eq!(rows[0].weekdays, vec![1, 2, 3, 4], "the first four weekdays");
+    assert_eq!(
+        rows[0].valid_from,
+        chrono::NaiveDate::from_ymd_opt(2026, 7, 1).unwrap()
+    );
+    assert_eq!(
+        rows[0].weekdays,
+        vec![1, 2, 3, 4],
+        "the first four weekdays"
+    );
 
     // Correcting a guessed pattern replaces that date's row rather than adding
     // a second one, because nothing about the person's schedule changed.
@@ -2639,11 +2646,20 @@ async fn work_schedule_history_repository_workflow() {
         .expect("history");
     let before = history.on(chrono::NaiveDate::from_ymd_opt(2027, 1, 4).unwrap());
     let after = history.on(chrono::NaiveDate::from_ymd_opt(2027, 3, 1).unwrap());
-    assert!(!before.covers(chrono::NaiveDate::from_ymd_opt(2027, 1, 4).unwrap()), "Monday was not worked before the change");
-    assert!(after.covers(chrono::NaiveDate::from_ymd_opt(2027, 3, 1).unwrap()), "Monday is worked after it");
+    assert!(
+        !before.covers(chrono::NaiveDate::from_ymd_opt(2027, 1, 4).unwrap()),
+        "Monday was not worked before the change"
+    );
+    assert!(
+        after.covers(chrono::NaiveDate::from_ymd_opt(2027, 3, 1).unwrap()),
+        "Monday is worked after it"
+    );
 
     // A person with no recorded pattern falls back to the old count.
-    let assistant_history = schedules.history_for_user(9_999_999, 7).await.expect("history");
+    let assistant_history = schedules
+        .history_for_user(9_999_999, 7)
+        .await
+        .expect("history");
     assert!(assistant_history.is_empty());
     assert!(!assistant_history
         .on(chrono::NaiveDate::from_ymd_opt(2026, 7, 1).unwrap())
@@ -2670,18 +2686,27 @@ async fn work_schedule_history_repository_workflow() {
 
     // Withdrawing a later change removes that row and leaves the rest.
     let removed = schedules
-        .delete_change(user_id, chrono::NaiveDate::from_ymd_opt(2027, 3, 1).unwrap())
+        .delete_change(
+            user_id,
+            chrono::NaiveDate::from_ymd_opt(2027, 3, 1).unwrap(),
+        )
         .await
         .expect("withdraw the change");
     assert_eq!(removed, 1);
-    assert_eq!(schedules.list_for_user(user_id).await.expect("list").len(), 1);
+    assert_eq!(
+        schedules.list_for_user(user_id).await.expect("list").len(),
+        1
+    );
 
     // The starting pattern cannot be withdrawn, whatever a caller asks. Leaving
     // somebody with no working days recorded would send every calculation for
     // them back to the old spread over Monday to Friday, so the statement
     // itself refuses rather than relying on anyone to check first.
     let removed = schedules
-        .delete_change(user_id, chrono::NaiveDate::from_ymd_opt(2026, 7, 1).unwrap())
+        .delete_change(
+            user_id,
+            chrono::NaiveDate::from_ymd_opt(2026, 7, 1).unwrap(),
+        )
         .await
         .expect("no error, simply nothing removed");
     assert_eq!(removed, 0, "the starting pattern stays");
@@ -2733,7 +2758,11 @@ async fn a_user_who_gains_a_work_target_gains_a_pattern() {
     assert_eq!(st, StatusCode::OK, "create pure admin: {body}");
     let admin_id = id(&body);
     assert!(
-        schedules.list_for_user(admin_id).await.expect("list").is_empty(),
+        schedules
+            .list_for_user(admin_id)
+            .await
+            .expect("list")
+            .is_empty(),
         "no time tracking, no pattern"
     );
 
@@ -2746,7 +2775,11 @@ async fn a_user_who_gains_a_work_target_gains_a_pattern() {
         .await;
     assert_eq!(st, StatusCode::OK, "enable time tracking: {body}");
     let rows = schedules.list_for_user(admin_id).await.expect("list");
-    assert_eq!(rows.len(), 1, "enabling tracking records a pattern: {rows:?}");
+    assert_eq!(
+        rows.len(),
+        1,
+        "enabling tracking records a pattern: {rows:?}"
+    );
     assert_eq!(rows[0].weekdays, vec![1, 2, 3, 4, 5]);
 
     // An assistant has none, and gains one on promotion.
@@ -2765,7 +2798,11 @@ async fn a_user_who_gains_a_work_target_gains_a_pattern() {
     assert_eq!(st, StatusCode::OK, "create assistant: {body}");
     let promoted_id = id(&body);
     assert!(
-        schedules.list_for_user(promoted_id).await.expect("list").is_empty(),
+        schedules
+            .list_for_user(promoted_id)
+            .await
+            .expect("list")
+            .is_empty(),
         "an assistant has no pattern"
     );
     let (st, body) = admin
@@ -2849,13 +2886,21 @@ async fn restoring_a_contract_keeps_its_working_days_covered() {
     assert_eq!(st, StatusCode::OK, "restore: {body}");
 
     let rows = schedules.list_for_user(user_id).await.expect("list");
-    assert_eq!(rows.len(), 1, "restoring is not a change of working days: {rows:?}");
+    assert_eq!(
+        rows.len(),
+        1,
+        "restoring is not a change of working days: {rows:?}"
+    );
     assert_eq!(
         rows[0].valid_from,
         chrono::NaiveDate::from_ymd_opt(2026, 5, 4).unwrap(),
         "the pattern reaches back to the new start"
     );
-    assert_eq!(rows[0].weekdays, vec![2, 3, 4, 5], "and still says Tuesday to Friday");
+    assert_eq!(
+        rows[0].weekdays,
+        vec![2, 3, 4, 5],
+        "and still says Tuesday to Friday"
+    );
 
     app.cleanup().await;
 }
@@ -2902,7 +2947,10 @@ async fn the_starting_pattern_survives_concurrent_withdrawals() {
             .await
             .expect("record a change");
     }
-    assert_eq!(schedules.list_for_user(user_id).await.expect("list").len(), 5);
+    assert_eq!(
+        schedules.list_for_user(user_id).await.expect("list").len(),
+        5
+    );
 
     // Every date withdrawn at once, including the starting pattern's own.
     let mut handles = Vec::new();
@@ -2917,7 +2965,11 @@ async fn the_starting_pattern_survives_concurrent_withdrawals() {
     }
 
     let rows = schedules.list_for_user(user_id).await.expect("list");
-    assert_eq!(rows.len(), 1, "exactly the starting pattern is left: {rows:?}");
+    assert_eq!(
+        rows.len(),
+        1,
+        "exactly the starting pattern is left: {rows:?}"
+    );
     assert_eq!(
         rows[0].valid_from,
         chrono::NaiveDate::from_ymd_opt(2026, 7, 1).unwrap()
@@ -2964,17 +3016,46 @@ async fn a_changed_contract_day_count_reaches_the_pattern() {
     assert_eq!(st, StatusCode::OK, "shrink the contract: {body}");
 
     let rows = schedules.list_for_user(user_id).await.expect("list");
-    assert_eq!(rows.len(), 2, "the change is recorded, not applied backwards: {rows:?}");
-    assert_eq!(rows[0].valid_from, start, "the first pattern keeps its date");
-    assert_eq!(rows[0].weekdays, vec![1, 2, 3, 4, 5], "and the days it was worked under");
-    assert_eq!(rows[1].weekdays, vec![1, 2, 3], "the new pattern works three days");
-    assert!(rows[1].valid_from > start, "dated from the change, not the contract start");
+    assert_eq!(
+        rows.len(),
+        2,
+        "the change is recorded, not applied backwards: {rows:?}"
+    );
+    assert_eq!(
+        rows[0].valid_from, start,
+        "the first pattern keeps its date"
+    );
+    assert_eq!(
+        rows[0].weekdays,
+        vec![1, 2, 3, 4, 5],
+        "and the days it was worked under"
+    );
+    assert_eq!(
+        rows[1].weekdays,
+        vec![1, 2, 3],
+        "the new pattern works three days"
+    );
+    assert!(
+        rows[1].valid_from > start,
+        "dated from the change, not the contract start"
+    );
     let changed_on = rows[1].valid_from;
 
     // The timeline agrees: the old weeks keep five days, the new ones have three.
-    let history = schedules.history_for_user(user_id, 3).await.expect("history");
-    assert_eq!(history.on(start).days_per_week(), 5, "a week already worked");
-    assert_eq!(history.on(changed_on).days_per_week(), 3, "and one after the change");
+    let history = schedules
+        .history_for_user(user_id, 3)
+        .await
+        .expect("history");
+    assert_eq!(
+        history.on(start).days_per_week(),
+        5,
+        "a week already worked"
+    );
+    assert_eq!(
+        history.on(changed_on).days_per_week(),
+        3,
+        "and one after the change"
+    );
 
     // An admin picks the days that contract really works.
     schedules
@@ -3134,15 +3215,10 @@ async fn a_contract_without_a_work_target_is_never_judged_by_fixed_days() {
     let user_id = id(&body);
 
     // While they are an employee the recorded pattern is what judges them.
-    let history = zerf::services::work_schedules::history_for(
-        &app.state.pool,
-        user_id,
-        "employee",
-        true,
-        4,
-    )
-    .await
-    .expect("history for an employee");
+    let history =
+        zerf::services::work_schedules::history_for(&app.state.pool, user_id, "employee", true, 4)
+            .await
+            .expect("history for an employee");
     assert!(
         history.on(reference_date()).has_fixed_days(),
         "an employee is judged by the weekdays on record"
@@ -3229,7 +3305,10 @@ async fn an_admin_can_state_which_weekdays_a_contract_works() {
         vec![2, 3, 4, 5],
         "sorted, and the repeated Wednesday counted once"
     );
-    assert_eq!(rows[0].valid_from, start, "in force from the contract start");
+    assert_eq!(
+        rows[0].valid_from, start,
+        "in force from the contract start"
+    );
 
     let (st, detail) = admin.get(&format!("/api/v1/users/{user_id}")).await;
     assert_eq!(st, StatusCode::OK, "read back: {detail}");
@@ -3254,14 +3333,33 @@ async fn an_admin_can_state_which_weekdays_a_contract_works() {
     assert_eq!(st, StatusCode::OK, "restate the days: {body}");
 
     let rows = schedules.list_for_user(user_id).await.expect("list");
-    assert_eq!(rows.len(), 2, "the change is dated, not retroactive: {rows:?}");
-    assert_eq!(rows[0].weekdays, vec![2, 3, 4, 5], "the weeks already worked keep theirs");
-    assert_eq!(rows[1].weekdays, vec![1, 3, 5], "and the new days apply from the change");
-    assert!(rows[1].valid_from > start, "dated from today, not from the contract start");
+    assert_eq!(
+        rows.len(),
+        2,
+        "the change is dated, not retroactive: {rows:?}"
+    );
+    assert_eq!(
+        rows[0].weekdays,
+        vec![2, 3, 4, 5],
+        "the weeks already worked keep theirs"
+    );
+    assert_eq!(
+        rows[1].weekdays,
+        vec![1, 3, 5],
+        "and the new days apply from the change"
+    );
+    assert!(
+        rows[1].valid_from > start,
+        "dated from today, not from the contract start"
+    );
 
     let (st, detail) = admin.get(&format!("/api/v1/users/{user_id}")).await;
     assert_eq!(st, StatusCode::OK, "read back: {detail}");
-    assert_eq!(detail["workdays_per_week"].as_i64(), Some(3), "three days now");
+    assert_eq!(
+        detail["workdays_per_week"].as_i64(),
+        Some(3),
+        "three days now"
+    );
 
     // A day outside Monday to Friday is refused outright.
     let (st, body) = admin
@@ -3270,14 +3368,22 @@ async fn an_admin_can_state_which_weekdays_a_contract_works() {
             &json!({"work_weekdays": [1, 6]}),
         )
         .await;
-    assert_eq!(st, StatusCode::BAD_REQUEST, "Saturday is not a weekday: {body}");
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "Saturday is not a weekday: {body}"
+    );
     let (st, body) = admin
         .put(
             &format!("/api/v1/users/{user_id}"),
             &json!({"work_weekdays": []}),
         )
         .await;
-    assert_eq!(st, StatusCode::BAD_REQUEST, "a contract works some day: {body}");
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "a contract works some day: {body}"
+    );
 
     app.cleanup().await;
 }
@@ -3309,7 +3415,11 @@ async fn weekly_hours_changes_are_dated_and_not_retroactive() {
     assert_eq!(st, StatusCode::OK, "create: {body}");
     let user_id = id(&body);
     assert!(
-        schedules.list_hours_for_user(user_id).await.unwrap().is_empty(),
+        schedules
+            .list_hours_for_user(user_id)
+            .await
+            .unwrap()
+            .is_empty(),
         "no history until the hours change"
     );
 
@@ -3329,17 +3439,27 @@ async fn weekly_hours_changes_are_dated_and_not_retroactive() {
 
     let (_, detail) = admin.get(&format!("/api/v1/users/{user_id}")).await;
     assert_eq!(detail["weekly_hours"].as_f64(), Some(30.0), "current hours");
-    assert_eq!(detail["weekly_hours_history"].as_array().map(Vec::len), Some(2));
+    assert_eq!(
+        detail["weekly_hours_history"].as_array().map(Vec::len),
+        Some(2)
+    );
 
     // Before the contract start, and in the future, are refused.
-    for bad in [start - Duration::days(1), reference_date() + Duration::days(30)] {
+    for bad in [
+        start - Duration::days(1),
+        reference_date() + Duration::days(30),
+    ] {
         let (st, body) = admin
             .put(
                 &format!("/api/v1/users/{user_id}"),
                 &json!({"weekly_hours": 10.0, "weekly_hours_from": iso(bad)}),
             )
             .await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, "date {bad} must be refused: {body}");
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "date {bad} must be refused: {body}"
+        );
     }
 
     // The same date again replaces that row.

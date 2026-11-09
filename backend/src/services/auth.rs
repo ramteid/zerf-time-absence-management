@@ -68,7 +68,8 @@ pub fn validate_password_strength(pw: &str) -> AppResult<()> {
         pw.chars().any(|c| c.is_ascii_lowercase()),
         pw.chars().any(|c| c.is_ascii_uppercase()),
         pw.chars().any(|c| c.is_ascii_digit()),
-        pw.chars().any(|c| c.is_ascii() && !c.is_ascii_alphanumeric()),
+        pw.chars()
+            .any(|c| c.is_ascii() && !c.is_ascii_alphanumeric()),
     ]
     .iter()
     .filter(|&&present| present)

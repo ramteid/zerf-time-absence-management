@@ -118,7 +118,12 @@ pub async fn run_once(state: &AppState) -> AppResult<()> {
     }
     let relevant_categories = payroll_report::payroll_relevant_categories(&state.pool).await?;
     if config.has_no_content(&relevant_categories)
-        && state.db.reports.pending_payroll_absence_cancellations().await?.is_empty()
+        && state
+            .db
+            .reports
+            .pending_payroll_absence_cancellations()
+            .await?
+            .is_empty()
     {
         return Ok(());
     }
@@ -166,7 +171,12 @@ pub async fn run_now(state: &AppState) -> AppResult<RunSummary> {
     }
     let relevant_categories = payroll_report::payroll_relevant_categories(&state.pool).await?;
     if config.has_no_content(&relevant_categories)
-        && state.db.reports.pending_payroll_absence_cancellations().await?.is_empty()
+        && state
+            .db
+            .reports
+            .pending_payroll_absence_cancellations()
+            .await?
+            .is_empty()
     {
         return Err(AppError::BadRequest(
             "Select at least one section for the payroll report.".into(),
@@ -993,8 +1003,14 @@ mod tests {
     #[test]
     fn mailed_email_ends_with_the_no_reply_notice() {
         for (code, closing) in [
-            ("en", "Please do not reply! This email was sent automatically by the system."),
-            ("de", "Bitte nicht antworten! Diese E-Mail wurde automatisch vom System versendet."),
+            (
+                "en",
+                "Please do not reply! This email was sent automatically by the system.",
+            ),
+            (
+                "de",
+                "Bitte nicht antworten! Diese E-Mail wurde automatisch vom System versendet.",
+            ),
         ] {
             let language = crate::i18n::Language::from_setting(code);
             let plain = email_for_sending(&language, "May 2026", "Example GmbH", false, None);
@@ -1008,7 +1024,11 @@ mod tests {
 
             for text in [&plain, &manual_partial] {
                 assert!(text.body.ends_with(closing), "{code}: {}", text.body);
-                assert_eq!(text.body.matches(closing).count(), 1, "{code}: exactly once");
+                assert_eq!(
+                    text.body.matches(closing).count(),
+                    1,
+                    "{code}: exactly once"
+                );
             }
             assert!(
                 manual_partial.body.contains("Jane Doe"),

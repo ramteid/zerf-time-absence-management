@@ -1415,13 +1415,12 @@ pub async fn restore_assistant(
 ) -> AppResult<User> {
     // Use assert_team_lead_can_manage_assistant — it also fetches by id without an
     // active filter so archived assistants are reachable.
-    let _target_user = assert_team_lead_can_manage_assistant(app_state, requester, target_id).await?;
+    let _target_user =
+        assert_team_lead_can_manage_assistant(app_state, requester, target_id).await?;
 
     // Extra validation: lead must still be active and valid approver (covers case where lead archived in meantime)
     if !requester.active {
-        return Err(AppError::BadRequest(
-            "Restoring lead is not active.".into(),
-        ));
+        return Err(AppError::BadRequest("Restoring lead is not active.".into()));
     }
     if !is_team_lead_role(&requester.role) && !is_admin_role(&requester.role) {
         return Err(AppError::BadRequest(

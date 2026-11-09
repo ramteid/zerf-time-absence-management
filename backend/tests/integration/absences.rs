@@ -1241,14 +1241,12 @@ async fn flextime_balance_charges_every_potential_weekday_for_reduced_schedules(
     // current_balance_min is exactly the seed — no historical ledger noise.
     let target_per_day_min: i64 = 288;
     let monday = next_monday(7);
-    sqlx::query(
-        "UPDATE users SET start_date=$1, weekly_hours=24, workdays_per_week=3 WHERE id=$2",
-    )
-    .bind(monday)
-    .bind(emp_id)
-    .execute(&app.state.pool)
-    .await
-    .expect("seed reduced schedule");
+    sqlx::query("UPDATE users SET start_date=$1, weekly_hours=24, workdays_per_week=3 WHERE id=$2")
+        .bind(monday)
+        .bind(emp_id)
+        .execute(&app.state.pool)
+        .await
+        .expect("seed reduced schedule");
     // 1152 min: enough for the 3-day quota (864) but short of the true
     // 5-day cost (1440).
     set_flextime_opening_balance(&app.state.pool, emp_id, target_per_day_min * 4)
@@ -1535,8 +1533,7 @@ async fn a_week_off_straddling_today_costs_one_weekly_quota() {
         .await;
     assert_eq!(status, StatusCode::OK, "create part-time employee: {body}");
     let part_timer_id = id(&body);
-    let part_timer =
-        login_change_pw(&app, "part-timer@example.com", &temp_pw(&body)).await;
+    let part_timer = login_change_pw(&app, "part-timer@example.com", &temp_pw(&body)).await;
 
     let (status, body) = part_timer
         .post(
@@ -1551,7 +1548,10 @@ async fn a_week_off_straddling_today_costs_one_weekly_quota() {
     assert_eq!(status, StatusCode::OK, "request the week off: {body}");
     let absence_id = id(&body);
     let (status, body) = lead
-        .post(&format!("/api/v1/absences/{absence_id}/approve"), &json!({}))
+        .post(
+            &format!("/api/v1/absences/{absence_id}/approve"),
+            &json!({}),
+        )
         .await;
     assert_eq!(status, StatusCode::OK, "approve the week off: {body}");
 
@@ -1586,7 +1586,9 @@ async fn a_week_off_straddling_today_costs_one_weekly_quota() {
     // must reach the same total — it used to count the two sides as separate
     // windows, so a lead saw a different number from the employee.
     let month = monday.format("%Y-%m").to_string();
-    let (status, team) = lead.get(&format!("/api/v1/reports/team?month={month}")).await;
+    let (status, team) = lead
+        .get(&format!("/api/v1/reports/team?month={month}"))
+        .await;
     assert_eq!(status, StatusCode::OK, "read the team report: {team}");
     let row = team["rows"]
         .as_array()
@@ -1681,7 +1683,11 @@ async fn a_second_booking_in_one_week_is_priced_by_what_it_adds() {
             }),
         )
         .await;
-    assert_eq!(status, StatusCode::OK, "set the entitlement to 3 days: {body}");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "set the entitlement to 3 days: {body}"
+    );
 
     // Two days of that week booked and approved.
     let (status, body) = employee
@@ -1900,7 +1906,11 @@ async fn two_bookings_in_one_week_add_up_to_that_week() {
         2.0,
         "Monday is not worked, so that request costs its Tuesday and Wednesday"
     );
-    assert_eq!(days_for(thursday), 2.0, "and the rest of the week costs two");
+    assert_eq!(
+        days_for(thursday),
+        2.0,
+        "and the rest of the week costs two"
+    );
     assert_eq!(
         days_for(monday) + days_for(thursday),
         4.0,

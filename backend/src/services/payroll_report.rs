@@ -260,7 +260,10 @@ pub async fn payroll_members(
             let mut ranges_by_user: std::collections::HashMap<i64, Vec<(NaiveDate, NaiveDate)>> =
                 std::collections::HashMap::new();
             for (user_id, _, start, end, _, _, _) in absences {
-                ranges_by_user.entry(user_id).or_default().push((start, end));
+                ranges_by_user
+                    .entry(user_id)
+                    .or_default()
+                    .push((start, end));
             }
             let mut members = Vec::with_capacity(ranges_by_user.len());
             for (user_id, ranges) in ranges_by_user {
@@ -312,7 +315,11 @@ pub async fn payroll_members(
             }
         }
     }
-    let mut members = app_state.db.reports.timesheet_members_for_period(to).await?;
+    let mut members = app_state
+        .db
+        .reports
+        .timesheet_members_for_period(to)
+        .await?;
     // `known` grows as people are added: somebody holding both a carried day
     // and a carried absence appears in both lists, and adding them twice would
     // duplicate every row they produce.
@@ -746,7 +753,10 @@ fn payroll_content_rows(
 
     for stored in stored_rows {
         let kind = content_kind(&stored.kind)?;
-        if matches!(kind, "absence" | "late_absence" | "absence_cancellation" | "absence_review") {
+        if matches!(
+            kind,
+            "absence" | "late_absence" | "absence_cancellation" | "absence_review"
+        ) {
             absence_count += 1;
         }
         if stored.minutes.is_some() {
@@ -1219,16 +1229,20 @@ pub async fn build_report_data(
         &mut regular_absences,
         &mut late_absences,
         from,
-        !carried.as_ref().is_some_and(|value| value.reported_as.is_some()),
+        !carried
+            .as_ref()
+            .is_some_and(|value| value.reported_as.is_some()),
     )
     .await?;
     let absence_rows = (!relevant_categories.is_empty()).then_some(regular_rows);
-    let (cancelled_absence_rows, cancellation_snapshots) =
-        if carried.as_ref().is_some_and(|value| value.reported_as.is_some()) {
-            (Vec::new(), Vec::new())
-        } else {
-            build_cancelled_absence_rows(app_state, members, language).await?
-        };
+    let (cancelled_absence_rows, cancellation_snapshots) = if carried
+        .as_ref()
+        .is_some_and(|value| value.reported_as.is_some())
+    {
+        (Vec::new(), Vec::new())
+    } else {
+        build_cancelled_absence_rows(app_state, members, language).await?
+    };
     regular_absences.snapshots.extend(cancellation_snapshots);
 
     Ok(PayrollReportData {
@@ -1416,8 +1430,12 @@ async fn approved_month_totals(
     for (user_id, year, month) in months {
         let invalid_month = || crate::error::AppError::BadRequest("date".into());
         let from = NaiveDate::from_ymd_opt(year, month, 1).ok_or_else(invalid_month)?;
-        let to = NaiveDate::from_ymd_opt(year, month, crate::time_calc::last_day_of_month(year, month))
-            .ok_or_else(invalid_month)?;
+        let to = NaiveDate::from_ymd_opt(
+            year,
+            month,
+            crate::time_calc::last_day_of_month(year, month),
+        )
+        .ok_or_else(invalid_month)?;
         let auth_user = crate::services::users::repo_user_to_auth_user(printed[&user_id].clone());
         let report = crate::services::reports::build_range_with_user(
             &app_state.pool,
@@ -1777,7 +1795,11 @@ async fn build_cancelled_absence_rows(
         });
         snapshots.push((id, version));
     }
-    rows.sort_by(|a, b| a.employee.cmp(&b.employee).then_with(|| a.from.cmp(&b.from)));
+    rows.sort_by(|a, b| {
+        a.employee
+            .cmp(&b.employee)
+            .then_with(|| a.from.cmp(&b.from))
+    });
     Ok((rows, snapshots))
 }
 
@@ -2023,10 +2045,10 @@ async fn build_absence_rows(
             String,
             String,
             &(String, String, usize, bool),
-        )> =
-            absences
-                .into_iter()
-                .filter_map(|(absence_id, start_date, end_date, slug, _stored_name, version)| {
+        )> = absences
+            .into_iter()
+            .filter_map(
+                |(absence_id, start_date, end_date, slug, _stored_name, version)| {
                     let category = selected
                         .iter()
                         .find(|(selected_slug, _, _, _)| selected_slug == &slug)?;
@@ -2034,8 +2056,9 @@ async fn build_absence_rows(
                     let row_to = end_date.min(to);
                     (row_from <= row_to)
                         .then_some((absence_id, row_from, row_to, slug, version, category))
-                })
-                .collect();
+                },
+            )
+            .collect();
         for (absence_id, row_from, row_to, slug, version, category) in printable {
             let (_, category_name, category_rank, tracks_medical_certificate) = category;
             // Marked whatever its own day count came to, because the document
@@ -2081,7 +2104,11 @@ async fn finish_absence_rows(
     late: &mut AbsenceRows,
     period_start: NaiveDate,
     check_earlier_reports: bool,
-) -> AppResult<(Vec<PayrollAbsenceRow>, Vec<PayrollAbsenceRow>, Vec<PayrollAbsenceRow>)> {
+) -> AppResult<(
+    Vec<PayrollAbsenceRow>,
+    Vec<PayrollAbsenceRow>,
+    Vec<PayrollAbsenceRow>,
+)> {
     let all = regular.rows.iter().chain(&late.rows);
     let Some(start) = all.clone().map(|row| row.3.from).min() else {
         return Ok((Vec::new(), Vec::new(), Vec::new()));
@@ -2115,7 +2142,9 @@ async fn finish_absence_rows(
         });
         if check_earlier_reports && may_use_quota {
             let first_week = crate::time_calc::week_monday(window_start);
-            let earlier = app_state.db.reports
+            let earlier = app_state
+                .db
+                .reports
                 .reported_payroll_absence_ranges(user_id, first_week, period_start)
                 .await?;
             let last_earlier_day = period_start.pred_opt().unwrap_or(period_start);
@@ -2367,8 +2396,16 @@ pub fn people_in_report(data: &PayrollReportData) -> usize {
             .iter()
             .map(|row| row.employee.as_str()),
     );
-    names.extend(data.cancelled_absence_rows.iter().map(|row| row.employee.as_str()));
-    names.extend(data.absence_review_rows.iter().map(|row| row.employee.as_str()));
+    names.extend(
+        data.cancelled_absence_rows
+            .iter()
+            .map(|row| row.employee.as_str()),
+    );
+    names.extend(
+        data.absence_review_rows
+            .iter()
+            .map(|row| row.employee.as_str()),
+    );
     names.len()
 }
 
@@ -2461,11 +2498,7 @@ mod tests {
             vec![(day(2029, 12, 28), day(2030, 1, 3))]
         );
         assert_eq!(
-            reportable_segments(
-                day(2029, 12, 28),
-                day(2030, 1, 3),
-                &["2030-01".to_string()]
-            ),
+            reportable_segments(day(2029, 12, 28), day(2030, 1, 3), &["2030-01".to_string()]),
             vec![(day(2029, 12, 28), day(2029, 12, 31))]
         );
     }

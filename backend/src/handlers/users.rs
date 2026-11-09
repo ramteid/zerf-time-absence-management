@@ -521,7 +521,9 @@ pub async fn update(
     // it. Sending both cannot produce a contradiction, because the count sent is
     // simply ignored in favour of the days.
     let requested_weekdays: Option<Vec<i16>> = match &body.work_weekdays {
-        Some(days) => Some(crate::repository::WorkScheduleDb::normalised_weekdays(days)?),
+        Some(days) => Some(crate::repository::WorkScheduleDb::normalised_weekdays(
+            days,
+        )?),
         None => None,
     };
     let effective_workdays_update: Option<i16> = if is_assistant_role(&new_role) {

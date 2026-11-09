@@ -815,7 +815,10 @@ impl ReportDb {
         snapshots: &[(i64, String)],
     ) -> AppResult<u64> {
         let ids: Vec<i64> = snapshots.iter().map(|(id, _)| *id).collect();
-        let versions: Vec<String> = snapshots.iter().map(|(_, version)| version.clone()).collect();
+        let versions: Vec<String> = snapshots
+            .iter()
+            .map(|(_, version)| version.clone())
+            .collect();
         let result = sqlx::query(
             "UPDATE absences AS a SET payroll_reported_period=$1 \
              WHERE (a.payroll_reported_period IS NULL OR a.payroll_reported_period = '0000-00') \
@@ -1161,12 +1164,11 @@ impl ReportDb {
             }
         }
         let ids: Vec<i64> = versions.keys().copied().collect();
-        let current: Vec<(i64, String)> = sqlx::query_as(
-            "SELECT id, xmin::text FROM absences WHERE id = ANY($1) FOR UPDATE",
-        )
-        .bind(&ids)
-        .fetch_all(&mut *tx)
-        .await?;
+        let current: Vec<(i64, String)> =
+            sqlx::query_as("SELECT id, xmin::text FROM absences WHERE id = ANY($1) FOR UPDATE")
+                .bind(&ids)
+                .fetch_all(&mut *tx)
+                .await?;
         for (id, version) in current {
             if versions.remove(&id) != Some(version.as_str()) {
                 return Ok(None);
@@ -1475,10 +1477,7 @@ impl ReportDb {
              WHERE start_date <= $1 \
              AND active=TRUE AND tracks_time=TRUE \
              ORDER BY last_name, first_name, id";
-        Ok(sqlx::query_as(SQL)
-            .bind(to)
-            .fetch_all(&self.pool)
-            .await?)
+        Ok(sqlx::query_as(SQL).bind(to).fetch_all(&self.pool).await?)
     }
 
     /// The date a user's flextime ledger starts at.

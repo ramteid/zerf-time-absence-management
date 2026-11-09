@@ -918,8 +918,7 @@ impl TimeEntryDb {
             || prev.category_id != entry.category_id;
         if let Some(limit) = work_stretch_limit {
             if content_changed && !is_work_stretch_exempt(&mut tx, entry_id).await? {
-                validate_work_stretch(&mut tx, prev.user_id, entry, Some(entry_id), limit)
-                    .await?;
+                validate_work_stretch(&mut tx, prev.user_id, entry, Some(entry_id), limit).await?;
             }
         }
         sqlx::query(

@@ -655,7 +655,11 @@ mod tests {
         while date <= window_end {
             let is_candidate = !holidays.contains(&date)
                 && (irregular || is_potential_workday(date, workdays_per_week));
-            if is_candidate && clamped.iter().any(|(start, end)| date >= *start && date <= *end) {
+            if is_candidate
+                && clamped
+                    .iter()
+                    .any(|(start, end)| date >= *start && date <= *end)
+            {
                 if irregular {
                     counted.push(date);
                 } else {
@@ -670,7 +674,6 @@ mod tests {
         }
         counted
     }
-
 
     #[test]
     fn week_monday_returns_monday_for_any_weekday() {
@@ -929,26 +932,17 @@ mod tests {
     #[test]
     fn work_stretch_extends_an_entry_that_touches_it() {
         // 08:00-14:00 already booked; 14:00-14:15 continues it without a pause.
-        assert_eq!(
-            stretch((t(14, 0), t(14, 15)), &[(t(8, 0), t(14, 0))]),
-            375
-        );
+        assert_eq!(stretch((t(14, 0), t(14, 15)), &[(t(8, 0), t(14, 0))]), 375);
         // The same stretch when the new entry comes first (the early service
         // booked after the main shift).
-        assert_eq!(
-            stretch((t(7, 45), t(8, 0)), &[(t(8, 0), t(14, 0))]),
-            375
-        );
+        assert_eq!(stretch((t(7, 45), t(8, 0)), &[(t(8, 0), t(14, 0))]), 375);
     }
 
     #[test]
     fn work_stretch_is_cut_by_a_pause_of_at_least_the_minimum_rest_break() {
         let morning = [(t(8, 0), t(14, 0))];
         // Exactly 15 minutes is a rest break: the new entry stands alone.
-        assert_eq!(
-            stretch((t(14, 15), t(15, 0)), &morning),
-            45
-        );
+        assert_eq!(stretch((t(14, 15), t(15, 0)), &morning), 45);
         assert_eq!(stretch((t(7, 0), t(7, 45)), &morning), 45);
     }
 
@@ -956,14 +950,8 @@ mod tests {
     fn work_stretch_runs_through_a_pause_shorter_than_the_minimum_rest_break() {
         // 14 minutes is no rest break, so the stretch is the whole 08:00-15:00,
         // pause included — leaving out one minute of it must not void the rule.
-        assert_eq!(
-            stretch((t(14, 14), t(15, 0)), &[(t(8, 0), t(14, 0))]),
-            420
-        );
-        assert_eq!(
-            stretch((t(7, 0), t(7, 46)), &[(t(8, 0), t(14, 0))]),
-            420
-        );
+        assert_eq!(stretch((t(14, 14), t(15, 0)), &[(t(8, 0), t(14, 0))]), 420);
+        assert_eq!(stretch((t(7, 0), t(7, 46)), &[(t(8, 0), t(14, 0))]), 420);
     }
 
     #[test]
@@ -988,10 +976,7 @@ mod tests {
             (t(8, 0), t(10, 0)),
             (t(10, 10), t(12, 0)),
         ];
-        assert_eq!(
-            stretch((t(14, 10), t(15, 0)), &existing),
-            420
-        );
+        assert_eq!(stretch((t(14, 10), t(15, 0)), &existing), 420);
     }
 
     #[test]
@@ -999,28 +984,19 @@ mod tests {
         // The 15-minute pause 10:00-10:15 ends the first stretch: only 10:15
         // onwards belongs to the new entry's.
         let existing = [(t(8, 0), t(10, 0)), (t(10, 15), t(12, 0))];
-        assert_eq!(
-            stretch((t(12, 5), t(13, 0)), &existing),
-            165
-        );
+        assert_eq!(stretch((t(12, 5), t(13, 0)), &existing), 165);
     }
 
     #[test]
     fn work_stretch_is_not_made_longer_by_a_long_stretch_elsewhere() {
         // 07:45-14:00 is already too long, but 15:00-16:00 has nothing to do
         // with it: only what the new entry belongs to is measured.
-        assert_eq!(
-            stretch((t(15, 0), t(16, 0)), &[(t(7, 45), t(14, 0))]),
-            60
-        );
+        assert_eq!(stretch((t(15, 0), t(16, 0)), &[(t(7, 45), t(14, 0))]), 60);
     }
 
     #[test]
     fn work_stretch_merges_an_overlapping_entry_defensively() {
-        assert_eq!(
-            stretch((t(11, 0), t(13, 0)), &[(t(8, 0), t(12, 0))]),
-            300
-        );
+        assert_eq!(stretch((t(11, 0), t(13, 0)), &[(t(8, 0), t(12, 0))]), 300);
     }
 
     #[test]
@@ -1029,15 +1005,9 @@ mod tests {
         let exactly_six_hours = NaiveTime::from_hms_opt(14, 0, 0).unwrap();
         let a_second_over = NaiveTime::from_hms_opt(14, 0, 1).unwrap();
         let almost_a_minute_over = NaiveTime::from_hms_opt(14, 0, 59).unwrap();
-        assert_eq!(
-            stretch((start, exactly_six_hours), &[]),
-            360
-        );
+        assert_eq!(stretch((start, exactly_six_hours), &[]), 360);
         assert_eq!(stretch((start, a_second_over), &[]), 361);
-        assert_eq!(
-            stretch((start, almost_a_minute_over), &[]),
-            361
-        );
+        assert_eq!(stretch((start, almost_a_minute_over), &[]), 361);
     }
 
     #[test]
@@ -1091,7 +1061,14 @@ mod tests {
         holidays: &HashSet<NaiveDate>,
         workdays_per_week: i16,
     ) -> f64 {
-        counted_workdays(ranges, window_start, window_end, holidays, workdays_per_week).len() as f64
+        counted_workdays(
+            ranges,
+            window_start,
+            window_end,
+            holidays,
+            workdays_per_week,
+        )
+        .len() as f64
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -1185,7 +1162,15 @@ mod tests {
             &holidays,
             5,
         );
-        assert_eq!(counted, vec![day(2026, 5, 11), day(2026, 5, 12), day(2026, 5, 13), day(2026, 5, 15)]);
+        assert_eq!(
+            counted,
+            vec![
+                day(2026, 5, 11),
+                day(2026, 5, 12),
+                day(2026, 5, 13),
+                day(2026, 5, 15)
+            ]
+        );
     }
 
     /// An irregular schedule has no quota to cap against, so every covered
@@ -1215,10 +1200,7 @@ mod tests {
             5,
         )
         .is_empty());
-        assert!(
-            counted_workdays(&[], day(2026, 5, 1), day(2026, 5, 31), &holidays, 5)
-                .is_empty()
-        );
+        assert!(counted_workdays(&[], day(2026, 5, 1), day(2026, 5, 31), &holidays, 5).is_empty());
     }
 
     /// Whatever the inputs, every day `counted_workdays` returns is a real one:
@@ -1248,11 +1230,17 @@ mod tests {
                     assert!(!holidays.contains(date), "never a holiday");
                     assert!(is_potential_workday(*date, quota), "a potential workday");
                     assert!(
-                        ranges.iter().any(|(start, end)| date >= start && date <= end),
+                        ranges
+                            .iter()
+                            .any(|(start, end)| date >= start && date <= end),
                         "covered by a range"
                     );
                 }
-                for monday in counted.iter().map(|d| week_monday(*d)).collect::<HashSet<_>>() {
+                for monday in counted
+                    .iter()
+                    .map(|d| week_monday(*d))
+                    .collect::<HashSet<_>>()
+                {
                     let in_week = counted
                         .iter()
                         .filter(|date| week_monday(**date) == monday)
@@ -1306,7 +1294,11 @@ mod tests {
             monday + Duration::days(6),
             &HashSet::new(),
         );
-        assert_eq!(counted, vec![2.0, 1.0], "Monday and Tuesday, then Wednesday");
+        assert_eq!(
+            counted,
+            vec![2.0, 1.0],
+            "Monday and Tuesday, then Wednesday"
+        );
         assert_eq!(counted.iter().sum::<f64>(), 3.0, "three days, not four");
     }
 
@@ -1461,13 +1453,7 @@ mod tests {
         );
         // And the very first day of the contract does ask.
         assert_eq!(
-            scheduled_day_minutes(
-                &always(sabine()),
-                started_later,
-                started_later,
-                false,
-                23.4
-            ),
+            scheduled_day_minutes(&always(sabine()), started_later, started_later, false, 23.4),
             351
         );
     }
@@ -1537,7 +1523,6 @@ mod tests {
         );
     }
 
-
     fn sabine() -> WorkSchedule {
         WorkSchedule::fixed(&[MON, TUE, WED, THU]).unwrap()
     }
@@ -1558,7 +1543,10 @@ mod tests {
         )
     }
     fn span(monday: NaiveDate, offsets: &[i64]) -> HashSet<NaiveDate> {
-        offsets.iter().map(|o| monday + Duration::days(*o)).collect()
+        offsets
+            .iter()
+            .map(|o| monday + Duration::days(*o))
+            .collect()
     }
     /// Minutes a span asks for: the per-day rule summed. Every report loop
     /// does exactly this with its own extra reasons to excuse a day, so this
@@ -1626,7 +1614,10 @@ mod tests {
         assert!(WorkSchedule::fixed(&[]).is_none());
         assert!(WorkSchedule::fixed(&[0]).is_none());
         assert!(WorkSchedule::fixed(&[8]).is_none());
-        assert!(WorkSchedule::fixed(&[6, 7]).is_none(), "no weekend-only contract");
+        assert!(
+            WorkSchedule::fixed(&[6, 7]).is_none(),
+            "no weekend-only contract"
+        );
         assert!(WorkSchedule::fixed(&[0, 8, 9]).is_none());
         assert!(WorkSchedule::fixed(&[MON]).is_some());
     }
@@ -1679,7 +1670,11 @@ mod tests {
         // working days" made all of that leave free.
         let irregular = WorkSchedule::without_fixed_days(0);
         assert_eq!(irregular.days_per_week(), 0, "no target pool");
-        assert_eq!(irregular.day_minutes(40.0), 0, "and so no day is worth anything");
+        assert_eq!(
+            irregular.day_minutes(40.0),
+            0,
+            "and so no day is worth anything"
+        );
         for offset in 0..7i64 {
             assert!(
                 irregular.covers(day(2026, 5, 4) + Duration::days(offset)),
@@ -1691,7 +1686,11 @@ mod tests {
 
     #[test]
     fn only_a_contract_without_recorded_days_is_capped() {
-        assert_eq!(sabine().weekly_leave_cap(), None, "a pattern needs no quota");
+        assert_eq!(
+            sabine().weekly_leave_cap(),
+            None,
+            "a pattern needs no quota"
+        );
         assert_eq!(full_time().weekly_leave_cap(), None);
         for count in 1..=5i16 {
             assert_eq!(
@@ -1727,13 +1726,8 @@ mod tests {
                         window_end,
                         &holidays,
                     );
-                    let today = counted_workdays(
-                        &[(from, to)],
-                        window_start,
-                        window_end,
-                        &holidays,
-                        count,
-                    );
+                    let today =
+                        counted_workdays(&[(from, to)], window_start, window_end, &holidays, count);
                     assert_eq!(charged, today, "{count} days a week, {from}..{to}");
                 }
             }
@@ -1824,7 +1818,10 @@ mod tests {
         let assistant = WorkSchedule::without_fixed_days(7);
         assert!(!assistant.has_fixed_days());
         assert_eq!(assistant.days_per_week(), 7);
-        assert!(assistant.covers(monday + Duration::days(6)), "Sunday counts");
+        assert!(
+            assistant.covers(monday + Duration::days(6)),
+            "Sunday counts"
+        );
 
         let five = WorkSchedule::without_fixed_days(5);
         assert_eq!(five.days_per_week(), 5);
@@ -1969,15 +1966,29 @@ mod tests {
         let monday = day(2026, 5, 4);
         let whole_week = [(monday, monday + Duration::days(6))];
         let hers = scheduled_leave_days(
-            &always(sabine()), &whole_week, hired_long_ago(), monday,
-            monday + Duration::days(6), &HashSet::new());
+            &always(sabine()),
+            &whole_week,
+            hired_long_ago(),
+            monday,
+            monday + Duration::days(6),
+            &HashSet::new(),
+        );
         let his = scheduled_leave_days(
-            &always(orell()), &whole_week, hired_long_ago(), monday,
-            monday + Duration::days(6), &HashSet::new());
+            &always(orell()),
+            &whole_week,
+            hired_long_ago(),
+            monday,
+            monday + Duration::days(6),
+            &HashSet::new(),
+        );
         assert_eq!(hers.len(), 4);
         assert_eq!(his.len(), 4);
         assert_eq!(hers[0], monday, "her week starts on the Monday");
-        assert_eq!(his[0], monday + Duration::days(1), "his starts on the Tuesday");
+        assert_eq!(
+            his[0],
+            monday + Duration::days(1),
+            "his starts on the Tuesday"
+        );
         assert_ne!(hers, his);
     }
 
@@ -2020,7 +2031,11 @@ mod tests {
         );
         assert_eq!(
             charged,
-            vec![monday, monday + Duration::days(2), monday + Duration::days(3)],
+            vec![
+                monday,
+                monday + Duration::days(2),
+                monday + Duration::days(3)
+            ],
             "Tuesday is a holiday, so three of her four days are spent"
         );
         assert_eq!(target(&sabine(), monday, &[1], &[0, 2, 3], 23.4), 0);
@@ -2042,7 +2057,13 @@ mod tests {
         let start = day(2026, 7, 1);
         assert_eq!(
             week_target_min(
-                &always(sabine()), monday, start, &HashSet::new(), &HashSet::new(), 23.4),
+                &always(sabine()),
+                monday,
+                start,
+                &HashSet::new(),
+                &HashSet::new(),
+                23.4
+            ),
             2 * 351,
             "Wednesday and Thursday are the working days she has that week"
         );
@@ -2052,8 +2073,13 @@ mod tests {
     fn a_scheduled_week_entirely_before_the_start_date_is_empty() {
         assert_eq!(
             week_target_min(
-                &always(sabine()), day(2026, 6, 22), day(2026, 7, 1),
-                &HashSet::new(), &HashSet::new(), 23.4),
+                &always(sabine()),
+                day(2026, 6, 22),
+                day(2026, 7, 1),
+                &HashSet::new(),
+                &HashSet::new(),
+                23.4
+            ),
             0
         );
     }
@@ -2081,13 +2107,29 @@ mod tests {
         let ranges = [(day(2025, 12, 29), day(2026, 1, 2))];
         let holidays = HashSet::from([day(2026, 1, 1)]);
         let in_2025 = scheduled_leave_days(
-            &always(sabine()), &ranges, hired_long_ago(),
-            day(2025, 1, 1), day(2025, 12, 31), &holidays);
+            &always(sabine()),
+            &ranges,
+            hired_long_ago(),
+            day(2025, 1, 1),
+            day(2025, 12, 31),
+            &holidays,
+        );
         let in_2026 = scheduled_leave_days(
-            &always(sabine()), &ranges, hired_long_ago(),
-            day(2026, 1, 1), day(2026, 12, 31), &holidays);
-        assert_eq!(in_2025, vec![day(2025, 12, 29), day(2025, 12, 30), day(2025, 12, 31)]);
-        assert!(in_2026.is_empty(), "her Thursday that week is New Year's Day");
+            &always(sabine()),
+            &ranges,
+            hired_long_ago(),
+            day(2026, 1, 1),
+            day(2026, 12, 31),
+            &holidays,
+        );
+        assert_eq!(
+            in_2025,
+            vec![day(2025, 12, 29), day(2025, 12, 30), day(2025, 12, 31)]
+        );
+        assert!(
+            in_2026.is_empty(),
+            "her Thursday that week is New Year's Day"
+        );
         assert_eq!(in_2025.len() + in_2026.len(), 3);
     }
 
@@ -2099,11 +2141,21 @@ mod tests {
         let ranges = [(day(2025, 12, 29), day(2026, 1, 2))];
         let holidays = HashSet::from([day(2026, 1, 1)]);
         let in_2025 = scheduled_leave_days(
-            &always(orell()), &ranges, hired_long_ago(),
-            day(2025, 1, 1), day(2025, 12, 31), &holidays);
+            &always(orell()),
+            &ranges,
+            hired_long_ago(),
+            day(2025, 1, 1),
+            day(2025, 12, 31),
+            &holidays,
+        );
         let in_2026 = scheduled_leave_days(
-            &always(orell()), &ranges, hired_long_ago(),
-            day(2026, 1, 1), day(2026, 12, 31), &holidays);
+            &always(orell()),
+            &ranges,
+            hired_long_ago(),
+            day(2026, 1, 1),
+            day(2026, 12, 31),
+            &holidays,
+        );
         assert_eq!(in_2025, vec![day(2025, 12, 30), day(2025, 12, 31)]);
         assert_eq!(in_2026, vec![day(2026, 1, 2)]);
         assert_eq!(in_2025.len() + in_2026.len(), 3);
@@ -2118,17 +2170,37 @@ mod tests {
         let new_year = (day(2026, 1, 1), day(2026, 1, 2));
         let both = [old_year, new_year];
         let apart_2025 = scheduled_leave_days(
-            &always(sabine()), &[old_year], hired_long_ago(),
-            day(2025, 1, 1), day(2025, 12, 31), &HashSet::new());
+            &always(sabine()),
+            &[old_year],
+            hired_long_ago(),
+            day(2025, 1, 1),
+            day(2025, 12, 31),
+            &HashSet::new(),
+        );
         let apart_2026 = scheduled_leave_days(
-            &always(sabine()), &[new_year], hired_long_ago(),
-            day(2026, 1, 1), day(2026, 12, 31), &HashSet::new());
+            &always(sabine()),
+            &[new_year],
+            hired_long_ago(),
+            day(2026, 1, 1),
+            day(2026, 12, 31),
+            &HashSet::new(),
+        );
         let together_2025 = scheduled_leave_days(
-            &always(sabine()), &both, hired_long_ago(),
-            day(2025, 1, 1), day(2025, 12, 31), &HashSet::new());
+            &always(sabine()),
+            &both,
+            hired_long_ago(),
+            day(2025, 1, 1),
+            day(2025, 12, 31),
+            &HashSet::new(),
+        );
         let together_2026 = scheduled_leave_days(
-            &always(sabine()), &both, hired_long_ago(),
-            day(2026, 1, 1), day(2026, 12, 31), &HashSet::new());
+            &always(sabine()),
+            &both,
+            hired_long_ago(),
+            day(2026, 1, 1),
+            day(2026, 12, 31),
+            &HashSet::new(),
+        );
         assert_eq!(apart_2025, together_2025);
         assert_eq!(apart_2026, together_2026);
         // Monday and Tuesday in the old year, Thursday in the new one. The
@@ -2150,15 +2222,28 @@ mod tests {
         ];
         let no_holidays = HashSet::new();
         let year = scheduled_leave_days(
-            &always(sabine()), &ranges, hired_long_ago(),
-            day(2026, 1, 1), day(2026, 12, 31), &no_holidays).len();
+            &always(sabine()),
+            &ranges,
+            hired_long_ago(),
+            day(2026, 1, 1),
+            day(2026, 12, 31),
+            &no_holidays,
+        )
+        .len();
         let months: usize = (1..=12u32)
             .map(|month| {
                 let first = NaiveDate::from_ymd_opt(2026, month, 1).unwrap();
-                let last = NaiveDate::from_ymd_opt(
-                    2026, month, last_day_of_month(2026, month)).unwrap();
+                let last =
+                    NaiveDate::from_ymd_opt(2026, month, last_day_of_month(2026, month)).unwrap();
                 scheduled_leave_days(
-                    &always(sabine()), &ranges, hired_long_ago(), first, last, &no_holidays).len()
+                    &always(sabine()),
+                    &ranges,
+                    hired_long_ago(),
+                    first,
+                    last,
+                    &no_holidays,
+                )
+                .len()
             })
             .sum();
         assert_eq!(year, 11, "the Friday inside her range is not her day");
@@ -2170,14 +2255,32 @@ mod tests {
         let ranges = [(day(2026, 8, 24), day(2026, 9, 11))];
         let no_holidays = HashSet::new();
         let year = scheduled_leave_days(
-            &always(orell()), &ranges, hired_long_ago(),
-            day(2026, 1, 1), day(2026, 12, 31), &no_holidays).len();
+            &always(orell()),
+            &ranges,
+            hired_long_ago(),
+            day(2026, 1, 1),
+            day(2026, 12, 31),
+            &no_holidays,
+        )
+        .len();
         let august = scheduled_leave_days(
-            &always(orell()), &ranges, hired_long_ago(),
-            day(2026, 8, 1), day(2026, 8, 31), &no_holidays).len();
+            &always(orell()),
+            &ranges,
+            hired_long_ago(),
+            day(2026, 8, 1),
+            day(2026, 8, 31),
+            &no_holidays,
+        )
+        .len();
         let september = scheduled_leave_days(
-            &always(orell()), &ranges, hired_long_ago(),
-            day(2026, 9, 1), day(2026, 9, 30), &no_holidays).len();
+            &always(orell()),
+            &ranges,
+            hired_long_ago(),
+            day(2026, 9, 1),
+            day(2026, 9, 30),
+            &no_holidays,
+        )
+        .len();
         assert_eq!(year, 12);
         assert_eq!(august, 4, "his Mondays in August cost him nothing");
         assert_eq!(august + september, year);
@@ -2188,9 +2291,13 @@ mod tests {
     #[test]
     fn a_week_never_costs_more_leave_than_the_contract_has_days() {
         let holidays = HashSet::from([day(2026, 1, 1), day(2026, 4, 3), day(2026, 5, 1)]);
-        for schedule in [sabine(), orell(), full_time(),
-                         WorkSchedule::fixed(&[WED]).unwrap(),
-                         WorkSchedule::fixed(&[MON, FRI]).unwrap()] {
+        for schedule in [
+            sabine(),
+            orell(),
+            full_time(),
+            WorkSchedule::fixed(&[WED]).unwrap(),
+            WorkSchedule::fixed(&[MON, FRI]).unwrap(),
+        ] {
             for start_offset in 0..120i64 {
                 for length in 0..16i64 {
                     let from = day(2026, 1, 1) + Duration::days(start_offset);
@@ -2220,8 +2327,12 @@ mod tests {
     #[test]
     fn a_weeks_target_never_exceeds_the_contract_and_never_goes_negative() {
         let monday = day(2026, 5, 4);
-        for schedule in [sabine(), orell(), full_time(),
-                         WorkSchedule::fixed(&[TUE, THU]).unwrap()] {
+        for schedule in [
+            sabine(),
+            orell(),
+            full_time(),
+            WorkSchedule::fixed(&[TUE, THU]).unwrap(),
+        ] {
             let full = i64::from(schedule.days_per_week()) * schedule.day_minutes(23.4);
             for holidays in 0..=5i64 {
                 for absences in 0..=7i64 {
@@ -2255,8 +2366,13 @@ mod tests {
                     .map(|o| (monday + Duration::days(*o), monday + Duration::days(*o)))
                     .collect();
                 let charged = scheduled_leave_days(
-                    &always(schedule), &ranges, hired_long_ago(), monday,
-                    monday + Duration::days(6), &HashSet::new());
+                    &always(schedule),
+                    &ranges,
+                    hired_long_ago(),
+                    monday,
+                    monday + Duration::days(6),
+                    &HashSet::new(),
+                );
                 let value = target(&schedule, monday, &[], &offsets, 23.4);
                 assert_eq!(
                     value,
@@ -2271,8 +2387,7 @@ mod tests {
 
     #[test]
     fn a_person_without_recorded_days_always_gets_the_fallback() {
-        let history = WorkScheduleHistory::without_history(
-            WorkSchedule::without_fixed_days(7));
+        let history = WorkScheduleHistory::without_history(WorkSchedule::without_fixed_days(7));
         assert!(history.is_empty());
         assert!(!history.on(day(2026, 5, 4)).has_fixed_days());
         assert_eq!(history.on(day(2026, 5, 4)).days_per_week(), 7);
@@ -2285,7 +2400,11 @@ mod tests {
             WorkSchedule::without_fixed_days(5),
         );
         assert!(!history.on(day(2026, 6, 30)).has_fixed_days());
-        assert_eq!(history.on(day(2026, 7, 1)), sabine(), "the first day counts");
+        assert_eq!(
+            history.on(day(2026, 7, 1)),
+            sabine(),
+            "the first day counts"
+        );
     }
 
     #[test]
@@ -2319,11 +2438,21 @@ mod tests {
         );
         let january = day(2027, 1, 4); // a Monday
         let target_before = week_target_min(
-            &before, january, day(2026, 7, 1),
-            &HashSet::new(), &HashSet::new(), 23.4);
+            &before,
+            january,
+            day(2026, 7, 1),
+            &HashSet::new(),
+            &HashSet::new(),
+            23.4,
+        );
         let target_after = week_target_min(
-            &after, january, day(2026, 7, 1),
-            &HashSet::new(), &HashSet::new(), 23.4);
+            &after,
+            january,
+            day(2026, 7, 1),
+            &HashSet::new(),
+            &HashSet::new(),
+            23.4,
+        );
         assert_eq!(target_before, 4 * 351);
         assert_eq!(
             target_after, target_before,
@@ -2369,15 +2498,27 @@ mod tests {
         let monday = day(2026, 5, 4);
         let history = WorkScheduleHistory::new(
             vec![
-                (day(2020, 1, 1), WorkSchedule::fixed(&[MON, TUE, WED]).unwrap()),
+                (
+                    day(2020, 1, 1),
+                    WorkSchedule::fixed(&[MON, TUE, WED]).unwrap(),
+                ),
                 (day(2026, 5, 6), full_time()),
             ],
             WorkSchedule::without_fixed_days(5),
         );
         let target = week_target_min(
-            &history, monday, hired_long_ago(),
-            &HashSet::new(), &HashSet::new(), 23.4);
-        assert_eq!(target, 2 * 468 + 3 * 281, "each day is worth what its own contract said");
+            &history,
+            monday,
+            hired_long_ago(),
+            &HashSet::new(),
+            &HashSet::new(),
+            23.4,
+        );
+        assert_eq!(
+            target,
+            2 * 468 + 3 * 281,
+            "each day is worth what its own contract said"
+        );
         assert_ne!(target, 3 * 468, "not three days of the old contract");
     }
 
@@ -2389,7 +2530,10 @@ mod tests {
         let monday = day(2026, 5, 4);
         let history = WorkScheduleHistory::new(
             vec![
-                (day(2020, 1, 1), WorkSchedule::fixed(&[MON, TUE, WED]).unwrap()),
+                (
+                    day(2020, 1, 1),
+                    WorkSchedule::fixed(&[MON, TUE, WED]).unwrap(),
+                ),
                 (day(2026, 5, 6), full_time()),
             ],
             WorkSchedule::without_fixed_days(5),
@@ -2444,11 +2588,23 @@ mod tests {
     fn an_empty_or_inverted_request_charges_nothing() {
         let monday = day(2026, 5, 4);
         assert!(scheduled_leave_days(
-            &always(sabine()), &[], hired_long_ago(), monday,
-            monday + Duration::days(6), &HashSet::new()).is_empty());
+            &always(sabine()),
+            &[],
+            hired_long_ago(),
+            monday,
+            monday + Duration::days(6),
+            &HashSet::new()
+        )
+        .is_empty());
         assert!(scheduled_leave_days(
-            &always(sabine()), &[(monday, monday)], hired_long_ago(),
-            monday + Duration::days(6), monday, &HashSet::new()).is_empty());
+            &always(sabine()),
+            &[(monday, monday)],
+            hired_long_ago(),
+            monday + Duration::days(6),
+            monday,
+            &HashSet::new()
+        )
+        .is_empty());
     }
 
     #[test]

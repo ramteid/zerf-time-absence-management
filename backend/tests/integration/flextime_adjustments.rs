@@ -193,7 +193,11 @@ async fn a_correction_moves_the_balance_only_from_its_date_onwards() {
             &json!({}),
         )
         .await;
-    assert_eq!(st, StatusCode::BAD_REQUEST, "no double cancellation: {body}");
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "no double cancellation: {body}"
+    );
     let reversal_id = id(&reversal);
     let (st, body) = admin
         .post(
@@ -267,7 +271,11 @@ async fn only_admins_may_book_adjustments() {
             &json!({}),
         )
         .await;
-    assert_eq!(st, StatusCode::FORBIDDEN, "employee cannot cancel a booking");
+    assert_eq!(
+        st,
+        StatusCode::FORBIDDEN,
+        "employee cannot cancel a booking"
+    );
 
     app.cleanup().await;
 }
@@ -330,7 +338,11 @@ async fn adjustment_input_is_validated() {
             &json!({"effective_date": today_iso, "minutes": 60, "reason": "x".repeat(501)}),
         )
         .await;
-    assert_eq!(st, StatusCode::BAD_REQUEST, "over-long note rejected: {body}");
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "over-long note rejected: {body}"
+    );
 
     app.cleanup().await;
 }
@@ -606,7 +618,10 @@ async fn month_rows_and_the_day_ledger_agree_across_months() {
         .format("%Y-%m-%d")
         .to_string();
     let days = flextime_days(&admin, user_id, &day_before_iso, &correction_iso).await;
-    assert_eq!(days[0]["cumulative_min"], 600, "untouched before the booking");
+    assert_eq!(
+        days[0]["cumulative_min"], 600,
+        "untouched before the booking"
+    );
     assert_eq!(days[1]["adjustment_min"], -120);
     assert_eq!(days[1]["cumulative_min"], 480);
 
@@ -732,7 +747,11 @@ async fn migration_043_backfills_existing_carry_in_balances() {
 
     // Two rows, for the two users who carried a balance. The admin carries 0,
     // which holds no information, so they get no row.
-    assert_eq!(rows.len(), 2, "only non-zero balances are migrated: {rows:?}");
+    assert_eq!(
+        rows.len(),
+        2,
+        "only non-zero balances are migrated: {rows:?}"
+    );
     for (_, effective_date, _, kind, created_by) in &rows {
         assert_eq!(kind, "opening_balance");
         assert_eq!(

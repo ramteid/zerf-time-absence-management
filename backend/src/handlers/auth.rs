@@ -152,10 +152,9 @@ pub async fn logout(State(app_state): State<AppState>, req: Request) -> AppResul
         .get(header::COOKIE)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if let Some(token) = extract_token_from_cookie_str_secure(
-        cookie_header,
-        app_state.cfg.secure_cookies,
-    ) {
+    if let Some(token) =
+        extract_token_from_cookie_str_secure(cookie_header, app_state.cfg.secure_cookies)
+    {
         // Per security policy: on logout, all sessions of the affected user are
         // deleted — not just the current one — so a user logging out from one
         // device invalidates all other open sessions too.
@@ -191,11 +190,9 @@ pub async fn me(
         .get(header::COOKIE)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    let raw_token = extract_token_from_cookie_str_secure(
-        cookie_header,
-        app_state.cfg.secure_cookies,
-    )
-    .unwrap_or_default();
+    let raw_token =
+        extract_token_from_cookie_str_secure(cookie_header, app_state.cfg.secure_cookies)
+            .unwrap_or_default();
     let csrf_token = app_state
         .db
         .sessions
@@ -362,11 +359,9 @@ pub async fn change_password(
         .get(header::COOKIE)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    let raw_token = extract_token_from_cookie_str_secure(
-        cookie_header,
-        app_state.cfg.secure_cookies,
-    )
-    .ok_or(AppError::Unauthorized)?;
+    let raw_token =
+        extract_token_from_cookie_str_secure(cookie_header, app_state.cfg.secure_cookies)
+            .ok_or(AppError::Unauthorized)?;
     let (_, raw_body) = req.into_parts();
     let body_bytes = axum::body::to_bytes(raw_body, 1024 * 1024)
         .await

@@ -733,7 +733,15 @@ mod tests {
     fn month_summary(rows: &[PayrollLateEntryRow]) -> Vec<(String, i32, u32, i64, i64)> {
         sum_late_entries_per_month(rows)
             .into_iter()
-            .map(|m| (m.employee.to_string(), m.year, m.month, m.minutes, m.total_minutes))
+            .map(|m| {
+                (
+                    m.employee.to_string(),
+                    m.year,
+                    m.month,
+                    m.minutes,
+                    m.total_minutes,
+                )
+            })
             .collect()
     }
 

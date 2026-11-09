@@ -166,7 +166,6 @@ impl AbsenceDb {
             .await
     }
 
-
     /// Sum of workdays for approved (and cancellation_pending) absences whose
     /// category matches `category_id`, clamped to the [from, to] window. Used
     /// by team reports for kind-specific totals (e.g. "vacation taken" =
@@ -208,7 +207,8 @@ impl AbsenceDb {
         .bind(to)
         .fetch_all(&self.pool)
         .await?;
-        let schedule = crate::services::work_schedules::contract_schedule(&self.pool, user_id).await?;
+        let schedule =
+            crate::services::work_schedules::contract_schedule(&self.pool, user_id).await?;
         let holidays = self.holidays_set(from, to).await?;
         // Union counting with weekly cap to avoid double count when separate ranges fall in same week.
         let clamped: Vec<(NaiveDate, NaiveDate)> = ranges
@@ -219,11 +219,7 @@ impl AbsenceDb {
         // Delegate to shared counting logic (union).
         Ok(
             crate::services::absence_balance::workdays_for_ranges_in_window_with_calendar(
-                &clamped,
-                from,
-                to,
-                &holidays,
-                &schedule,
+                &clamped, from, to, &holidays, &schedule,
             ),
         )
     }
@@ -249,7 +245,8 @@ impl AbsenceDb {
         .bind(to)
         .fetch_all(&self.pool)
         .await?;
-        let schedule = crate::services::work_schedules::contract_schedule(&self.pool, user_id).await?;
+        let schedule =
+            crate::services::work_schedules::contract_schedule(&self.pool, user_id).await?;
         let holidays = self.holidays_set(from, to).await?;
         let clamped: Vec<(NaiveDate, NaiveDate)> = ranges
             .into_iter()
@@ -258,11 +255,7 @@ impl AbsenceDb {
             .collect();
         Ok(
             crate::services::absence_balance::workdays_for_ranges_in_window_with_calendar(
-                &clamped,
-                from,
-                to,
-                &holidays,
-                &schedule,
+                &clamped, from, to, &holidays, &schedule,
             ),
         )
     }

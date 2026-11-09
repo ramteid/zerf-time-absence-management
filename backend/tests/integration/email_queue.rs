@@ -128,7 +128,14 @@ async fn failed_delivery_keeps_the_row_queued_and_records_the_error() {
     app.state
         .db
         .email_queue
-        .enqueue("someone@example.com", "Someone", "test", "subject", "body", None)
+        .enqueue(
+            "someone@example.com",
+            "Someone",
+            "test",
+            "subject",
+            "body",
+            None,
+        )
         .await
         .expect("enqueue");
 
@@ -154,7 +161,14 @@ async fn disabling_smtp_leaves_queued_emails_untouched() {
     app.state
         .db
         .email_queue
-        .enqueue("someone@example.com", "Someone", "test", "subject", "body", None)
+        .enqueue(
+            "someone@example.com",
+            "Someone",
+            "test",
+            "subject",
+            "body",
+            None,
+        )
         .await
         .expect("enqueue");
 
@@ -182,7 +196,14 @@ async fn a_previously_failed_row_is_demoted_behind_a_fresh_one() {
     app.state
         .db
         .email_queue
-        .enqueue("stuck@example.com", "Stuck", "test", "subject", "body", None)
+        .enqueue(
+            "stuck@example.com",
+            "Stuck",
+            "test",
+            "subject",
+            "body",
+            None,
+        )
         .await
         .expect("enqueue stuck row");
     let stuck_id = app.state.db.email_queue.list_pending(1).await.unwrap()[0].id;
@@ -194,7 +215,14 @@ async fn a_previously_failed_row_is_demoted_behind_a_fresh_one() {
     app.state
         .db
         .email_queue
-        .enqueue("fresh@example.com", "Fresh", "test", "subject", "body", None)
+        .enqueue(
+            "fresh@example.com",
+            "Fresh",
+            "test",
+            "subject",
+            "body",
+            None,
+        )
         .await
         .expect("enqueue fresh row");
 
@@ -224,7 +252,14 @@ async fn delete_with_retry_removes_the_row() {
     app.state
         .db
         .email_queue
-        .enqueue("someone@example.com", "Someone", "test", "subject", "body", None)
+        .enqueue(
+            "someone@example.com",
+            "Someone",
+            "test",
+            "subject",
+            "body",
+            None,
+        )
         .await
         .expect("enqueue");
     let id = app.state.db.email_queue.list_pending(1).await.unwrap()[0].id;
@@ -252,7 +287,14 @@ async fn repeated_failures_trip_the_circuit_breaker_and_stop_further_attempts() 
     app.state
         .db
         .email_queue
-        .enqueue("someone@example.com", "Someone", "test", "subject", "body", None)
+        .enqueue(
+            "someone@example.com",
+            "Someone",
+            "test",
+            "subject",
+            "body",
+            None,
+        )
         .await
         .expect("enqueue");
     let id = app.state.db.email_queue.list_pending(1).await.unwrap()[0].id;
@@ -384,7 +426,14 @@ async fn a_failing_delivery_is_reported_at_the_first_and_the_persistent_attempt_
     app.state
         .db
         .email_queue
-        .enqueue("stuck@example.com", "Stuck", "test", "subject", "body", None)
+        .enqueue(
+            "stuck@example.com",
+            "Stuck",
+            "test",
+            "subject",
+            "body",
+            None,
+        )
         .await
         .expect("enqueue");
     let id = app.state.db.email_queue.list_pending(1).await.unwrap()[0].id;
@@ -443,7 +492,14 @@ async fn a_failure_with_a_new_reason_is_reported_again() {
     app.state
         .db
         .email_queue
-        .enqueue("someone@example.com", "Someone", "test", "subject", "body", None)
+        .enqueue(
+            "someone@example.com",
+            "Someone",
+            "test",
+            "subject",
+            "body",
+            None,
+        )
         .await
         .expect("enqueue");
     let id = app.state.db.email_queue.list_pending(1).await.unwrap()[0].id;
@@ -484,7 +540,14 @@ async fn a_failed_alert_mail_is_not_reported_again() {
     app.state
         .db
         .email_queue
-        .enqueue("someone@example.com", "Someone", "test", "subject", "body", None)
+        .enqueue(
+            "someone@example.com",
+            "Someone",
+            "test",
+            "subject",
+            "body",
+            None,
+        )
         .await
         .expect("enqueue");
 
@@ -643,7 +706,10 @@ async fn absence_approval_cancellation_and_revoke_are_answered_by_whoever_acted(
     let revoked_id = request_vacation(&emp, 42).await;
     for absence_id in [cancelled_id, kept_id, revoked_id] {
         let (st, _) = lead
-            .post(&format!("/api/v1/absences/{absence_id}/approve"), &json!({}))
+            .post(
+                &format!("/api/v1/absences/{absence_id}/approve"),
+                &json!({}),
+            )
             .await;
         assert_eq!(st, StatusCode::OK, "approve vacation");
     }
@@ -689,7 +755,11 @@ async fn absence_approval_cancellation_and_revoke_are_answered_by_whoever_acted(
     }
     let cancellation_requests =
         queued_mail(&app, "lead-r@example.com", "absence_cancellation_requested").await;
-    assert_eq!(cancellation_requests.len(), 2, "one per cancellation request");
+    assert_eq!(
+        cancellation_requests.len(),
+        2,
+        "one per cancellation request"
+    );
     for mail in &cancellation_requests {
         assert_answered_by(mail, "emp-r@example.com");
     }
@@ -852,7 +922,12 @@ async fn automatic_mail_ends_with_the_do_not_reply_notice() {
     app.state
         .db
         .error_queue
-        .enqueue(Some("reply_to_test"), "Boom", Some("something broke"), "app")
+        .enqueue(
+            Some("reply_to_test"),
+            "Boom",
+            Some("something broke"),
+            "app",
+        )
         .await
         .expect("enqueue error");
     zerf::background::error_notifications::process_pending(&app.state).await;

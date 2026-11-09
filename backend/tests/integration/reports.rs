@@ -2289,7 +2289,6 @@ async fn report_counts_submitted_weeks_of_the_shown_period() {
     app.cleanup().await;
 }
 
-
 /// The week being worked is not due before its Friday. The employee's own
 /// month view must not report weeks missing while they are still working the
 /// only one there is — the dashboard showed "weeks missing" every Monday to
@@ -2389,8 +2388,8 @@ async fn a_finished_month_is_settled_by_its_own_days() {
 
     let today = reference_date();
     // The month that has just ended, and the week carrying its last day.
-    let this_month_start = NaiveDate::from_ymd_opt(today.year(), today.month(), 1)
-        .expect("first of this month");
+    let this_month_start =
+        NaiveDate::from_ymd_opt(today.year(), today.month(), 1).expect("first of this month");
     let last_month_end = this_month_start - Duration::days(1);
     let last_month = last_month_end.format("%Y-%m").to_string();
     let last_month_start =
@@ -2431,7 +2430,11 @@ async fn a_finished_month_is_settled_by_its_own_days() {
             &json!({"ids": [entry_id]}),
         )
         .await;
-    assert_eq!(status, StatusCode::OK, "approve the month's last day: {body}");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "approve the month's last day: {body}"
+    );
 
     let (status, report) = employee
         .get(&format!("/api/v1/reports/month?month={last_month}"))
@@ -2461,7 +2464,11 @@ async fn a_finished_month_is_settled_by_its_own_days() {
             }),
         )
         .await;
-    assert_eq!(status, StatusCode::OK, "book a draft in the new month: {body}");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "book a draft in the new month: {body}"
+    );
     create_and_submit_entry(
         &employee,
         &(this_month_start + Duration::days(1))

@@ -103,8 +103,11 @@ impl WorkScheduleDb {
         let entries = rows
             .iter()
             .filter_map(|row| {
-                let days: Option<Vec<u8>> =
-                    row.weekdays.iter().map(|day| u8::try_from(*day).ok()).collect();
+                let days: Option<Vec<u8>> = row
+                    .weekdays
+                    .iter()
+                    .map(|day| u8::try_from(*day).ok())
+                    .collect();
                 days.as_deref()
                     .and_then(WorkSchedule::fixed)
                     .map(|schedule| (row.valid_from, schedule))
@@ -366,7 +369,9 @@ impl WorkScheduleDb {
     ) -> AppResult<WeeklyHoursHistory> {
         let rows = self.list_hours_for_user(user_id).await?;
         Ok(WeeklyHoursHistory::new(
-            rows.into_iter().map(|row| (row.valid_from, row.weekly_hours)).collect(),
+            rows.into_iter()
+                .map(|row| (row.valid_from, row.weekly_hours))
+                .collect(),
             current_hours,
         ))
     }

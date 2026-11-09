@@ -50,7 +50,11 @@ pub(crate) fn is_bridgeable_day(date: NaiveDate, holidays: &HashSet<NaiveDate>) 
 /// row: the row a certificate verdict is printed on must be the same period
 /// the verdict was computed over, or the document contradicts itself (a two-day
 /// row marked "certificate required" under a four-day threshold).
-pub(crate) fn bridges(previous_end: NaiveDate, next_start: NaiveDate, holidays: &HashSet<NaiveDate>) -> bool {
+pub(crate) fn bridges(
+    previous_end: NaiveDate,
+    next_start: NaiveDate,
+    holidays: &HashSet<NaiveDate>,
+) -> bool {
     if next_start <= previous_end {
         return true; // adjacent/overlapping
     }
@@ -99,8 +103,16 @@ fn build_chains(ranges: &[Range], holidays: &HashSet<NaiveDate>) -> Vec<Vec<Rang
 /// Total calendar-day span of a chain (inclusive), bridging any weekend/
 /// holiday gaps between its absences.
 fn chain_span_days(chain: &[Range]) -> i64 {
-    let start = chain.iter().map(|(_, s, _)| *s).min().expect("non-empty chain");
-    let end = chain.iter().map(|(_, _, e)| *e).max().expect("non-empty chain");
+    let start = chain
+        .iter()
+        .map(|(_, s, _)| *s)
+        .min()
+        .expect("non-empty chain");
+    let end = chain
+        .iter()
+        .map(|(_, _, e)| *e)
+        .max()
+        .expect("non-empty chain");
     (end - start).num_days() + 1
 }
 

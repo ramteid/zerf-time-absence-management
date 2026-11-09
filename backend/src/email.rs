@@ -263,8 +263,11 @@ where
         }
         Err(_) => {
             breaker.record_failure();
-            let timeout_err: Box<dyn std::error::Error + Send + Sync> =
-                format!("SMTP delivery timed out after {} seconds", timeout.as_secs()).into();
+            let timeout_err: Box<dyn std::error::Error + Send + Sync> = format!(
+                "SMTP delivery timed out after {} seconds",
+                timeout.as_secs()
+            )
+            .into();
             Err(GuardedSendError::Smtp(timeout_err))
         }
     }
@@ -346,7 +349,10 @@ fn build_queued_message(
     let from: Mailbox = from.parse()?;
     let to_box = mailbox(&entry.to_address, &entry.to_name)?;
     let clean_subject = entry.subject.replace(['\r', '\n'], "");
-    let mut builder = Message::builder().from(from).to(to_box).subject(clean_subject);
+    let mut builder = Message::builder()
+        .from(from)
+        .to(to_box)
+        .subject(clean_subject);
     if let Some(reply_to) = reply_to_mailbox(entry) {
         builder = builder.reply_to(reply_to);
     }
@@ -468,7 +474,10 @@ mod tests {
     /// into the raw SMTP message and must be stripped.
     #[test]
     fn sanitize_display_name_strips_control_characters() {
-        assert_eq!(sanitize_display_name("Jane\r\nBcc: evil@example.com"), "JaneBcc: evil@example.com");
+        assert_eq!(
+            sanitize_display_name("Jane\r\nBcc: evil@example.com"),
+            "JaneBcc: evil@example.com"
+        );
         assert_eq!(sanitize_display_name("Jane\tDoe"), "JaneDoe");
     }
 
@@ -477,7 +486,10 @@ mod tests {
         assert_eq!(sanitize_display_name("  Jane Doe  "), "Jane Doe");
     }
 
-    fn queued_entry(reply_to_address: &str, reply_to_name: &str) -> crate::repository::EmailQueueEntry {
+    fn queued_entry(
+        reply_to_address: &str,
+        reply_to_name: &str,
+    ) -> crate::repository::EmailQueueEntry {
         crate::repository::EmailQueueEntry {
             id: 7,
             to_address: "emil@example.com".into(),
@@ -512,7 +524,10 @@ mod tests {
             .find(|line| line.starts_with("Reply-To:"))
             .expect("Reply-To header present");
         assert!(reply_to.contains("Lara Lead"), "Reply-To: {reply_to}");
-        assert!(reply_to.contains("<lara@example.com>"), "Reply-To: {reply_to}");
+        assert!(
+            reply_to.contains("<lara@example.com>"),
+            "Reply-To: {reply_to}"
+        );
         let from = lines.iter().find(|line| line.starts_with("From:")).unwrap();
         assert!(from.contains("zerf@example.com"), "From: {from}");
     }

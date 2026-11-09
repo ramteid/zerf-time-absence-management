@@ -359,8 +359,16 @@ async fn process_one_entry(
     }
     let first_raw = sanitize_name(&user.first_name);
     let last_raw = sanitize_name(&user.last_name);
-    let first = if first_raw.is_empty() { "user".to_string() } else { first_raw };
-    let last = if last_raw.is_empty() { "unknown".to_string() } else { last_raw };
+    let first = if first_raw.is_empty() {
+        "user".to_string()
+    } else {
+        first_raw
+    };
+    let last = if last_raw.is_empty() {
+        "unknown".to_string()
+    } else {
+        last_raw
+    };
     let folder = entry.period.clone();
     let filename = format!(
         "{}_Stundenzettel_{}_{}_{}.pdf",
@@ -394,15 +402,12 @@ async fn load_upload_settings(state: &AppState) -> AppResult<(bool, String, u8, 
         .await?
         == "true";
     let url = settings::load_setting(&state.pool, settings::REPORT_UPLOAD_URL_KEY, "").await?;
-    let day_of_month: u8 = settings::load_setting(
-        &state.pool,
-        settings::REPORT_UPLOAD_DAY_OF_MONTH_KEY,
-        "5",
-    )
-    .await?
-    .parse()
-    .unwrap_or(5)
-    .clamp(1, 28);
+    let day_of_month: u8 =
+        settings::load_setting(&state.pool, settings::REPORT_UPLOAD_DAY_OF_MONTH_KEY, "5")
+            .await?
+            .parse()
+            .unwrap_or(5)
+            .clamp(1, 28);
     let password =
         settings::load_setting(&state.pool, settings::REPORT_UPLOAD_PASSWORD_KEY, "").await?;
     Ok((enabled, url, day_of_month, password))

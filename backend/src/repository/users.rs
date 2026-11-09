@@ -797,13 +797,12 @@ impl UserDb {
                 .ok_or(AppError::NotFound)?;
         let requires_admin_approver = is_admin_role(&subject_role);
         // Check if relationship already exists – idempotent restore should not error.
-        let existing: Option<i64> = sqlx::query_scalar(
-            "SELECT 1 FROM user_approvers WHERE user_id=$1 AND approver_id=$2",
-        )
-        .bind(user_id)
-        .bind(approver_id)
-        .fetch_optional(&mut *tx)
-        .await?;
+        let existing: Option<i64> =
+            sqlx::query_scalar("SELECT 1 FROM user_approvers WHERE user_id=$1 AND approver_id=$2")
+                .bind(user_id)
+                .bind(approver_id)
+                .fetch_optional(&mut *tx)
+                .await?;
         if existing.is_some() {
             return Ok(());
         }
