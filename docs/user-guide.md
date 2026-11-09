@@ -2143,7 +2143,9 @@ may be shortened, deleted, or moved to another day.
 The next report compares each affected day's current approved net minutes with
 the total already declared for that day. Only a nonzero difference appears in
 **Corrections to earlier months**, with one line per person and month. The line
-holds the sum of all changes of that person in that month. Changes that cancel
+holds the sum of all changes of that person in that month, and a last column
+shows the new total hours of that person for the month (for example 20 hours
+booked before plus 20 hours added shows 40). Changes that cancel
 each other out within a month produce no line, and the table has no total row.
 Positive hours add time; negative hours reduce or reverse it. Moving a shift
 into another month therefore produces a negative correction for the old month

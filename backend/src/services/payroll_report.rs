@@ -1352,6 +1352,7 @@ async fn build_late_entry_rows(
             .cmp(&employee_name(printed[&right.user_id]))
             .then_with(|| left.date.cmp(&right.date))
     });
+    let month_totals = approved_month_totals(app_state, &printed, &rendered).await?;
     let rows = rendered
         .iter()
         .map(|delta| PayrollLateEntryRow {
@@ -1359,6 +1360,8 @@ async fn build_late_entry_rows(
             employee: employee_name(printed[&delta.user_id]),
             date: delta.date,
             minutes: delta.minutes,
+            month_total_minutes: month_totals
+                [&(delta.user_id, delta.date.year(), delta.date.month())],
         })
         .collect();
     let declared_work_days = if records_declarations {
@@ -1392,6 +1395,41 @@ async fn build_late_entry_rows(
         declared_work_days,
         carried_work_days,
     })
+}
+
+/// Approved net minutes of each person for every calendar month the given
+/// corrections fall into: what that month's books should read once the
+/// corrections are booked. Taken from the same month report the regular hours
+/// section is built from, so both always agree on what a month holds.
+///
+/// Every delta's person must be in `printed`.
+async fn approved_month_totals(
+    app_state: &AppState,
+    printed: &std::collections::HashMap<i64, &User>,
+    deltas: &[LateEntryDelta],
+) -> AppResult<std::collections::HashMap<(i64, i32, u32), i64>> {
+    let months: std::collections::BTreeSet<(i64, i32, u32)> = deltas
+        .iter()
+        .map(|delta| (delta.user_id, delta.date.year(), delta.date.month()))
+        .collect();
+    let mut totals = std::collections::HashMap::new();
+    for (user_id, year, month) in months {
+        let invalid_month = || crate::error::AppError::BadRequest("date".into());
+        let from = NaiveDate::from_ymd_opt(year, month, 1).ok_or_else(invalid_month)?;
+        let to = NaiveDate::from_ymd_opt(year, month, crate::time_calc::last_day_of_month(year, month))
+            .ok_or_else(invalid_month)?;
+        let auth_user = crate::services::users::repo_user_to_auth_user(printed[&user_id].clone());
+        let report = crate::services::reports::build_range_with_user(
+            &app_state.pool,
+            &auth_user,
+            from,
+            to,
+            "",
+        )
+        .await?;
+        totals.insert((user_id, year, month), report.actual_min);
+    }
+    Ok(totals)
 }
 
 /// Signed workday differences a report produced now would still have to
@@ -2319,7 +2357,11 @@ pub fn people_in_report(data: &PayrollReportData) -> usize {
     }
     // A month whose only content is somebody's catch-up day is still worth
     // sending — without this it would count as empty and be settled unsent.
-    names.extend(data.late_entry_rows.iter().map(|row| row.employee.as_str()));
+    // Only those with a printed line count: changes that cancel out within a
+    // month leave nothing for payroll to adjust.
+    names.extend(crate::report_pdf::people_with_corrections(
+        &data.late_entry_rows,
+    ));
     names.extend(
         data.late_absence_rows
             .iter()
@@ -2631,6 +2673,49 @@ mod tests {
             ..empty
         };
         assert_eq!(people_in_report(&populated), 2);
+    }
+
+    #[test]
+    fn people_in_report_ignores_corrections_that_cancel_out() {
+        let correction = |day: &str, minutes: i64| PayrollLateEntryRow {
+            user_id: 1,
+            employee: "Doe, Jane".into(),
+            date: day.parse().unwrap(),
+            minutes,
+            month_total_minutes: 480,
+        };
+        let report_with = |late_entry_rows: Vec<PayrollLateEntryRow>| PayrollReportData {
+            period_label: "August 2026".into(),
+            organization_name: String::new(),
+            absence_rows: Some(vec![]),
+            hours_sections: vec![],
+            late_entry_rows,
+            declared_work_days: Vec::new(),
+            carried_work_days: Vec::new(),
+            reported_absence_snapshots: Vec::new(),
+            late_absence_rows: Vec::new(),
+            late_absence_snapshots: Vec::new(),
+            cancelled_absence_rows: Vec::new(),
+            absence_review_rows: Vec::new(),
+            created_on: NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
+            provisional: None,
+        };
+
+        let moved_within_a_month = report_with(vec![
+            correction("2026-07-09", 120),
+            correction("2026-07-10", -120),
+        ]);
+        assert_eq!(
+            people_in_report(&moved_within_a_month),
+            0,
+            "a shift moved within a month prints no line, so the document is empty"
+        );
+
+        let net_change = report_with(vec![
+            correction("2026-07-09", 120),
+            correction("2026-07-10", -60),
+        ]);
+        assert_eq!(people_in_report(&net_change), 1);
     }
 
     #[test]

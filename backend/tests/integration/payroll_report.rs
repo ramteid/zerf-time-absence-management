@@ -2731,6 +2731,10 @@ async fn hours_booked_after_a_month_was_reported_reach_the_next_report() {
         "the day that was worked, not the month that reports it"
     );
     assert_eq!(data.late_entry_rows[0].minutes, 240);
+    assert_eq!(
+        data.late_entry_rows[0].month_total_minutes, 480,
+        "the month now holds the on-time day and the late one"
+    );
     assert!(
         data.declared_work_days.is_empty(),
         "a pre-ledger period has no reconstructible zero-day baseline"
@@ -6048,6 +6052,10 @@ async fn payroll_declared_days_second_shift_recomputes_the_whole_days_break() {
     assert_eq!(
         data.late_entry_rows[0].minutes, 180,
         "450 raw minutes minus the 30-minute whole-day break, less 240 already declared"
+    );
+    assert_eq!(
+        data.late_entry_rows[0].month_total_minutes, 420,
+        "the month's new total is the whole day's net time"
     );
     assert_eq!(
         data.declared_work_days

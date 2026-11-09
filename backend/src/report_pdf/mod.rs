@@ -27,7 +27,7 @@ mod payroll;
 mod timesheet;
 
 pub use payroll::{
-    render_payroll_report_pdf, PayrollAbsenceRow, PayrollCarriedWorkDay, PayrollDeclaredWorkDay,
+    people_with_corrections, render_payroll_report_pdf, PayrollAbsenceRow, PayrollCarriedWorkDay, PayrollDeclaredWorkDay,
     PayrollHoursRow, PayrollHoursSection, PayrollLateEntryRow, PayrollOmittedPerson,
     PayrollReportData, ProvisionalNotice,
 };

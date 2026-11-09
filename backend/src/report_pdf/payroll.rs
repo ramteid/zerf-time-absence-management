@@ -146,22 +146,27 @@ const HOURS_DECIMAL_COLUMN: usize = 3;
 const LATE_ENTRY_COLUMNS: &[Column] = &[
     Column {
         header_key: "pdf_payroll_column_employee",
-        width_mm: 70.0,
+        width_mm: 62.0,
         align: Align::Left,
     },
     Column {
         header_key: "pdf_payroll_column_month",
-        width_mm: 30.0,
+        width_mm: 26.0,
         align: Align::Left,
     },
     Column {
         header_key: "pdf_payroll_column_hours",
-        width_mm: 40.0,
+        width_mm: 24.0,
         align: Align::Left,
     },
     Column {
         header_key: "pdf_payroll_column_hours_decimal",
-        width_mm: 40.0,
+        width_mm: 32.0,
+        align: Align::Left,
+    },
+    Column {
+        header_key: "pdf_payroll_column_month_total",
+        width_mm: 36.0,
         align: Align::Left,
     },
 ];
@@ -169,21 +174,26 @@ const LATE_ENTRY_COLUMNS: &[Column] = &[
 const LATE_ENTRY_MONTH_COLUMN: usize = 1;
 const LATE_ENTRY_HOURS_COLUMN: usize = 2;
 const LATE_ENTRY_DECIMAL_COLUMN: usize = 3;
+const LATE_ENTRY_TOTAL_COLUMN: usize = 4;
 
-/// The net correction of one person for one calendar month.
-struct LateEntryMonth {
-    employee: String,
+/// The net correction of one person for one calendar month, with the month's
+/// new total.
+struct LateEntryMonth<'a> {
+    employee: &'a str,
     year: i32,
     month: u32,
     minutes: i64,
+    total_minutes: i64,
 }
 
 /// Sum the day-level corrections per person and month, ordered by name and
 /// then by month. Payroll books hours per month, so the single days do not
 /// matter. A month whose changes cancel out (a shift moved within it) needs no
 /// adjustment and is left out.
-fn sum_late_entries_per_month(rows: &[PayrollLateEntryRow]) -> Vec<LateEntryMonth> {
-    let mut totals: BTreeMap<(&str, i64, i32, u32), i64> = BTreeMap::new();
+fn sum_late_entries_per_month(rows: &[PayrollLateEntryRow]) -> Vec<LateEntryMonth<'_>> {
+    // Per key: the summed correction and the month's total, which all rows of
+    // the key share.
+    let mut totals: BTreeMap<(&str, i64, i32, u32), (i64, i64)> = BTreeMap::new();
     for row in rows {
         let key = (
             row.employee.as_str(),
@@ -191,17 +201,20 @@ fn sum_late_entries_per_month(rows: &[PayrollLateEntryRow]) -> Vec<LateEntryMont
             row.date.year(),
             row.date.month(),
         );
-        *totals.entry(key).or_default() += row.minutes;
+        totals.entry(key).or_insert((0, row.month_total_minutes)).0 += row.minutes;
     }
     totals
         .into_iter()
-        .filter(|(_, minutes)| *minutes != 0)
-        .map(|((employee, _, year, month), minutes)| LateEntryMonth {
-            employee: employee.to_string(),
-            year,
-            month,
-            minutes,
-        })
+        .filter(|(_, (minutes, _))| *minutes != 0)
+        .map(
+            |((employee, _, year, month), (minutes, total_minutes))| LateEntryMonth {
+                employee,
+                year,
+                month,
+                minutes,
+                total_minutes,
+            },
+        )
         .collect()
 }
 
@@ -252,6 +265,10 @@ pub struct PayrollLateEntryRow {
     /// The day actually worked — always before the reported month.
     pub date: NaiveDate,
     pub minutes: i64,
+    /// The person's approved net total for the month of `date`, with this
+    /// correction included. Every row of one person and month carries the same
+    /// value.
+    pub month_total_minutes: i64,
 }
 
 /// One signed day total the assembled report declares to payroll.
@@ -600,6 +617,15 @@ fn render_absence_review_table(
     }
 }
 
+/// The people the corrections table prints a line for. Somebody whose changes
+/// all cancel out within their months has none, and a document with nothing
+/// else in it is not worth sending.
+pub fn people_with_corrections(rows: &[PayrollLateEntryRow]) -> impl Iterator<Item = &str> {
+    sum_late_entries_per_month(rows)
+        .into_iter()
+        .map(|month| month.employee)
+}
+
 /// Draw the corrections table, with a line of explanation above it.
 ///
 /// The note matters more than the table: without it the payroll accountant sees
@@ -626,7 +652,7 @@ fn render_late_entry_table(
     for (index, month) in months.iter().enumerate() {
         renderer.draw_row(
             &[
-                (0, month.employee.clone()),
+                (0, month.employee.to_string()),
                 (
                     LATE_ENTRY_MONTH_COLUMN,
                     i18n::format_month(language, month.year, month.month),
@@ -639,6 +665,7 @@ fn render_late_entry_table(
                     LATE_ENTRY_DECIMAL_COLUMN,
                     format_signed_decimal_hours(month.minutes, language),
                 ),
+                (LATE_ENTRY_TOTAL_COLUMN, format_minutes(month.total_minutes)),
             ],
             index % 2 == 1,
         );
@@ -688,55 +715,62 @@ mod tests {
         NaiveDate::from_ymd_opt(year, month, day).unwrap()
     }
 
-    fn late_row(user_id: i64, day: NaiveDate, minutes: i64) -> PayrollLateEntryRow {
+    fn late_row(
+        user_id: i64,
+        day: NaiveDate,
+        minutes: i64,
+        month_total_minutes: i64,
+    ) -> PayrollLateEntryRow {
         PayrollLateEntryRow {
             user_id,
             employee: format!("User {user_id}"),
             date: day,
             minutes,
+            month_total_minutes,
         }
     }
 
-    fn month_summary(rows: &[PayrollLateEntryRow]) -> Vec<(String, i32, u32, i64)> {
+    fn month_summary(rows: &[PayrollLateEntryRow]) -> Vec<(String, i32, u32, i64, i64)> {
         sum_late_entries_per_month(rows)
             .into_iter()
-            .map(|m| (m.employee, m.year, m.month, m.minutes))
+            .map(|m| (m.employee.to_string(), m.year, m.month, m.minutes, m.total_minutes))
             .collect()
     }
 
     #[test]
     fn late_entries_are_summed_per_person_and_month() {
+        // 20 hours were booked before; +20 hours arrive for the same month.
         let rows = [
-            late_row(1, date(2026, 3, 9), 120),
-            late_row(1, date(2026, 3, 10), -30),
-            late_row(1, date(2026, 3, 20), 15),
-            late_row(1, date(2026, 4, 2), 60),
-            late_row(2, date(2026, 3, 5), 20),
+            late_row(1, date(2026, 3, 9), 600, 2400),
+            late_row(1, date(2026, 3, 10), -30, 2400),
+            late_row(1, date(2026, 3, 20), 630, 2400),
+            late_row(1, date(2026, 4, 2), 60, 900),
+            late_row(2, date(2026, 3, 5), 20, 500),
         ];
         assert_eq!(
             month_summary(&rows),
             vec![
-                ("User 1".to_string(), 2026, 3, 105),
-                ("User 1".to_string(), 2026, 4, 60),
-                ("User 2".to_string(), 2026, 3, 20),
+                ("User 1".to_string(), 2026, 3, 1200, 2400),
+                ("User 1".to_string(), 2026, 4, 60, 900),
+                ("User 2".to_string(), 2026, 3, 20, 500),
             ]
         );
     }
 
     #[test]
     fn late_entries_are_ordered_by_name_before_month() {
-        let mut anna = late_row(2, date(2026, 3, 10), 30);
+        let mut anna = late_row(2, date(2026, 3, 10), 30, 100);
         anna.employee = "Anna".to_string();
-        let mut berta_march = late_row(1, date(2026, 3, 9), 60);
+        let mut berta_march = late_row(1, date(2026, 3, 9), 60, 200);
         berta_march.employee = "Berta".to_string();
-        let mut berta_february = late_row(1, date(2026, 2, 9), 45);
+        let mut berta_february = late_row(1, date(2026, 2, 9), 45, 300);
         berta_february.employee = "Berta".to_string();
         assert_eq!(
             month_summary(&[berta_march, anna, berta_february]),
             vec![
-                ("Anna".to_string(), 2026, 3, 30),
-                ("Berta".to_string(), 2026, 2, 45),
-                ("Berta".to_string(), 2026, 3, 60),
+                ("Anna".to_string(), 2026, 3, 30, 100),
+                ("Berta".to_string(), 2026, 2, 45, 300),
+                ("Berta".to_string(), 2026, 3, 60, 200),
             ]
         );
     }
@@ -745,13 +779,13 @@ mod tests {
     fn late_entries_cancelling_out_within_a_month_are_dropped() {
         // A shift moved from the 10th to the 9th changes nothing for the month.
         let rows = [
-            late_row(1, date(2026, 3, 9), 120),
-            late_row(1, date(2026, 3, 10), -120),
-            late_row(1, date(2026, 4, 1), 30),
+            late_row(1, date(2026, 3, 9), 120, 480),
+            late_row(1, date(2026, 3, 10), -120, 480),
+            late_row(1, date(2026, 4, 1), 30, 90),
         ];
         assert_eq!(
             month_summary(&rows),
-            vec![("User 1".to_string(), 2026, 4, 30)]
+            vec![("User 1".to_string(), 2026, 4, 30, 90)]
         );
     }
 
@@ -786,6 +820,7 @@ mod tests {
                 employee: "Doe, Jane".into(),
                 date: date(2026, 4, 28),
                 minutes: 240,
+                month_total_minutes: 1500,
             }],
             declared_work_days: Vec::new(),
             carried_work_days: Vec::new(),
