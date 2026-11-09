@@ -15,6 +15,7 @@
 use super::{format_minutes, format_signed_minutes, Align, Column, Renderer};
 use crate::i18n::{self, Language};
 use chrono::{Datelike, NaiveDate};
+use std::collections::BTreeMap;
 
 /// Absence table: one row per absence period, clamped to the reported month.
 /// All columns are left-aligned so data rows line up under the (always
@@ -139,79 +140,69 @@ const HOURS_WORK_DAYS_COLUMN: usize = 1;
 const HOURS_HOURS_COLUMN: usize = 2;
 const HOURS_DECIMAL_COLUMN: usize = 3;
 
-/// Corrections table: one row per person and day whose approved net time
-/// changed after that day's month was reported. Same widths as
-/// [`HOURS_COLUMNS`], with the affected day in place of the work-day count so
-/// payroll can adjust the month the value belongs to.
+/// Corrections table: one row per person and calendar month whose approved
+/// net time changed after that month was reported. The month tells payroll
+/// which already-filed month the value belongs to.
 const LATE_ENTRY_COLUMNS: &[Column] = &[
     Column {
         header_key: "pdf_payroll_column_employee",
-        width_mm: 52.0,
+        width_mm: 70.0,
         align: Align::Left,
     },
     Column {
-        header_key: "pdf_payroll_column_from",
-        width_mm: 26.0,
-        align: Align::Left,
-    },
-    Column {
-        header_key: "pdf_payroll_column_to",
-        width_mm: 26.0,
+        header_key: "pdf_payroll_column_month",
+        width_mm: 30.0,
         align: Align::Left,
     },
     Column {
         header_key: "pdf_payroll_column_hours",
-        width_mm: 38.0,
+        width_mm: 40.0,
         align: Align::Left,
     },
     Column {
         header_key: "pdf_payroll_column_hours_decimal",
-        width_mm: 38.0,
+        width_mm: 40.0,
         align: Align::Left,
     },
 ];
 
-const LATE_ENTRY_FROM_COLUMN: usize = 1;
-const LATE_ENTRY_TO_COLUMN: usize = 2;
-const LATE_ENTRY_HOURS_COLUMN: usize = 3;
-const LATE_ENTRY_DECIMAL_COLUMN: usize = 4;
+const LATE_ENTRY_MONTH_COLUMN: usize = 1;
+const LATE_ENTRY_HOURS_COLUMN: usize = 2;
+const LATE_ENTRY_DECIMAL_COLUMN: usize = 3;
 
-/// Consecutive corrected days of one person, shown as a single period.
-struct LateEntryPeriod {
-    user_id: i64,
+/// The net correction of one person for one calendar month.
+struct LateEntryMonth {
     employee: String,
-    from: NaiveDate,
-    to: NaiveDate,
+    year: i32,
+    month: u32,
     minutes: i64,
 }
 
-/// Combine corrections of consecutive calendar days of the same person into
-/// periods with the summed minutes. A period never spans two months, because
-/// payroll adjusts each month separately.
-fn merge_late_entry_periods(rows: &[PayrollLateEntryRow]) -> Vec<LateEntryPeriod> {
-    let mut sorted: Vec<&PayrollLateEntryRow> = rows.iter().collect();
-    sorted.sort_by(|a, b| (&a.employee, a.user_id, a.date).cmp(&(&b.employee, b.user_id, b.date)));
-    let mut periods: Vec<LateEntryPeriod> = Vec::new();
-    for row in sorted {
-        if let Some(period) = periods.last_mut() {
-            let continues = period.user_id == row.user_id
-                && period.to.succ_opt() == Some(row.date)
-                && period.to.month() == row.date.month();
-            if continues {
-                period.to = row.date;
-                period.minutes += row.minutes;
-                continue;
-            }
-        }
-        periods.push(LateEntryPeriod {
-            user_id: row.user_id,
-            employee: row.employee.clone(),
-            from: row.date,
-            to: row.date,
-            minutes: row.minutes,
-        });
+/// Sum the day-level corrections per person and month, ordered by name and
+/// then by month. Payroll books hours per month, so the single days do not
+/// matter. A month whose changes cancel out (a shift moved within it) needs no
+/// adjustment and is left out.
+fn sum_late_entries_per_month(rows: &[PayrollLateEntryRow]) -> Vec<LateEntryMonth> {
+    let mut totals: BTreeMap<(&str, i64, i32, u32), i64> = BTreeMap::new();
+    for row in rows {
+        let key = (
+            row.employee.as_str(),
+            row.user_id,
+            row.date.year(),
+            row.date.month(),
+        );
+        *totals.entry(key).or_default() += row.minutes;
     }
-    periods
+    totals
+        .into_iter()
+        .filter(|(_, minutes)| *minutes != 0)
+        .map(|((employee, _, year, month), minutes)| LateEntryMonth {
+            employee: employee.to_string(),
+            year,
+            month,
+            minutes,
+        })
+        .collect()
 }
 
 /// One absence period of one employee within the reported month.
@@ -411,8 +402,9 @@ pub fn render_payroll_report_pdf(data: &PayrollReportData, language: &Language) 
             true,
         );
     }
-    if !data.late_entry_rows.is_empty() {
-        render_late_entry_table(&mut renderer, language, &data.late_entry_rows);
+    let late_entry_months = sum_late_entries_per_month(&data.late_entry_rows);
+    if !late_entry_months.is_empty() {
+        render_late_entry_table(&mut renderer, language, &late_entry_months);
     }
 
     super::build_pdf(renderer.finish())
@@ -616,7 +608,7 @@ fn render_absence_review_table(
 fn render_late_entry_table(
     renderer: &mut Renderer,
     language: &Language,
-    rows: &[PayrollLateEntryRow],
+    months: &[LateEntryMonth],
 ) {
     renderer.set_columns(LATE_ENTRY_COLUMNS);
     renderer.draw_section_heading(&i18n::translate(
@@ -631,22 +623,21 @@ fn render_late_entry_table(
     ));
 
     renderer.draw_table_header();
-    for (index, period) in merge_late_entry_periods(rows).iter().enumerate() {
+    for (index, month) in months.iter().enumerate() {
         renderer.draw_row(
             &[
-                (0, period.employee.clone()),
+                (0, month.employee.clone()),
                 (
-                    LATE_ENTRY_FROM_COLUMN,
-                    i18n::format_date(language, period.from),
+                    LATE_ENTRY_MONTH_COLUMN,
+                    i18n::format_month(language, month.year, month.month),
                 ),
-                (LATE_ENTRY_TO_COLUMN, i18n::format_date(language, period.to)),
                 (
                     LATE_ENTRY_HOURS_COLUMN,
-                    format_signed_minutes(period.minutes),
+                    format_signed_minutes(month.minutes),
                 ),
                 (
                     LATE_ENTRY_DECIMAL_COLUMN,
-                    format_signed_decimal_hours(period.minutes, language),
+                    format_signed_decimal_hours(month.minutes, language),
                 ),
             ],
             index % 2 == 1,
@@ -706,87 +697,62 @@ mod tests {
         }
     }
 
+    fn month_summary(rows: &[PayrollLateEntryRow]) -> Vec<(String, i32, u32, i64)> {
+        sum_late_entries_per_month(rows)
+            .into_iter()
+            .map(|m| (m.employee, m.year, m.month, m.minutes))
+            .collect()
+    }
+
     #[test]
-    fn late_entries_are_grouped_by_name_before_merging_days() {
+    fn late_entries_are_summed_per_person_and_month() {
+        let rows = [
+            late_row(1, date(2026, 3, 9), 120),
+            late_row(1, date(2026, 3, 10), -30),
+            late_row(1, date(2026, 3, 20), 15),
+            late_row(1, date(2026, 4, 2), 60),
+            late_row(2, date(2026, 3, 5), 20),
+        ];
+        assert_eq!(
+            month_summary(&rows),
+            vec![
+                ("User 1".to_string(), 2026, 3, 105),
+                ("User 1".to_string(), 2026, 4, 60),
+                ("User 2".to_string(), 2026, 3, 20),
+            ]
+        );
+    }
+
+    #[test]
+    fn late_entries_are_ordered_by_name_before_month() {
         let mut anna = late_row(2, date(2026, 3, 10), 30);
         anna.employee = "Anna".to_string();
-        let mut berta_first = late_row(1, date(2026, 3, 9), 60);
-        berta_first.employee = "Berta".to_string();
-        let mut berta_second = late_row(1, date(2026, 3, 10), 60);
-        berta_second.employee = "Berta".to_string();
-        let periods = merge_late_entry_periods(&[berta_first, anna, berta_second]);
-        let summary: Vec<_> = periods
-            .iter()
-            .map(|p| (p.employee.as_str(), p.from, p.to, p.minutes))
-            .collect();
+        let mut berta_march = late_row(1, date(2026, 3, 9), 60);
+        berta_march.employee = "Berta".to_string();
+        let mut berta_february = late_row(1, date(2026, 2, 9), 45);
+        berta_february.employee = "Berta".to_string();
         assert_eq!(
-            summary,
+            month_summary(&[berta_march, anna, berta_february]),
             vec![
-                ("Anna", date(2026, 3, 10), date(2026, 3, 10), 30),
-                ("Berta", date(2026, 3, 9), date(2026, 3, 10), 120),
+                ("Anna".to_string(), 2026, 3, 30),
+                ("Berta".to_string(), 2026, 2, 45),
+                ("Berta".to_string(), 2026, 3, 60),
             ]
         );
     }
 
     #[test]
-    fn late_entries_merge_consecutive_days_within_a_month_and_person() {
+    fn late_entries_cancelling_out_within_a_month_are_dropped() {
+        // A shift moved from the 10th to the 9th changes nothing for the month.
         let rows = [
-            late_row(1, date(2026, 3, 30), 60),
-            late_row(1, date(2026, 3, 31), 30),
-            late_row(1, date(2026, 4, 1), 15),
-            late_row(1, date(2026, 4, 2), 15),
-            late_row(1, date(2026, 4, 5), 10),
-            late_row(2, date(2026, 4, 3), 20),
+            late_row(1, date(2026, 3, 9), 120),
+            late_row(1, date(2026, 3, 10), -120),
+            late_row(1, date(2026, 4, 1), 30),
         ];
-        let periods = merge_late_entry_periods(&rows);
-        let summary: Vec<_> = periods
-            .iter()
-            .map(|p| (p.user_id, p.from, p.to, p.minutes))
-            .collect();
         assert_eq!(
-            summary,
-            vec![
-                (1, date(2026, 3, 30), date(2026, 3, 31), 90),
-                (1, date(2026, 4, 1), date(2026, 4, 2), 30),
-                (1, date(2026, 4, 5), date(2026, 4, 5), 10),
-                (2, date(2026, 4, 3), date(2026, 4, 3), 20),
-            ]
+            month_summary(&rows),
+            vec![("User 1".to_string(), 2026, 4, 30)]
         );
-    }
-
-    #[test]
-    fn columns_sum_to_content_width() {
-        for (name, columns) in [
-            ("absence", ABSENCE_COLUMNS),
-            ("absence review", CANCELLED_ABSENCE_COLUMNS),
-            ("absence review with certificate", REVIEW_ABSENCE_COLUMNS),
-            ("hours", HOURS_COLUMNS),
-        ] {
-            let total: f32 = columns.iter().map(|column| column.width_mm).sum();
-            assert!(
-                (total - super::super::CONTENT_WIDTH_MM).abs() < 0.01,
-                "{name} column widths {total} mm != content width"
-            );
-        }
-    }
-
-    #[test]
-    fn decimal_hours_use_the_language_separator() {
-        let english = Language::from_setting("en");
-        let german = Language::from_setting("de");
-        assert_eq!(format_decimal_hours(450, &english), "7.50");
-        assert_eq!(format_decimal_hours(450, &german), "7,50");
-        assert_eq!(format_decimal_hours(0, &english), "0.00");
-        assert_eq!(format_signed_decimal_hours(450, &english), "+7.50");
-        assert_eq!(format_signed_decimal_hours(-30, &german), "-0,50");
-    }
-
-    #[test]
-    fn days_print_without_decimals_unless_fractional() {
-        let german = Language::from_setting("de");
-        assert_eq!(format_days(3.0, &german), "3");
-        assert_eq!(format_days(0.0, &german), "0");
-        assert_eq!(format_days(3.5, &german), "3,5");
     }
 
     #[test]

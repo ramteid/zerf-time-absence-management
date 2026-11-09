@@ -2142,14 +2142,14 @@ may be shortened, deleted, or moved to another day.
 
 The next report compares each affected day's current approved net minutes with
 the total already declared for that day. Only a nonzero difference appears in
-**Corrections to earlier months**, with the period it affects. Consecutive days
-of the same person within one month are combined into one period with their
-summed hours, and the table has no total row. Positive hours add
-time; negative hours reduce or reverse it. Moving a shift between months can
-therefore produce a negative correction on the old day and a positive one on
-the new day. Automatic breaks are recalculated across the whole current day
-before the difference is taken, so adding a second shift cannot under-deduct
-the break.
+**Corrections to earlier months**, with one line per person and month. The line
+holds the sum of all changes of that person in that month. Changes that cancel
+each other out within a month produce no line, and the table has no total row.
+Positive hours add time; negative hours reduce or reverse it. Moving a shift
+into another month therefore produces a negative correction for the old month
+and a positive one for the new month. Automatic breaks are recalculated across
+the whole current day before the difference is taken, so adding a second shift
+cannot under-deduct the break.
 
 The section appears only when there is something to adjust. Deleting and
 rebooking an unchanged day produces no row. Once a correction is sent, its
@@ -2202,8 +2202,8 @@ have used part of a week's day quota. When the amount cannot be determined
 from that earlier report, the affected absences are listed under **Absences
 requiring review** instead of giving a potentially incorrect day count.
 
-The **Payroll Report** card on the dashboard shows these signed corrections the
-same way, so you can see before the send what the next report will carry.
+The **Payroll Report** card on the dashboard lists these signed corrections day
+by day, so you can see before the send what the next report will carry.
 
 #### When it is sent
 
