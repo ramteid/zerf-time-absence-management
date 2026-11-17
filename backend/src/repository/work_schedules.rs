@@ -277,44 +277,62 @@ impl WorkScheduleDb {
         (1..=workdays_per_week.clamp(1, 5)).collect()
     }
 
-    /// Bring the recorded pattern in line with a changed *number* of working
-    /// days, from `effective_from` on. Returns true when a row was written.
-    ///
-    /// The admin screen sets a count, not a set of days, and that count and the
-    /// pattern are two statements of the same fact. Left alone they drift: an
-    /// employee moved from five days a week to three kept a Monday-to-Friday
-    /// pattern, so every calculation went on giving them a five-day target and
-    /// charging them five days of leave a week.
-    ///
-    /// Dated from the day the change is made, never backwards: the weeks
-    /// already worked keep the pattern they were worked under, which is the
-    /// whole reason this is a history.
-    ///
-    /// A pattern that already works that many days is left exactly as it is. An
-    /// admin re-saving a contract, or correcting a stale count, must not
-    /// overwrite weekdays somebody picked by hand with the Monday-first guess.
-    pub async fn align_day_count_tx(
+    /// The pattern in force on `date`, read inside the caller's transaction.
+    /// `None` when no recorded pattern has begun by then.
+    pub async fn weekdays_in_force_tx(
         tx: &mut sqlx::PgConnection,
         user_id: i64,
-        effective_from: NaiveDate,
-        workdays_per_week: i16,
-        created_by: Option<i64>,
-    ) -> AppResult<bool> {
-        let in_force: Option<Vec<i16>> = sqlx::query_scalar(
+        date: NaiveDate,
+    ) -> AppResult<Option<Vec<i16>>> {
+        Ok(sqlx::query_scalar(
             "SELECT weekdays FROM user_work_weekdays \
              WHERE user_id = $1 AND valid_from <= $2 \
              ORDER BY valid_from DESC, id DESC LIMIT 1",
         )
         .bind(user_id)
-        .bind(effective_from)
+        .bind(date)
         .fetch_optional(&mut *tx)
+        .await?)
+    }
+
+    /// Record a change of working days that applies from `valid_from` on.
+    ///
+    /// "From that day on" is meant literally: a change recorded for a later
+    /// date is replaced, so the days just saved are the ones in force today,
+    /// which is what the form showed the admin. Keeping the later row instead
+    /// would leave the form showing something other than what was just saved.
+    /// Every pattern before `valid_from` stays, so the weeks before it keep the
+    /// days they were worked under.
+    ///
+    /// A row that repeats the pattern of the row before it records no change
+    /// and is removed, as for weekly hours. The oldest row has no predecessor
+    /// and always stays, so the contract stays covered.
+    pub async fn record_weekdays_change_tx(
+        tx: &mut sqlx::PgConnection,
+        user_id: i64,
+        valid_from: NaiveDate,
+        weekdays: &[i16],
+        created_by: Option<i64>,
+    ) -> AppResult<()> {
+        let normalised = Self::normalised_weekdays(weekdays)?;
+        sqlx::query("DELETE FROM user_work_weekdays WHERE user_id = $1 AND valid_from > $2")
+            .bind(user_id)
+            .bind(valid_from)
+            .execute(&mut *tx)
+            .await?;
+        Self::set_for_user_tx(tx, user_id, valid_from, &normalised, created_by).await?;
+        sqlx::query(
+            "DELETE FROM user_work_weekdays WHERE id IN ( \
+                 SELECT id FROM ( \
+                     SELECT id, weekdays, \
+                            LAG(weekdays) OVER (ORDER BY valid_from, id) AS before_days \
+                     FROM user_work_weekdays WHERE user_id = $1 \
+                 ) ordered WHERE before_days IS NOT NULL AND weekdays = before_days)",
+        )
+        .bind(user_id)
+        .execute(&mut *tx)
         .await?;
-        let wanted = Self::default_weekdays(workdays_per_week);
-        if in_force.is_some_and(|days| days.len() == wanted.len()) {
-            return Ok(false);
-        }
-        Self::set_for_user_tx(tx, user_id, effective_from, &wanted, created_by).await?;
-        Ok(true)
+        Ok(())
     }
 
     /// Withdraw a later change of working days.
@@ -377,13 +395,18 @@ impl WorkScheduleDb {
     }
 
     /// Record the hours in force from `valid_from` on, inside the caller's
-    /// transaction. Writing the same date again replaces that day's value.
+    /// transaction. Writing the same date again replaces that day's value, and
+    /// a change recorded for a later date is replaced too, for the reason
+    /// [`Self::record_weekdays_change_tx`] gives.
     ///
     /// When the person has no history yet, `previous_hours` is first written as
     /// the starting row dated `contract_start`, so the weeks already worked keep
-    /// the hours they were worked under. A `previous_hours` of zero (assistant,
-    /// or a contract that had no target) writes no starting row: the whole past
-    /// then simply reads the new hours, as it always did for a first target.
+    /// the hours they were worked under. That includes zero: somebody who had
+    /// no target before (a non-booking contract, an assistant promoted to
+    /// employee) keeps a target of zero for the weeks before the change. Not
+    /// writing it handed the new hours to the whole past, so a first target
+    /// dated from October also demanded those hours for every week since the
+    /// contract start.
     ///
     /// Finally `users.weekly_hours` is set to the latest row, the value in force
     /// today, so everything that needs only the current contract stays correct
@@ -400,19 +423,22 @@ impl WorkScheduleDb {
         if !(0.0..=168.0).contains(&new_hours) {
             return Err(AppError::BadRequest("Invalid weekly_hours.".into()));
         }
-        if previous_hours > 0.0 {
-            sqlx::query(
-                "INSERT INTO user_weekly_hours (user_id, valid_from, weekly_hours, created_by) \
-                 SELECT $1, $2, $3, $4 \
-                 WHERE NOT EXISTS (SELECT 1 FROM user_weekly_hours WHERE user_id = $1)",
-            )
+        sqlx::query(
+            "INSERT INTO user_weekly_hours (user_id, valid_from, weekly_hours, created_by) \
+             SELECT $1, $2, $3, $4 \
+             WHERE NOT EXISTS (SELECT 1 FROM user_weekly_hours WHERE user_id = $1)",
+        )
+        .bind(user_id)
+        .bind(contract_start.min(valid_from))
+        .bind(previous_hours)
+        .bind(created_by)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("DELETE FROM user_weekly_hours WHERE user_id = $1 AND valid_from > $2")
             .bind(user_id)
-            .bind(contract_start.min(valid_from))
-            .bind(previous_hours)
-            .bind(created_by)
+            .bind(valid_from)
             .execute(&mut *tx)
             .await?;
-        }
         sqlx::query(
             "INSERT INTO user_weekly_hours (user_id, valid_from, weekly_hours, created_by) \
              VALUES ($1, $2, $3, $4) \

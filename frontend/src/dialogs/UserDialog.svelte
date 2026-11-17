@@ -27,16 +27,24 @@
   let last_name = template.last_name || "";
   let role = lockedRole || template.role || "employee";
   let weekly_hours = fmtDecimal(template.weekly_hours ?? 39, 2);
-  // Contract hours are a dated history: a change applies from a chosen day on
-  // and the weeks before it keep the hours they were worked under. Defaults to
-  // today; only sent (and only shown) when an existing user's hours change.
-  let weekly_hours_from = appTodayIsoDate($settings?.timezone);
+  // Contract hours and working days are a dated history: a change applies
+  // from a chosen day on, one date for both, and the weeks before it keep the
+  // hours and days they were worked under. Defaults to today; only sent (and
+  // only shown) when an existing contract's hours or days change.
+  let changes_from = appTodayIsoDate($settings?.timezone);
   $: weeklyHoursHistory = template.weekly_hours_history || [];
+  // A contract that had no target until now (an assistant, an account that
+  // did not track time) was judged by zero hours, so any hours it gains are a
+  // change that needs a date. The server compares against the same value.
+  const templateHadWorkTarget =
+    template.role !== "assistant" && (template.tracks_time ?? true);
+  const previousWeeklyHours = templateHadWorkTarget
+    ? Number(template.weekly_hours ?? 0)
+    : 0;
   $: weeklyHoursChanged =
     !isNew &&
     Number.isFinite(parseDecimal(weekly_hours)) &&
-    Math.abs(parseDecimal(weekly_hours) - Number(template.weekly_hours ?? 0)) >
-      1e-9;
+    Math.abs(parseDecimal(weekly_hours) - previousWeeklyHours) > 1e-9;
   // Which weekdays this contract works, as ISO numbers: 1 is Monday, 5 Friday.
   // A contract recorded before working days were stored has none, so fall back
   // to counting up from Monday — the same guess the server made for the roster
@@ -49,6 +57,14 @@
           (_, index) => index + 1,
         ),
   );
+  const initialWorkWeekdays = work_weekdays.join(",");
+  $: workWeekdaysChanged =
+    !isNew && work_weekdays.join(",") !== initialWorkWeekdays;
+  // Only a contract with a work target records hours and days at all.
+  $: workingTimeChanged =
+    !isAssistantRole &&
+    tracks_time &&
+    (weeklyHoursChanged || workWeekdaysChanged);
   const WEEKDAY_CHOICES = [
     { value: 1, name: "Monday" },
     { value: 2, name: "Tuesday" },
@@ -266,6 +282,11 @@
 
   // Keep untouched start-date default aligned with timezone changes.
   $: todayIso = appTodayIsoDate($settings?.timezone);
+  // A change can start from the contract start up to today. A contract that
+  // has not begun yet can only change from its first day, so the date follows
+  // the start there instead of offering today, which the server refuses.
+  $: changesFromLatest = start_date > todayIso ? start_date : todayIso;
+  $: if (start_date > todayIso) changes_from = start_date;
   $: if (
     isNew &&
     !template.start_date &&
@@ -407,16 +428,14 @@
     }
     const leave_accounts = leaveAccountsPayload();
     if (leave_accounts === null) return;
-    // The new hours may start anywhere from the contract start to today
-    // (or to the start itself, for a contract that has not begun yet).
+    // The change may start anywhere from the contract start to today (or to
+    // the start itself, for a contract that has not begun yet).
     if (
-      weeklyHoursChanged &&
-      !isAssistantRole &&
-      (weekly_hours_from < start_date ||
-        weekly_hours_from > (start_date > todayIso ? start_date : todayIso))
+      workingTimeChanged &&
+      (changes_from < start_date || changes_from > changesFromLatest)
     ) {
       error = $t(
-        "The new weekly hours must start between the contract start and today.",
+        "Changes to the working time must start between the contract start and today.",
       );
       return;
     }
@@ -482,9 +501,7 @@
         role: normalizedRole,
         weekly_hours: normalizedWeeklyHours,
         ...(isAssistantRole ? {} : { work_weekdays }),
-        ...(weeklyHoursChanged && !isAssistantRole
-          ? { weekly_hours_from }
-          : {}),
+        ...(workingTimeChanged ? { changes_from } : {}),
         leave_accounts,
         start_date,
         // Always send explicitly: `null` clears it back to the start_date
@@ -693,19 +710,21 @@
             </div>
           </fieldset>
         </div>
-        {#if weeklyHoursChanged}
-          <div class="hours-change">
-            <label class="zf-label" for="user-weekly-hours-from"
-              >{$t("New hours apply from")}</label
+        {#if workingTimeChanged}
+          <div class="working-time-change">
+            <label class="zf-label" for="user-changes-from"
+              >{$t("Changes apply from")}</label
             >
             <DatePicker
-              id="user-weekly-hours-from"
-              bind:value={weekly_hours_from}
+              id="user-changes-from"
+              bind:value={changes_from}
+              min={start_date}
+              max={changesFromLatest}
               container={dlg}
             />
             <div class="field-hint">
               {$t(
-                "Weeks before this date keep the hours they were worked with.",
+                "Weeks before this date keep the hours and working days they were worked with.",
               )}
             </div>
           </div>

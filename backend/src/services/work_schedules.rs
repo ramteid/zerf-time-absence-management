@@ -6,7 +6,7 @@
 //! This module is the only place a calculation should obtain one.
 
 use crate::db::DatabasePool;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::repository::WorkScheduleDb;
 use crate::time_calc::{WeeklyHoursHistory, WorkSchedule, WorkScheduleHistory};
 use chrono::NaiveDate;
@@ -118,4 +118,141 @@ pub async fn weekly_hours_for(
     WorkScheduleDb::new(pool.clone())
         .hours_history_for_user(user_id, current_weekly_hours)
         .await
+}
+
+/// What one save of the user form says about a contract's working time.
+///
+/// Only built for a contract that has a work target after the save; one
+/// without a target records no hours and no working days at all.
+pub struct WorkingTimeUpdate<'a> {
+    pub user_id: i64,
+    /// The contract start after the save.
+    pub contract_start: NaiveDate,
+    pub today: NaiveDate,
+    /// The weekly hours the weeks before this save were judged by: the stored
+    /// hours, or zero for a contract that had no work target until now.
+    pub previous_hours: f64,
+    /// The weekly hours the form sent, if any.
+    pub new_hours: Option<f64>,
+    /// The weekdays the form named, already normalised.
+    pub named_weekdays: Option<&'a [i16]>,
+    pub previous_day_count: i16,
+    /// The day count after the save.
+    pub new_day_count: i16,
+    /// The first day the changed hours and working days apply to. Omitted
+    /// means today, or the contract start for a contract not yet begun.
+    pub changes_from: Option<NaiveDate>,
+    pub changed_by: i64,
+}
+
+/// Record a change of weekly hours and working days, both from one date.
+///
+/// Hours and days are two halves of one contract change. Dating them apart is
+/// what let them disagree: hours moved back to October with the days still
+/// following from the day of saving gave the weeks in between the new hours
+/// spread over the old days. One date for both makes that impossible.
+///
+/// Weeks before that date keep the hours and days they were worked under. The
+/// date may lie in the past so a change entered late can still be dated
+/// correctly, but never before the contract start and never in the future.
+/// Only what actually changed is recorded: a save that leaves the hours or the
+/// days as they are writes nothing for them, so an unrelated save can never
+/// re-date an earlier change.
+pub async fn record_working_time_tx(
+    tx: &mut crate::db::PgConnection,
+    update: WorkingTimeUpdate<'_>,
+) -> AppResult<()> {
+    let created_by = Some(update.changed_by);
+    // A contract with no pattern at all gets a starting one. When the form
+    // named the days, they are the starting pattern too: writing the
+    // Monday-first guess for the earlier period and the named days from the
+    // change on would invent a change that never happened.
+    let starting_pattern = match update.named_weekdays {
+        Some(days) => days.to_vec(),
+        None => WorkScheduleDb::default_weekdays(update.new_day_count),
+    };
+    WorkScheduleDb::ensure_for_user_tx(
+        tx,
+        update.user_id,
+        update.contract_start,
+        &starting_pattern,
+        created_by,
+    )
+    .await?;
+    // A contract start moved earlier would otherwise leave the days between
+    // the new start and the oldest record with no pattern and no hours.
+    WorkScheduleDb::extend_earliest_to_tx(tx, update.user_id, update.contract_start).await?;
+    WorkScheduleDb::extend_earliest_hours_to_tx(tx, update.user_id, update.contract_start).await?;
+
+    // "Today" for a contract that has not begun yet is its first day: that is
+    // the pattern the form shows, and the latest a change may start.
+    let latest_allowed = update.today.max(update.contract_start);
+    let current_pattern =
+        WorkScheduleDb::weekdays_in_force_tx(tx, update.user_id, latest_allowed).await?;
+    let wanted_pattern = wanted_weekdays(&update, current_pattern.as_deref());
+    let changed_pattern = wanted_pattern.filter(|days| current_pattern.as_ref() != Some(days));
+    let changed_hours = update
+        .new_hours
+        .filter(|hours| *hours != update.previous_hours);
+    if changed_pattern.is_none() && changed_hours.is_none() {
+        return Ok(());
+    }
+
+    let changes_from = update.changes_from.unwrap_or(latest_allowed);
+    if changes_from < update.contract_start || changes_from > latest_allowed {
+        return Err(AppError::BadRequest(
+            "Changes to the working time must start between the contract start and today.".into(),
+        ));
+    }
+    if let Some(new_hours) = changed_hours {
+        WorkScheduleDb::record_hours_tx(
+            tx,
+            update.user_id,
+            update.contract_start,
+            update.previous_hours,
+            changes_from,
+            new_hours,
+            created_by,
+        )
+        .await?;
+    }
+    if let Some(days) = changed_pattern {
+        WorkScheduleDb::record_weekdays_change_tx(
+            tx,
+            update.user_id,
+            changes_from,
+            &days,
+            created_by,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// The working days the save asks for, or `None` when it says nothing about
+/// them.
+///
+/// Named days are the authoritative statement. A changed day count alone (the
+/// API still accepts one) has to change the pattern too: the count and the
+/// pattern are two statements of the same fact, and left alone they drift, so
+/// somebody moved from five days a week to three kept a Monday-to-Friday
+/// pattern and went on being given a five-day target. A pattern that already
+/// works that many days is kept as it is, so weekdays somebody picked by hand
+/// are not overwritten with the Monday-first guess.
+fn wanted_weekdays(
+    update: &WorkingTimeUpdate<'_>,
+    current_pattern: Option<&[i16]>,
+) -> Option<Vec<i16>> {
+    if let Some(days) = update.named_weekdays {
+        return Some(days.to_vec());
+    }
+    if update.new_day_count == update.previous_day_count {
+        return None;
+    }
+    let already_fits = current_pattern
+        .is_some_and(|days| i16::try_from(days.len()).ok() == Some(update.new_day_count));
+    if already_fits {
+        return None;
+    }
+    Some(WorkScheduleDb::default_weekdays(update.new_day_count))
 }

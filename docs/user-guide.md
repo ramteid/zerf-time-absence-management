@@ -101,6 +101,7 @@ Use this document if you are:
   - [Reading the system log](#reading-the-system-log)
   - [Creating a user](#creating-a-user)
   - [Working days](#working-days)
+  - [Changing the weekly hours or working days](#changing-the-weekly-hours-or-working-days)
   - [Updating a user](#updating-a-user)
   - [Archiving a user](#archiving-a-user)
   - [Restoring an archived user](#restoring-an-archived-user)
@@ -1755,27 +1756,36 @@ What the working days decide:
   overtime in full, because no target was expected there.
 
 Changing someone's working days does not rewrite their past. The new days
-apply from the day you save the change; every week before that keeps the days
-it was worked under. To correct a mistake rather than record a change, save
-the correct days and then ask an administrator to adjust the earlier period.
+apply from the date you choose; every week before that keeps the days it was
+worked under. See [Changing the weekly hours or working
+days](#changing-the-weekly-hours-or-working-days).
 
 Assistants have no working days and no target hours. They are paid for the
 hours they are present.
 
-### Changing the weekly hours
+### Changing the weekly hours or working days
 
 A contract can change after the start date, for example from 20 to 30 hours a
-week. Open the user, enter the new weekly hours and choose **New hours apply
-from**. The date can be today or earlier, but not before the start date and not
-in the future.
+week, or from five to four working days. Open the user, enter the new weekly
+hours or tick the new working days, and choose **Changes apply from**. The date
+applies to both. It can be today or earlier, but not before the start date and
+not in the future.
 
-- Weeks before that date keep the hours they were worked with. Nothing in the
-  past is recalculated with the new hours.
-- From that date on, the daily target and the flextime balance use the new
-  hours.
+- Weeks before that date keep the hours and working days they were worked
+  with. Nothing before it is recalculated.
+- From that date on, the daily target, the flextime balance and the leave days
+  an absence costs follow the new hours and days.
+- Booked times and absences are never changed. Only the target they are
+  compared with changes.
+- If the person had no target before, for example as an assistant, the weeks
+  before the date keep no target.
+- If a later change is already on record, the new one replaces it. From the
+  chosen date on, what you saved applies.
+- Saving the form without changing the hours or days leaves the history as it
+  is.
 - The form shows a **Weekly hours history** once there has been a change, so
   you can see which hours applied from when.
-- If you entered a wrong date, save again with the same date and the right
+- If you entered wrong hours, save again with the same date and the right
   hours. This replaces that change.
 
 ### Updating a user

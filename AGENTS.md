@@ -304,13 +304,13 @@ migration 048's backfill (the roster that existed when it ran),
 before any other user and outside the regular path), `services::users::restore`
 and `handlers::users::update` — the last two through `ensure_for_user_tx` plus
 `extend_earliest_to_tx`, which pulls the oldest pattern back when a contract
-start moves earlier so no employed day is left uncovered. `update` additionally
-calls `align_day_count_tx` when `workdays_per_week` itself changes: the count
-and the pattern are two statements of the same fact, and without it somebody
-moved from five days a week to three kept a Monday-to-Friday pattern for good.
-That alignment is dated from the day the change is made, never from the contract
-start, and it leaves a pattern that already works that many days untouched so an
-admin's hand-picked weekdays survive an unrelated save.
+start moves earlier so no employed day is left uncovered. `update` goes through
+`services::work_schedules::record_working_time_tx`, which also turns a changed
+`workdays_per_week` alone into a pattern change: the count and the pattern are
+two statements of the same fact, and without it somebody moved from five days a
+week to three kept a Monday-to-Friday pattern for good. A pattern that already
+works that many days is left untouched so an admin's hand-picked weekdays
+survive an unrelated save.
 
 **Weekly hours are dated too.** `user_weekly_hours` (migration 055) works like the
 weekday history: `time_calc::WeeklyHoursHistory::on(date)` is asked per day by
@@ -319,12 +319,24 @@ from 20 to 30 hours never gives the weeks already worked a 30-hour target.
 `users.weekly_hours` stays the value in force today (the latest row) for
 everything that needs only the current contract. There is no backfill: the
 first change writes the old value as a starting row at the contract start
-(`WorkScheduleDb::record_hours_tx`), but only if the old value was above zero,
-so a first target (assistant promoted to employee) still reads the new hours
-for the whole past, as before. The admin chooses the effective date
-(`weekly_hours_from`): not before the contract start, not in the future; the
-same date again replaces that row. Contracts without a work target get zero
+(`WorkScheduleDb::record_hours_tx`). That includes zero: a contract that had no
+work target until this save (an assistant promoted, time tracking switched on)
+is judged by zero hours for the weeks before the change, so a first target never
+reaches back to the contract start. Contracts without a work target get zero
 hours (`services::work_schedules::weekly_hours_for`).
+
+**Hours and weekdays change from one date** (`changes_from`, formerly
+`weekly_hours_from`, still accepted as an alias): not before the contract start,
+not in the future, default today. Dating them apart is what let them disagree —
+hours dated back with the days changing on the day of saving gave the weeks in
+between the new hours spread over the old days. `record_working_time_tx`
+records only what differs from the value in force today (the pattern on
+`today.max(start_date)`, the hours the previous contract was judged by), so a
+save that resends unchanged days never re-dates an earlier change. A change
+replaces every row of the same kind dated after it
+(`record_weekdays_change_tx`, `record_hours_tx`): from that date on, what was
+saved applies, which is what the form shows afterwards. The same date again
+replaces that row, and a row repeating its predecessor is removed.
 
 Assistants and irregular contracts get no pattern, and their fallback has to
 keep reading exactly as the app reads today. `WorkSchedule::weekly_leave_cap` is

@@ -659,6 +659,109 @@ describe("UserDialog", () => {
     );
   });
 
+  it("dates a change of working days and sends no date when nothing changed", async () => {
+    // Hours and working days change from one date. Before this the days had
+    // no date at all and always changed on the day of saving, so hours dated
+    // back to an earlier Monday ran over the old days until then.
+    apiMock.mockImplementation(async (path) => {
+      if (path === "/users") return [];
+      if (path === "/users/7/leave-accounts") return userLeaveAccounts();
+      return {};
+    });
+    component = mount(UserDialog, {
+      target,
+      props: {
+        template: {
+          id: 7,
+          first_name: "Grace",
+          last_name: "Green",
+          role: "employee",
+          email: "grace@example.com",
+          weekly_hours: 40,
+          workdays_per_week: 5,
+          work_weekdays: [1, 2, 3, 4, 5],
+          start_date: "2023-01-01",
+          approver_ids: [5],
+          active: true,
+          tracks_time: true,
+        },
+        onClose: vi.fn(),
+      },
+    });
+    await waitForText(target, "Edit User");
+    await settle();
+    const saveButton = () =>
+      [...target.querySelectorAll("button")].find((b) =>
+        b.textContent.includes("Save"),
+      );
+    const lastPut = () =>
+      apiMock.mock.calls.findLast(
+        ([path, opts]) => path === "/users/7" && opts?.method === "PUT",
+      );
+
+    // Nothing changed: no date field and no date sent.
+    expect(target.textContent).not.toContain("Changes apply from");
+    apiMock.mockClear();
+    saveButton().click();
+    await settle();
+    expect(lastPut()[1].body).not.toHaveProperty("changes_from");
+
+    // Unticking Friday is a change of working days: it needs a date.
+    target.querySelector('input[data-weekday="5"]').click();
+    await settle();
+    expect(target.textContent).toContain("Changes apply from");
+    apiMock.mockClear();
+    saveButton().click();
+    await settle();
+    const body = lastPut()[1].body;
+    expect(body.work_weekdays).toEqual([1, 2, 3, 4]);
+    expect(body.changes_from).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("dates a change for a contract not yet begun from its first day", async () => {
+    // Such a contract can only change from its start: today lies before it,
+    // and the server refuses a change dated before the contract began.
+    apiMock.mockImplementation(async (path) => {
+      if (path === "/users") return [];
+      if (path === "/users/7/leave-accounts") return userLeaveAccounts();
+      return {};
+    });
+    component = mount(UserDialog, {
+      target,
+      props: {
+        template: {
+          id: 7,
+          first_name: "Grace",
+          last_name: "Green",
+          role: "employee",
+          email: "grace@example.com",
+          weekly_hours: 40,
+          workdays_per_week: 5,
+          work_weekdays: [1, 2, 3, 4, 5],
+          start_date: "2099-03-02",
+          approver_ids: [5],
+          active: true,
+          tracks_time: true,
+        },
+        onClose: vi.fn(),
+      },
+    });
+    await waitForText(target, "Edit User");
+    await settle();
+    target.querySelector('input[data-weekday="1"]').click();
+    await settle();
+    apiMock.mockClear();
+    [...target.querySelectorAll("button")]
+      .find((b) => b.textContent.includes("Save"))
+      .click();
+    await settle();
+    const putCall = apiMock.mock.calls.findLast(
+      ([path, opts]) => path === "/users/7" && opts?.method === "PUT",
+    );
+    expect(putCall[1].body.work_weekdays).toEqual([2, 3, 4, 5]);
+    expect(putCall[1].body.changes_from).toBe("2099-03-02");
+  });
+
   it("only sends category_ids/absence_category_ids on create, never on edit", async () => {
     apiMock.mockImplementation(async (path) => {
       if (path === "/users") return [];

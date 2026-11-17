@@ -3428,6 +3428,7 @@ async fn weekly_hours_changes_are_dated_and_not_retroactive() {
     let (st, body) = admin
         .put(
             &format!("/api/v1/users/{user_id}"),
+            // `weekly_hours_from` is the field's earlier name, still accepted.
             &json!({"weekly_hours": 30.0, "weekly_hours_from": iso(change)}),
         )
         .await;
@@ -3452,7 +3453,7 @@ async fn weekly_hours_changes_are_dated_and_not_retroactive() {
         let (st, body) = admin
             .put(
                 &format!("/api/v1/users/{user_id}"),
-                &json!({"weekly_hours": 10.0, "weekly_hours_from": iso(bad)}),
+                &json!({"weekly_hours": 10.0, "changes_from": iso(bad)}),
             )
             .await;
         assert_eq!(
@@ -3466,7 +3467,7 @@ async fn weekly_hours_changes_are_dated_and_not_retroactive() {
     let (st, body) = admin
         .put(
             &format!("/api/v1/users/{user_id}"),
-            &json!({"weekly_hours": 25.0, "weekly_hours_from": iso(change)}),
+            &json!({"weekly_hours": 25.0, "changes_from": iso(change)}),
         )
         .await;
     assert_eq!(st, StatusCode::OK, "correct the change: {body}");
@@ -3479,7 +3480,7 @@ async fn weekly_hours_changes_are_dated_and_not_retroactive() {
     let (st, body) = admin
         .put(
             &format!("/api/v1/users/{user_id}"),
-            &json!({"weekly_hours": 20.0, "weekly_hours_from": iso(change)}),
+            &json!({"weekly_hours": 20.0, "changes_from": iso(change)}),
         )
         .await;
     assert_eq!(st, StatusCode::OK, "correct back to the old hours: {body}");
@@ -3488,6 +3489,245 @@ async fn weekly_hours_changes_are_dated_and_not_retroactive() {
     assert_eq!((rows[0].valid_from, rows[0].weekly_hours), (start, 20.0));
     let (_, detail) = admin.get(&format!("/api/v1/users/{user_id}")).await;
     assert_eq!(detail["weekly_hours"].as_f64(), Some(20.0));
+
+    app.cleanup().await;
+}
+
+/// The target one day carries, read from the range report for that day alone.
+async fn day_target_minutes(
+    admin: &crate::common::TestClient,
+    user_id: i64,
+    day: chrono::NaiveDate,
+) -> i64 {
+    let (st, body) = admin
+        .get(&format!(
+            "/api/v1/reports/range?user_id={user_id}&from={day}&to={day}"
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK, "range report for {day}: {body}");
+    body["full_month_target_min"].as_i64().expect("target")
+}
+
+/// Hours and working days change from one date, and an unchanged half of the
+/// form is never re-dated.
+///
+/// Before this the working days had no date of their own and always changed on
+/// the day of saving. Hours dated back to an earlier Monday then ran over the
+/// old days until that save: 32 hours over five days is 384 minutes, so the
+/// Friday a four-day contract no longer works still carried a target.
+///
+/// The numbers: 40 hours over five days is 40 × 60 ÷ 5 = 480 minutes a day,
+/// and 32 hours over four days is 32 × 60 ÷ 4 = 480 minutes a day.
+#[tokio::test]
+async fn hours_and_working_days_change_from_one_date() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let schedules = &app.state.db.work_schedules;
+    let start = reference_date() - Duration::days(400);
+    let iso = |date: chrono::NaiveDate| date.format("%Y-%m-%d").to_string();
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "together@example.com",
+                "first_name": "Tanja", "last_name": "Together",
+                "role": "employee", "weekly_hours": 40.0,
+                "work_weekdays": [1, 2, 3, 4, 5],
+                "start_date": iso(start),
+                "approver_ids": [1],
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create: {body}");
+    let user_id = id(&body);
+
+    // reference_date() is a Monday, so the change starts on a Monday too, in
+    // December, clear of any public holiday.
+    let change = reference_date() - Duration::days(28);
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{user_id}"),
+            &json!({
+                "weekly_hours": 32.0,
+                "work_weekdays": [1, 2, 3, 4],
+                "changes_from": iso(change),
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "change hours and days: {body}");
+
+    let hours = schedules.list_hours_for_user(user_id).await.unwrap();
+    let hours: Vec<_> = hours
+        .iter()
+        .map(|r| (r.valid_from, r.weekly_hours))
+        .collect();
+    assert_eq!(hours, vec![(start, 40.0), (change, 32.0)]);
+    let days = schedules.list_for_user(user_id).await.unwrap();
+    let days: Vec<_> = days
+        .iter()
+        .map(|r| (r.valid_from, r.weekdays.clone()))
+        .collect();
+    assert_eq!(
+        days,
+        vec![(start, vec![1, 2, 3, 4, 5]), (change, vec![1, 2, 3, 4])],
+        "the days change on the same date as the hours"
+    );
+
+    let friday_before = change - Duration::days(3);
+    let thursday_after = change + Duration::days(3);
+    let friday_after = change + Duration::days(4);
+    assert_eq!(
+        day_target_minutes(&admin, user_id, friday_before).await,
+        480,
+        "the week before keeps 40 hours over five days"
+    );
+    assert_eq!(
+        day_target_minutes(&admin, user_id, thursday_after).await,
+        480,
+        "32 hours over four days from the change on"
+    );
+    assert_eq!(
+        day_target_minutes(&admin, user_id, friday_after).await,
+        0,
+        "the Friday no longer worked carries nothing from the change on"
+    );
+
+    // Saving again with the same hours and days writes nothing, whatever date
+    // the form sends along: nothing changed, so nothing is re-dated.
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{user_id}"),
+            &json!({
+                "first_name": "Tanja-Maria",
+                "weekly_hours": 32.0,
+                "work_weekdays": [1, 2, 3, 4],
+                "changes_from": iso(start),
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "unrelated save: {body}");
+    assert_eq!(schedules.list_for_user(user_id).await.unwrap().len(), 2);
+    assert_eq!(
+        schedules.list_hours_for_user(user_id).await.unwrap().len(),
+        2
+    );
+
+    // A change dated before a later one replaces it: from that day on, the
+    // days just saved apply. The hours were not touched and keep their history.
+    let earlier = change - Duration::days(14);
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{user_id}"),
+            &json!({
+                "weekly_hours": 32.0,
+                "work_weekdays": [2, 3, 4, 5],
+                "changes_from": iso(earlier),
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "earlier change of days: {body}");
+    let days = schedules.list_for_user(user_id).await.unwrap();
+    let days: Vec<_> = days
+        .iter()
+        .map(|r| (r.valid_from, r.weekdays.clone()))
+        .collect();
+    assert_eq!(
+        days,
+        vec![(start, vec![1, 2, 3, 4, 5]), (earlier, vec![2, 3, 4, 5])],
+        "the later change is replaced"
+    );
+    assert_eq!(
+        schedules.list_hours_for_user(user_id).await.unwrap().len(),
+        2
+    );
+    let (_, detail) = admin.get(&format!("/api/v1/users/{user_id}")).await;
+    assert_eq!(
+        detail["work_weekdays"],
+        json!([2, 3, 4, 5]),
+        "in force today"
+    );
+    assert_eq!(detail["workdays_per_week"].as_i64(), Some(4));
+
+    // A change of days is held to the same dates as a change of hours.
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{user_id}"),
+            &json!({
+                "work_weekdays": [1, 2, 3],
+                "changes_from": iso(reference_date() + Duration::days(30)),
+            }),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "no change in the future: {body}"
+    );
+
+    app.cleanup().await;
+}
+
+/// A contract that gains its first target keeps zero for the weeks before.
+///
+/// Before this an assistant promoted to employee with 30 hours from a December
+/// Monday was also given those 30 hours for every week since the contract
+/// start, and every one of those weeks then counted as hours not worked.
+///
+/// The numbers: 30 hours over five days is 30 × 60 ÷ 5 = 360 minutes a day.
+#[tokio::test]
+async fn a_first_target_leaves_the_weeks_before_it_at_zero() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let schedules = &app.state.db.work_schedules;
+    let start = reference_date() - Duration::days(400);
+    let iso = |date: chrono::NaiveDate| date.format("%Y-%m-%d").to_string();
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "promoted@example.com",
+                "first_name": "Paula", "last_name": "Promoted",
+                "role": "assistant", "weekly_hours": 0.0,
+                "start_date": iso(start),
+                "approver_ids": [1],
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create assistant: {body}");
+    let user_id = id(&body);
+
+    let change = reference_date() - Duration::days(28);
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{user_id}"),
+            &json!({
+                "role": "employee",
+                "weekly_hours": 30.0,
+                "work_weekdays": [1, 2, 3, 4, 5],
+                "changes_from": iso(change),
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "promote: {body}");
+
+    let hours = schedules.list_hours_for_user(user_id).await.unwrap();
+    let hours: Vec<_> = hours
+        .iter()
+        .map(|r| (r.valid_from, r.weekly_hours))
+        .collect();
+    assert_eq!(hours, vec![(start, 0.0), (change, 30.0)]);
+    assert_eq!(
+        day_target_minutes(&admin, user_id, change - Duration::days(3)).await,
+        0,
+        "the weeks before the promotion keep no target"
+    );
+    assert_eq!(
+        day_target_minutes(&admin, user_id, change + Duration::days(4)).await,
+        360,
+        "30 hours over five days from the promotion on"
+    );
 
     app.cleanup().await;
 }
