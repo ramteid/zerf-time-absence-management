@@ -5,23 +5,24 @@
 //! `crate::email::queue_email` rather than sent directly (see that module's
 //! doc comment for the two exceptions: the payroll report's own attachment
 //! send, and the admin "test connection" probe). This worker is the single
-//! consumer of that queue: it polls every 2 minutes, sends pending rows in
-//! the order `EmailQueueDb::list_pending` hands back (new messages first,
+//! consumer of that queue: it polls every 2 minutes, sends the rows that are
+//! due in the order `EmailQueueDb::list_due` hands back (new messages first,
 //! then previously-failed ones least-recently-retried first — see that
 //! method's doc comment for why strict creation order would let one
-//! undeliverable message starve everything behind it), and deletes a row
-//! only once the SMTP server confirmed it accepted the message. A row that
-//! keeps failing simply stays queued — nothing is ever silently dropped, and
-//! it is retried indefinitely.
+//! undeliverable message starve everything behind it), and deletes a row only
+//! once the SMTP server confirmed it accepted the message.
 //!
-//! A failed delivery is never silent either. Its first failed attempt, any
-//! attempt that fails for a different reason than the one before, and its
-//! 100th (`PERSISTENT_FAILURE_ATTEMPTS`) are logged as errors and reported to
-//! the opted-in admins (see `is_reported_failure` and
-//! `report_failed_delivery`); the repeats in between are logged at INFO only.
+//! A mail that fails is neither dropped nor reported at once. The mail server
+//! is often unreachable for only a short while, and the next try then simply
+//! succeeds, so the mail is retried on a widening schedule
+//! ([`RETRY_DELAYS_SECONDS`]). Only when the last scheduled attempt fails too
+//! is it given up: the row is marked `given_up_at` and never tried again, the
+//! failure is logged as an error and reported — once — to the opted-in admins
+//! (see `report_failed_attempt`). Every earlier failed attempt is logged as a
+//! warning and reaches nobody.
 
 use crate::error::AppResult;
-use crate::repository::EmailQueueEntry;
+use crate::repository::{EmailQueueEntry, FailedAttempt};
 use crate::services::notifications::{enqueue_error, load_language, SYSTEM_ERROR_KIND};
 use crate::AppState;
 use std::time::Duration;
@@ -34,13 +35,31 @@ const POLL_INTERVAL: Duration = Duration::from_secs(2 * 60);
 /// rest simply waits for the next poll.
 const BATCH_LIMIT: i64 = 50;
 
-/// Attempt count at which an email that is *still* undeliverable is reported
-/// once more, even though its reason has not changed. The first report may have
-/// been dismissed as a passing blip; after this many polls (hours, not minutes)
-/// it clearly is not one. Past this point only a changed reason is reported
-/// again — the row keeps retrying forever regardless, per the "never drop an
-/// email" requirement.
-const PERSISTENT_FAILURE_ATTEMPTS: i32 = 100;
+const MINUTE: i64 = 60;
+const HOUR: i64 = 60 * MINUTE;
+
+/// How long a mail waits after its 1st, 2nd, ... failed attempt before the
+/// next one is made. The first retries come quickly, because the usual
+/// outage is short; the later, longer waits cover one that lasts for hours.
+/// Together they keep a mail in play for 17 hours and 20 minutes after its
+/// first attempt (5 min + 15 min + 1 h + 4 h + 12 h), which is long enough to
+/// ride out a night and short enough for an admin to still react the next
+/// morning.
+///
+/// No wait may be shorter than [`POLL_INTERVAL`]: the worker could not honour
+/// it anyway, since a due row is picked up at the next poll. The waits are
+/// also what keeps one stuck message from being retried on every poll and
+/// from hammering the mail server in the meantime.
+pub const RETRY_DELAYS_SECONDS: [i64; 5] = [5 * MINUTE, 15 * MINUTE, HOUR, 4 * HOUR, 12 * HOUR];
+
+/// Attempts a mail gets in total: the first one plus one after each waiting
+/// time. The attempt that fails as number `MAX_ATTEMPTS` is the final failure.
+pub const MAX_ATTEMPTS: i32 = RETRY_DELAYS_SECONDS.len() as i32 + 1;
+
+/// Days a given-up mail stays in the table before the daily cleanup removes
+/// it. Long enough to look up what was lost, short enough not to keep a
+/// temporary password or reset link around for good.
+pub const GIVEN_UP_RETENTION_DAYS: i32 = 30;
 
 /// Longest server reply shown in an admin alert. The full text stays in the
 /// log and in the row's `last_error`; a pathological multi-line reply must not
@@ -54,8 +73,8 @@ pub async fn run_loop(state: AppState) {
     }
 }
 
-/// Drain and process one batch of pending emails. Public so integration
-/// tests can drive a single deterministic pass without the polling loop.
+/// Drain and process one batch of due emails. Public so integration tests can
+/// drive a single deterministic pass without the polling loop.
 pub async fn process_pending(state: &AppState) {
     // SMTP may have been disabled (or never configured) after some emails
     // were already queued; leave them queued untouched rather than
@@ -65,10 +84,15 @@ pub async fn process_pending(state: &AppState) {
         return;
     };
 
-    let entries = match state.db.email_queue.list_pending(BATCH_LIMIT).await {
+    let entries = match state
+        .db
+        .email_queue
+        .list_due(BATCH_LIMIT, &RETRY_DELAYS_SECONDS)
+        .await
+    {
         Ok(entries) => entries,
         Err(e) => {
-            tracing::error!(target: "zerf::email_queue", "list pending failed: {e}");
+            tracing::error!(target: "zerf::email_queue", "list due failed: {e}");
             return;
         }
     };
@@ -104,17 +128,18 @@ pub async fn process_pending(state: &AppState) {
             }
             Err(crate::email::GuardedSendError::Smtp(e)) => {
                 let error_text = e.to_string();
-                let attempts = match state
+                let failed_attempt = match state
                     .db
                     .email_queue
-                    .record_failure(entry.id, &error_text)
+                    .record_failure(entry.id, &error_text, MAX_ATTEMPTS)
                     .await
                 {
-                    Ok(attempts) => attempts,
+                    Ok(failed_attempt) => failed_attempt,
                     Err(db_err) => {
                         // The failed send is the news, whatever state the
                         // attempt counter is in: a bookkeeping error must
-                        // never swallow it.
+                        // never swallow it. The row keeps its old counter, so
+                        // it is simply tried again at the next poll.
                         tracing::error!(
                             target: "zerf::email_queue",
                             "email {} to {} could not be delivered: {error_text}",
@@ -129,69 +154,47 @@ pub async fn process_pending(state: &AppState) {
                         continue;
                     }
                 };
-                report_failed_delivery(state, &entry, attempts, &error_text).await;
+                report_failed_attempt(state, &entry, &failed_attempt, &error_text).await;
             }
         }
     }
 }
 
-/// Whether this failure is reported (logged as an error and raised to the
-/// admins) rather than merely noted at INFO level.
+/// Log one failed delivery attempt and, when it was the mail's last one, raise
+/// it to the opted-in admins like any other technical error.
 ///
-/// Three kinds of failure are news to an admin:
-/// * the first one of a mail, because a new problem has appeared;
-/// * one whose reason differs from the previous attempt's. The first report
-///   may have been about a passing outage, and the server that is back now
-///   refuses the recipient — that must not wait hours for the next milestone;
-/// * the [`PERSISTENT_FAILURE_ATTEMPTS`]th, because the problem has not gone
-///   away.
+/// Only the final failure is news to an admin. An attempt that will be
+/// followed by another one is a passing outage as far as anybody can tell, and
+/// the retry usually succeeds. It is logged as a warning ("the app still did
+/// its job"): that keeps it in the System Log, where a flaky mail server shows
+/// up as a pattern, without alerting anyone. The number of warnings is bounded
+/// by [`MAX_ATTEMPTS`] per mail, so a mail that keeps failing cannot flood the
+/// log that keeps only 1000 rows.
 ///
-/// The quiet for everything else protects the System Log: it keeps 1000 rows,
-/// and one address the server keeps refusing is retried on every poll — an
-/// error row per retry would push every other entry out of the log within days.
-fn is_reported_failure(attempts: i32, previous_error: Option<&str>, error_text: &str) -> bool {
-    attempts == 1
-        || attempts == PERSISTENT_FAILURE_ATTEMPTS
-        // No previous error on a later attempt cannot happen in practice;
-        // reporting is the safe reading of it.
-        || previous_error.map(failure_class) != Some(failure_class(error_text))
-}
-
-/// The stable head of an SMTP error text, such as `permanent error (550)` or
-/// `Connection error`: what is left once the details after the first colon
-/// (the server's wording, addresses, OS error numbers) are dropped. Two
-/// failures of one class are the same reason. Comparing whole texts instead
-/// would report every retry whenever the server's wording carries something
-/// that changes from attempt to attempt, such as a queue id.
-fn failure_class(error_text: &str) -> &str {
-    error_text.split(':').next().unwrap_or(error_text).trim()
-}
-
-/// Log one failed delivery attempt and, when it is worth reporting (see
-/// [`is_reported_failure`]), raise it to the opted-in admins like any other
-/// technical error.
-///
-/// The error is logged under this module's own `zerf::email_queue` target,
-/// which the log-capture writer keeps out of its automatic error → admin
-/// alert path (a delivery failure must not spawn a notification about
-/// itself). So the alert is raised explicitly here — except for a failed
-/// *admin alert* ([`SYSTEM_ERROR_KIND`]). Reporting that one would queue one
-/// more alert mail, which fails the same way, and so on for as long as the
-/// mail server stays down. Such a failure is still logged, and the alert
-/// about the original problem already sits in the admins' app notifications.
+/// The final failure is logged as an error under this module's own
+/// `zerf::email_queue` target, which the log-capture writer keeps out of its
+/// automatic error → admin alert path (a delivery failure must not spawn a
+/// notification about itself). So the alert is raised explicitly here — except
+/// for a failed *admin alert* ([`SYSTEM_ERROR_KIND`]). Reporting that one would
+/// queue one more alert mail, which fails the same way, and so on for as long
+/// as the mail server stays down. Such a failure is still logged, and the
+/// alert about the original problem already sits in the admins' app
+/// notifications.
 ///
 /// The mail body is never logged or quoted: it can carry a temporary password
 /// or a reset link.
-async fn report_failed_delivery(
+async fn report_failed_attempt(
     state: &AppState,
     entry: &EmailQueueEntry,
-    attempts: i32,
+    failed_attempt: &FailedAttempt,
     error_text: &str,
 ) {
-    if !is_reported_failure(attempts, entry.last_error.as_deref(), error_text) {
-        tracing::info!(
+    let attempts = failed_attempt.attempts;
+    if !failed_attempt.given_up {
+        tracing::warn!(
             target: "zerf::email_queue",
-            "email {} to {} is still not delivered (attempt {attempts}): {error_text}",
+            "email {} to {} could not be delivered (attempt {attempts} of {MAX_ATTEMPTS}), \
+             it will be tried again later: {error_text}",
             entry.id,
             entry.to_address
         );
@@ -200,7 +203,8 @@ async fn report_failed_delivery(
 
     tracing::error!(
         target: "zerf::email_queue",
-        "email {} to {} (subject {:?}) could not be delivered (attempt {attempts}): {error_text}",
+        "email {} to {} (subject {:?}) could not be delivered; giving up after {attempts} \
+         attempts: {error_text}",
         entry.id,
         entry.to_address,
         entry.subject
@@ -222,10 +226,9 @@ async fn report_failed_delivery(
             ("error", alert_error_text(error_text)),
         ],
     );
-    // One key per queued mail: a later report about the same mail (new reason,
-    // or the persistent milestone) re-raises the first one with its new text
-    // instead of piling up beside it, while a different mail failing for the
-    // same reason gets a notification of its own.
+    // One key per queued mail, so a different mail failing for the same reason
+    // gets a notification of its own. A mail is given up only once, which makes
+    // the key a safeguard against a duplicate rather than a way to update one.
     enqueue_error(
         state,
         &language,
@@ -286,73 +289,18 @@ pub async fn delete_with_retry(
 mod tests {
     use super::*;
 
-    const REFUSED: &str = "Connection error: Connection refused (os error 111)";
-    const UNKNOWN_USER: &str = "permanent error (550): 5.1.1 User unknown";
-
+    /// The schedule must widen, and never ask for a retry sooner than the next
+    /// poll could deliver it. A zero or shrinking wait would quietly turn the
+    /// widening schedule back into a retry on every poll.
     #[test]
-    fn the_first_and_the_persistent_attempt_are_always_reported() {
-        assert!(is_reported_failure(1, None, REFUSED));
-        assert!(is_reported_failure(
-            PERSISTENT_FAILURE_ATTEMPTS,
-            Some(REFUSED),
-            REFUSED
-        ));
-    }
-
-    #[test]
-    fn a_repeat_of_the_same_reason_stays_quiet() {
-        for attempts in [
-            2,
-            3,
-            5,
-            50,
-            PERSISTENT_FAILURE_ATTEMPTS - 1,
-            PERSISTENT_FAILURE_ATTEMPTS + 1,
-            500,
-        ] {
-            assert!(
-                !is_reported_failure(attempts, Some(REFUSED), REFUSED),
-                "attempt {attempts} must stay quiet"
-            );
-        }
-    }
-
-    #[test]
-    fn a_changed_reason_is_reported_between_the_milestones() {
-        // The server was unreachable at first and now answers, refusing the
-        // recipient: new information, not a repeat.
-        assert!(is_reported_failure(2, Some(REFUSED), UNKNOWN_USER));
-        assert!(is_reported_failure(
-            PERSISTENT_FAILURE_ATTEMPTS + 7,
-            Some(UNKNOWN_USER),
-            REFUSED
-        ));
-        // A failure with no recorded predecessor is reported rather than lost.
-        assert!(is_reported_failure(3, None, REFUSED));
-    }
-
-    #[test]
-    fn changing_server_detail_is_not_a_changed_reason() {
-        assert!(!is_reported_failure(
-            7,
-            Some("permanent error (550): 5.7.1 Blocked, id=abc123"),
-            "permanent error (550): 5.7.1 Blocked, id=def456"
-        ));
-        assert!(!is_reported_failure(
-            7,
-            Some("Connection error: Connection refused (os error 111)"),
-            "Connection error: timed out"
-        ));
-    }
-
-    #[test]
-    fn the_failure_class_is_the_text_before_the_first_colon() {
-        assert_eq!(failure_class(UNKNOWN_USER), "permanent error (550)");
-        assert_eq!(failure_class(REFUSED), "Connection error");
-        assert_eq!(failure_class("Connection error"), "Connection error");
-        assert_eq!(
-            failure_class("SMTP delivery timed out after 30 seconds"),
-            "SMTP delivery timed out after 30 seconds"
+    fn the_retry_waits_widen_and_none_is_shorter_than_a_poll() {
+        let poll_seconds = POLL_INTERVAL.as_secs() as i64;
+        assert!(RETRY_DELAYS_SECONDS[0] >= poll_seconds);
+        assert!(
+            RETRY_DELAYS_SECONDS
+                .windows(2)
+                .all(|pair| pair[0] < pair[1]),
+            "each wait must be longer than the one before: {RETRY_DELAYS_SECONDS:?}"
         );
     }
 

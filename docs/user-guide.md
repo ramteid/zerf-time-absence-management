@@ -1002,8 +1002,8 @@ When a technical failure occurs — such as a database backup failure, a Nextclo
 - Every error in the System Log is reported this way, except problems with delivering these notifications themselves. Warnings are not reported: anything that keeps Zerf from doing its job is recorded as an error.
 - If no admin has opted in, technical errors are still recorded in the System Log but no one is notified — enable the option for at least one admin to receive alerts.
 - Each failure class produces **at most one active notification** per admin. If the notification is dismissed and the failure recurs, it is raised again.
-- **Undeliverable emails are reported.** If the email server cannot be reached or refuses a message, the notification names the recipient, the subject and the reason the server gave. It appears when the first attempt fails, again if a later attempt fails for a different reason, and once more if the message is still undelivered after 100 attempts (several hours later). Zerf keeps trying in between without further notices.
-- If the email server is down, the notification still appears in the app right away. The alert email follows as soon as the server works again. An alert email that fails is not reported a second time.
+- **Undeliverable emails are reported once, after the last attempt.** If the email server cannot be reached or refuses a message, Zerf tries again several times: right away, then after 5 minutes, 15 minutes, 1 hour, 4 hours and 12 hours. If the server accepts the message at any of these tries, nobody is notified. If the last try fails too (about 17 hours after the first), the notification names the recipient, the subject and the reason the server gave. Zerf does not send that email again afterwards.
+- If the email server is still down when the last try fails, the notification appears in the app anyway. The alert email is sent like any other email, so it is also tried again for several hours. An alert email that fails for good is not reported a second time.
 - If no email server (SMTP) is configured, the in-app notification is still created and the missing email is noted in the System Log; no delivery is retried endlessly.
 - **Backup and upload failure notifications are automatically resolved** when the next cycle succeeds. You do not need to dismiss them manually after fixing the underlying problem; the notification disappears on the next successful backup or upload.
 
@@ -1670,10 +1670,10 @@ work without needing access to the server.
   popup.
 - The log keeps at most 1000 entries, and entries are removed after one year.
   Older entries are deleted automatically.
-- An email that cannot be delivered is listed when its first attempt fails,
-  when a later attempt fails for a different reason, and at the 100th attempt.
-  The other retries are not listed, so one address that keeps being refused
-  cannot fill the log.
+- A failed attempt to deliver an email is listed as a warning, because Zerf
+  tries again later. If the last attempt fails too, it is listed as an error
+  and admins who opted in are notified. One email causes at most six entries,
+  so one address that keeps being refused cannot fill the log.
 
 ### Creating a user
 

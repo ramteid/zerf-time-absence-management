@@ -7,9 +7,10 @@
 //!   persists the already-rendered message to the `email_queue` table and
 //!   returns immediately; [`crate::background::email_queue`] drains that
 //!   table on a 2-minute poll and only deletes a row once SMTP confirmed
-//!   delivery. A message that keeps failing simply stays queued forever —
-//!   nothing is silently lost to a transient SMTP outage anymore. Every
-//!   failure is logged and reported to the opted-in admins by that worker.
+//!   delivery. A message that fails is retried on a widening schedule over
+//!   many hours, so a transient SMTP outage no longer loses it. Only when the
+//!   last scheduled attempt fails too is it given up, and that one failure is
+//!   logged as an error and reported to the opted-in admins by that worker.
 //! * [`send_with_attachment`] — used only by the monthly payroll report,
 //!   which already has its own period-keyed retry queue
 //!   (`payroll_report_queue`) with "stays queued until confirmed sent"
@@ -383,9 +384,9 @@ fn mailbox(address: &str, name: &str) -> Result<Mailbox, Box<dyn std::error::Err
 }
 
 /// The `Reply-To` header of a queued row, if it has one. An address that does
-/// not parse is dropped with a warning instead of failing the send: a failed
-/// row is retried forever, so a bad Reply-To would otherwise block a message
-/// that is perfectly deliverable without it.
+/// not parse is dropped with a warning instead of failing the send: a failing
+/// row is retried until it is given up, so a bad Reply-To would otherwise doom
+/// a message that is perfectly deliverable without it.
 fn reply_to_mailbox(entry: &crate::repository::EmailQueueEntry) -> Option<Mailbox> {
     if entry.reply_to_address.trim().is_empty() {
         return None;
@@ -495,7 +496,6 @@ mod tests {
             to_address: "emil@example.com".into(),
             to_name: "Emil Emp".into(),
             kind: "absence_rejected".into(),
-            last_error: None,
             subject: "Absence rejected".into(),
             body_text: "body".into(),
             reply_to_address: reply_to_address.into(),
@@ -543,8 +543,9 @@ mod tests {
             .all(|line| !line.starts_with("Reply-To:")));
     }
 
-    /// A Reply-To that does not parse must not stop the mail: a failed row is
-    /// retried forever, and the message is deliverable without the header.
+    /// A Reply-To that does not parse must not stop the mail: a failing row is
+    /// retried until it is given up, and the message is deliverable without the
+    /// header.
     #[test]
     fn queued_message_ignores_an_unparseable_reply_to() {
         let entry = queued_entry("not an address", "Lara Lead");

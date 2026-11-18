@@ -180,7 +180,7 @@ static LANGUAGES: &[LangDef] = &[
             ("report_upload_pre_start_content_body", "User: {first_name} {last_name} (ID {user_id})\nPeriod: {period}\nCurrent start date: {start_date}\nIssue: Stored report rows exist before the current start date.\nAction: Correct the start date or historical entries, then retry the PDF export."),
             ("report_upload_unsettled_time_body", "User: {first_name} {last_name} (ID {user_id})\nPeriod: {period}\nIssue: The account is archived or time tracking is disabled, but unresolved time entries remain.\nAction: Resolve draft, submitted, and rejected entries, then retry the PDF export."),
             ("email_delivery_failed_title", "Email could not be delivered"),
-            ("email_delivery_failed_body", "Recipient: {recipient}\nSubject: {subject}\nAttempts: {attempts}\nIssue: The mail server did not accept the email: {error}\nAction: Check the email (SMTP) settings and the mail server. Zerf retries the delivery automatically."),
+            ("email_delivery_failed_body", "Recipient: {recipient}\nSubject: {subject}\nAttempts: {attempts}\nIssue: The mail server did not accept the email, even after several attempts: {error}\nAction: Check the email (SMTP) settings and the mail server. Zerf does not send this email again."),
             // Monthly payroll report
             ("payroll_report_email_subject", "Payroll report {period} - {org_name}"),
             ("payroll_report_email_body", "Hello,\n\nattached you will find the payroll report for {period} from {org_name}.\n\nIt lists the absence days per employee and the working days and hours for the selected groups."),
@@ -387,7 +387,7 @@ static LANGUAGES: &[LangDef] = &[
             ("report_upload_pre_start_content_body", "Person: {first_name} {last_name} (ID {user_id})\nZeitraum: {period}\nAktuelles Startdatum: {start_date}\nProblem: Gespeicherte Berichtsdaten liegen vor dem aktuellen Startdatum.\nAktion: Korrigieren Sie das Startdatum oder die historischen Eintr\u{00e4}ge und starten Sie den PDF-Export erneut."),
             ("report_upload_unsettled_time_body", "Person: {first_name} {last_name} (ID {user_id})\nZeitraum: {period}\nProblem: Das Konto ist archiviert oder die Zeiterfassung ist deaktiviert, aber es gibt noch ungekl\u{00e4}rte Zeiteintr\u{00e4}ge.\nAktion: Kl\u{00e4}ren Sie Eintr\u{00e4}ge im Entwurf, eingereichte und abgelehnte Eintr\u{00e4}ge und starten Sie den PDF-Export erneut."),
             ("email_delivery_failed_title", "E-Mail konnte nicht zugestellt werden"),
-            ("email_delivery_failed_body", "Empf\u{00e4}nger: {recipient}\nBetreff: {subject}\nVersuche: {attempts}\nProblem: Der Mailserver hat die E-Mail nicht angenommen: {error}\nAktion: Pr\u{00fc}fen Sie die E-Mail-Einstellungen (SMTP) und den Mailserver. Zerf versucht die Zustellung automatisch erneut."),
+            ("email_delivery_failed_body", "Empf\u{00e4}nger: {recipient}\nBetreff: {subject}\nVersuche: {attempts}\nProblem: Der Mailserver hat die E-Mail auch nach mehreren Versuchen nicht angenommen: {error}\nAktion: Pr\u{00fc}fen Sie die E-Mail-Einstellungen (SMTP) und den Mailserver. Zerf sendet diese E-Mail nicht noch einmal."),
             // Monatliche Lohnmeldung
             ("payroll_report_email_subject", "Lohnmeldung {period} - {org_name}"),
             ("payroll_report_email_body", "Hallo,\n\nim Anhang finden Sie die Lohnmeldung f\u{00fc}r {period} von {org_name}."),
@@ -1572,7 +1572,7 @@ mod tests {
                 &[
                     ("recipient", "jurij@example.com".to_string()),
                     ("subject", "Your temporary password".to_string()),
-                    ("attempts", "100".to_string()),
+                    ("attempts", "6".to_string()),
                     ("error", "550 5.1.1 User unknown".to_string()),
                 ],
             );
@@ -1580,7 +1580,7 @@ mod tests {
             for expected in [
                 "jurij@example.com",
                 "Your temporary password",
-                "100",
+                "6",
                 "550 5.1.1 User unknown",
             ] {
                 assert!(

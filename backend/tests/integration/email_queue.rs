@@ -1,12 +1,63 @@
 //! Outbound email queue: enqueue gating on SMTP settings, oldest-first
-//! draining, attempts/last_error tracking on failed delivery, and the shared
-//! circuit breaker backing off once SMTP is confirmed broken.
+//! draining, attempts/last_error tracking on failed delivery, the widening
+//! retry schedule, giving a mail up and reporting only that final failure, and
+//! the shared circuit breaker backing off once SMTP is confirmed broken.
 
 use reqwest::StatusCode;
 use serde_json::json;
+use zerf::background::email_queue::{GIVEN_UP_RETENTION_DAYS, MAX_ATTEMPTS, RETRY_DELAYS_SECONDS};
 
 use crate::common::{TestApp, TestClient};
 use crate::helpers::*;
+
+/// The queued mails the worker may attempt right now: never attempted, or
+/// failed before and done waiting.
+async fn due_rows(app: &TestApp) -> Vec<zerf::repository::EmailQueueEntry> {
+    app.state
+        .db
+        .email_queue
+        .list_due(100, &RETRY_DELAYS_SECONDS)
+        .await
+        .expect("list due mails")
+}
+
+/// Pretend the waiting time after the last failed attempt has passed, so the
+/// next `process_pending` tries the mail again. Two days is longer than every
+/// wait in the schedule.
+async fn make_retry_due(app: &TestApp, id: i64) {
+    sqlx::query(
+        "UPDATE email_queue SET last_attempt_at = CURRENT_TIMESTAMP - INTERVAL '2 days' \
+         WHERE id = $1",
+    )
+    .bind(id)
+    .execute(&app.state.pool)
+    .await
+    .expect("make the retry due");
+}
+
+/// Pretend the mail has already failed `failed_attempts` times and that its
+/// wait is over. With `MAX_ATTEMPTS - 1` the next failing attempt is the final
+/// failure. Jumping there in one step also keeps the circuit breaker, which
+/// opens after five failures in a row, out of the way.
+async fn fast_forward(app: &TestApp, id: i64, failed_attempts: i32) {
+    sqlx::query(
+        "UPDATE email_queue SET attempts = $2, \
+         last_attempt_at = CURRENT_TIMESTAMP - INTERVAL '2 days' WHERE id = $1",
+    )
+    .bind(id)
+    .bind(failed_attempts)
+    .execute(&app.state.pool)
+    .await
+    .expect("fast-forward the attempt counter");
+}
+
+async fn is_given_up(app: &TestApp, id: i64) -> bool {
+    sqlx::query_scalar("SELECT given_up_at IS NOT NULL FROM email_queue WHERE id = $1")
+        .bind(id)
+        .fetch_one(&app.state.pool)
+        .await
+        .expect("load given_up_at")
+}
 
 /// Point SMTP at a closed local port: `load_smtp_config` returns a config (so
 /// the send path is reachable) while no mail can ever leave the test machine.
@@ -76,7 +127,7 @@ async fn queue_email_persists_the_already_rendered_message() {
     )
     .await;
 
-    let pending = app.state.db.email_queue.list_pending(10).await.unwrap();
+    let pending = due_rows(&app).await;
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].to_address, "someone@example.com");
     assert_eq!(pending[0].to_name, "Someone");
@@ -108,7 +159,7 @@ async fn account_created_email_is_queued_when_smtp_is_configured() {
         .await;
     assert_eq!(status, StatusCode::OK, "create user");
 
-    let pending = app.state.db.email_queue.list_pending(10).await.unwrap();
+    let pending = due_rows(&app).await;
     let queued = pending
         .iter()
         .find(|e| e.to_address == "onboard@example.com")
@@ -138,18 +189,22 @@ async fn failed_delivery_keeps_the_row_queued_and_records_the_error() {
         )
         .await
         .expect("enqueue");
+    let id = due_rows(&app).await[0].id;
 
     zerf::background::email_queue::process_pending(&app.state).await;
 
-    let pending = app.state.db.email_queue.list_pending(10).await.unwrap();
     assert_eq!(
-        pending.len(),
+        app.state.db.email_queue.count().await.unwrap(),
         1,
         "a failed delivery must leave the row queued, never drop it"
     );
-    let (attempts, last_error) = attempts_and_error(&app, pending[0].id).await;
+    let (attempts, last_error) = attempts_and_error(&app, id).await;
     assert_eq!(attempts, 1);
     assert!(last_error.is_some(), "the failure reason must be recorded");
+    assert!(
+        !is_given_up(&app, id).await,
+        "the first failure is not the end: more attempts are scheduled"
+    );
 
     app.cleanup().await;
 }
@@ -174,7 +229,7 @@ async fn disabling_smtp_leaves_queued_emails_untouched() {
 
     zerf::background::email_queue::process_pending(&app.state).await;
 
-    let pending = app.state.db.email_queue.list_pending(10).await.unwrap();
+    let pending = due_rows(&app).await;
     assert_eq!(pending.len(), 1, "row must remain queued");
     let (attempts, last_error) = attempts_and_error(&app, pending[0].id).await;
     assert_eq!(attempts, 0, "no delivery was ever attempted");
@@ -184,7 +239,7 @@ async fn disabling_smtp_leaves_queued_emails_untouched() {
 }
 
 /// A message that already failed once must not permanently block a fresh
-/// message queued after it: `list_pending` demotes previously-attempted rows
+/// message queued after it: `list_due` demotes previously-attempted rows
 /// behind never-yet-attempted ones, so a single persistently undeliverable
 /// address (e.g. a typo'd recipient) can't monopolize the circuit breaker's
 /// scarce half-open retry slot and starve every healthy email behind it.
@@ -206,10 +261,12 @@ async fn a_previously_failed_row_is_demoted_behind_a_fresh_one() {
         )
         .await
         .expect("enqueue stuck row");
-    let stuck_id = app.state.db.email_queue.list_pending(1).await.unwrap()[0].id;
+    let stuck_id = due_rows(&app).await[0].id;
 
-    // One failed attempt sets `last_attempt_at` on the stuck row.
+    // One failed attempt sets `last_attempt_at` on the stuck row; its wait is
+    // over by the time the fresh row below arrives.
     zerf::background::email_queue::process_pending(&app.state).await;
+    make_retry_due(&app, stuck_id).await;
 
     // A fresh row queued afterwards has never been attempted.
     app.state
@@ -226,7 +283,7 @@ async fn a_previously_failed_row_is_demoted_behind_a_fresh_one() {
         .await
         .expect("enqueue fresh row");
 
-    let pending = app.state.db.email_queue.list_pending(10).await.unwrap();
+    let pending = due_rows(&app).await;
     assert_eq!(pending.len(), 2);
     assert_eq!(
         pending[0].to_address, "fresh@example.com",
@@ -262,7 +319,7 @@ async fn delete_with_retry_removes_the_row() {
         )
         .await
         .expect("enqueue");
-    let id = app.state.db.email_queue.list_pending(1).await.unwrap()[0].id;
+    let id = due_rows(&app).await[0].id;
 
     zerf::background::email_queue::delete_with_retry(&app.state.db.email_queue, id)
         .await
@@ -297,12 +354,14 @@ async fn repeated_failures_trip_the_circuit_breaker_and_stop_further_attempts() 
         )
         .await
         .expect("enqueue");
-    let id = app.state.db.email_queue.list_pending(1).await.unwrap()[0].id;
+    let id = due_rows(&app).await[0].id;
 
     // Five consecutive failures open the breaker
-    // (CircuitBreaker::DEFAULT_FAILURE_THRESHOLD).
+    // (CircuitBreaker::DEFAULT_FAILURE_THRESHOLD). The mail's wait is skipped
+    // each time, so only the breaker can stop the sixth attempt below.
     for _ in 0..5 {
         zerf::background::email_queue::process_pending(&app.state).await;
+        make_retry_due(&app, id).await;
     }
     let (attempts_after_five, _) = attempts_and_error(&app, id).await;
     assert_eq!(attempts_after_five, 5);
@@ -355,11 +414,11 @@ async fn discard_queued_alerts(app: &TestApp) {
     }
 }
 
-/// A failed delivery must reach the opted-in admins, naming the recipient, the
-/// subject, the attempt and the server's reason — and never the mail body,
-/// which can hold a temporary password or a reset link.
+/// A mail that is given up must reach the opted-in admins, naming the
+/// recipient, the subject, the number of attempts and the server's reason — and
+/// never the mail body, which can hold a temporary password or a reset link.
 #[tokio::test]
-async fn a_failed_delivery_is_reported_to_the_opted_in_admins() {
+async fn a_given_up_delivery_is_reported_to_the_opted_in_admins() {
     let app = TestApp::spawn().await;
     let admin_id = opt_in_admin(&app).await;
     configure_unreachable_smtp(&app).await;
@@ -376,8 +435,10 @@ async fn a_failed_delivery_is_reported_to_the_opted_in_admins() {
         )
         .await
         .expect("enqueue");
-    let id = app.state.db.email_queue.list_pending(1).await.unwrap()[0].id;
+    let id = due_rows(&app).await[0].id;
 
+    // The final attempt fails like the ones before it.
+    fast_forward(&app, id, MAX_ATTEMPTS - 1).await;
     zerf::background::email_queue::process_pending(&app.state).await;
 
     let alerts = queued_alerts(&app).await;
@@ -390,7 +451,10 @@ async fn a_failed_delivery_is_reported_to_the_opted_in_admins() {
     let body = alerts[0].body.as_deref().expect("alert body");
     assert!(body.contains("Recipient: jurij@example.com"), "{body}");
     assert!(body.contains("Subject: Your temporary password"), "{body}");
-    assert!(body.contains("Attempts: 1"), "{body}");
+    assert!(
+        body.contains(&format!("Attempts: {MAX_ATTEMPTS}")),
+        "{body}"
+    );
     assert!(
         !body.contains("TOP-SECRET-TEMPORARY-PASSWORD"),
         "the mail body must never be quoted in an alert: {body}"
@@ -415,11 +479,11 @@ async fn a_failed_delivery_is_reported_to_the_opted_in_admins() {
     app.cleanup().await;
 }
 
-/// The same stuck mail is retried on every poll, so it may be reported only at
-/// its first failure and once more when it has clearly not recovered — not on
-/// every retry.
+/// While more attempts are scheduled, a failing mail raises no alert: an outage
+/// that passes within the schedule must reach nobody. The alert comes with the
+/// final failure, once, and the mail is then given up for good.
 #[tokio::test]
-async fn a_failing_delivery_is_reported_at_the_first_and_the_persistent_attempt_only() {
+async fn a_failing_delivery_is_reported_only_when_it_is_given_up() {
     let app = TestApp::spawn().await;
     opt_in_admin(&app).await;
     configure_unreachable_smtp(&app).await;
@@ -436,58 +500,72 @@ async fn a_failing_delivery_is_reported_at_the_first_and_the_persistent_attempt_
         )
         .await
         .expect("enqueue");
-    let id = app.state.db.email_queue.list_pending(1).await.unwrap()[0].id;
+    let id = due_rows(&app).await[0].id;
 
-    // Attempt 1 is reported.
+    // The first failure looks like a passing outage: nobody hears about it.
     zerf::background::email_queue::process_pending(&app.state).await;
-    assert_eq!(queued_alerts(&app).await.len(), 1);
-    discard_queued_alerts(&app).await;
-
-    // Attempt 2 stays quiet.
-    zerf::background::email_queue::process_pending(&app.state).await;
-    assert_eq!(attempts_and_error(&app, id).await.0, 2);
+    assert_eq!(attempts_and_error(&app, id).await.0, 1);
     assert!(
         queued_alerts(&app).await.is_empty(),
-        "a plain retry must not raise another alert"
+        "the first failed attempt must not raise an alert"
     );
+    assert!(!is_given_up(&app, id).await);
 
-    // Jump close to the persistent milestone: attempt 99 stays quiet too...
-    sqlx::query("UPDATE email_queue SET attempts = 98 WHERE id = $1")
-        .bind(id)
-        .execute(&app.state.pool)
-        .await
-        .expect("fast-forward the attempt counter");
+    // A retry that fails changes nothing about that.
+    make_retry_due(&app, id).await;
     zerf::background::email_queue::process_pending(&app.state).await;
-    assert_eq!(attempts_and_error(&app, id).await.0, 99);
+    assert_eq!(attempts_and_error(&app, id).await.0, 2);
     assert!(queued_alerts(&app).await.is_empty());
 
-    // ...and attempt 100 reports again, with the new attempt count. (Four
-    // failures in a row by now: the circuit breaker is still closed.)
+    // Even the attempt right before the last one stays quiet.
+    fast_forward(&app, id, MAX_ATTEMPTS - 2).await;
     zerf::background::email_queue::process_pending(&app.state).await;
-    assert_eq!(attempts_and_error(&app, id).await.0, 100);
+    assert_eq!(attempts_and_error(&app, id).await.0, MAX_ATTEMPTS - 1);
+    assert!(queued_alerts(&app).await.is_empty());
+    assert!(!is_given_up(&app, id).await);
+
+    // The last attempt is the final failure: one alert, and the mail is given up.
+    make_retry_due(&app, id).await;
+    zerf::background::email_queue::process_pending(&app.state).await;
+    assert_eq!(attempts_and_error(&app, id).await.0, MAX_ATTEMPTS);
+    assert!(is_given_up(&app, id).await);
     let alerts = queued_alerts(&app).await;
-    assert_eq!(
-        alerts.len(),
-        1,
-        "the persistent failure is reported once more"
-    );
+    assert_eq!(alerts.len(), 1, "the final failure is reported once");
     assert_eq!(
         alerts[0].dedupe_key.as_deref(),
-        Some(format!("email_delivery_failed_{id}").as_str()),
-        "same key as the first report, so it re-raises that notification"
+        Some(format!("email_delivery_failed_{id}").as_str())
     );
-    assert!(alerts[0].body.as_deref().unwrap().contains("Attempts: 100"));
+    assert!(alerts[0]
+        .body
+        .as_deref()
+        .unwrap()
+        .contains(&format!("Attempts: {MAX_ATTEMPTS}")));
+
+    // A given-up mail is never tried again, however long ago its last attempt was.
+    discard_queued_alerts(&app).await;
+    make_retry_due(&app, id).await;
+    assert!(due_rows(&app).await.is_empty());
+    zerf::background::email_queue::process_pending(&app.state).await;
+    assert_eq!(attempts_and_error(&app, id).await.0, MAX_ATTEMPTS);
+    assert!(
+        queued_alerts(&app).await.is_empty(),
+        "a given-up mail must not raise another alert"
+    );
+    assert_eq!(
+        app.state.db.email_queue.count().await.unwrap(),
+        1,
+        "the given-up row stays for a while instead of being dropped"
+    );
 
     app.cleanup().await;
 }
 
-/// The first report may describe a passing outage. When the server is back and
-/// fails the same mail for a *different* reason, that is new information and
-/// must not wait for the persistent milestone.
+/// A failed mail is offered again only once its wait has passed, and the waits
+/// follow the schedule. Otherwise a mail the server keeps refusing would be
+/// sent again on every poll.
 #[tokio::test]
-async fn a_failure_with_a_new_reason_is_reported_again() {
+async fn a_failed_mail_waits_for_its_retry_delay() {
     let app = TestApp::spawn().await;
-    opt_in_admin(&app).await;
     configure_unreachable_smtp(&app).await;
     app.state
         .db
@@ -502,36 +580,140 @@ async fn a_failure_with_a_new_reason_is_reported_again() {
         )
         .await
         .expect("enqueue");
-    let id = app.state.db.email_queue.list_pending(1).await.unwrap()[0].id;
+    let id = due_rows(&app).await[0].id;
 
-    // Attempt 1 is reported.
+    // Right after a failed attempt the mail is not due, and the next poll
+    // leaves it alone.
     zerf::background::email_queue::process_pending(&app.state).await;
-    assert_eq!(queued_alerts(&app).await.len(), 1);
-    discard_queued_alerts(&app).await;
+    assert!(due_rows(&app).await.is_empty());
+    zerf::background::email_queue::process_pending(&app.state).await;
+    assert_eq!(
+        attempts_and_error(&app, id).await.0,
+        1,
+        "a poll inside the waiting time must not attempt the mail again"
+    );
 
-    // Pretend that attempt had failed for another reason: the server had
-    // answered and refused the recipient. The next failure (connection refused
-    // again) then differs from its predecessor...
-    sqlx::query("UPDATE email_queue SET last_error = $2 WHERE id = $1")
+    // For every number of failed attempts the mail is due once that wait has
+    // passed, and not a minute sooner. A number beyond the schedule (a row
+    // that failed more often under older rules) keeps the longest wait.
+    let schedule_length = RETRY_DELAYS_SECONDS.len();
+    for failed_attempts in 1..=(schedule_length + 3) {
+        let wait = RETRY_DELAYS_SECONDS[failed_attempts.min(schedule_length) - 1];
+        for (seconds_ago, expect_due) in [(wait - 60, false), (wait + 60, true)] {
+            sqlx::query(
+                "UPDATE email_queue SET attempts = $2, \
+                 last_attempt_at = CURRENT_TIMESTAMP - $3::bigint * INTERVAL '1 second' \
+                 WHERE id = $1",
+            )
+            .bind(id)
+            .bind(failed_attempts as i32)
+            .bind(seconds_ago)
+            .execute(&app.state.pool)
+            .await
+            .expect("set the time of the last attempt");
+            let is_due = due_rows(&app).await.iter().any(|row| row.id == id);
+            assert_eq!(
+                is_due, expect_due,
+                "after {failed_attempts} failed attempts the mail waits {wait}s; \
+                 its last attempt was {seconds_ago}s ago"
+            );
+        }
+    }
+
+    app.cleanup().await;
+}
+
+/// A row that failed more often than the schedule allows was queued while a
+/// worker without a limit was still retrying it. The change must not drop such
+/// a mail silently: it gets one more attempt and is reported if that fails.
+#[tokio::test]
+async fn a_mail_beyond_the_schedule_gets_one_last_attempt_and_is_then_reported() {
+    let app = TestApp::spawn().await;
+    opt_in_admin(&app).await;
+    configure_unreachable_smtp(&app).await;
+    app.state
+        .db
+        .email_queue
+        .enqueue("old@example.com", "Old", "test", "subject", "body", None)
+        .await
+        .expect("enqueue");
+    let id = due_rows(&app).await[0].id;
+    fast_forward(&app, id, 300).await;
+    assert_eq!(
+        due_rows(&app).await.len(),
+        1,
+        "it is not given up, so it is still offered"
+    );
+
+    zerf::background::email_queue::process_pending(&app.state).await;
+
+    assert_eq!(attempts_and_error(&app, id).await.0, 301);
+    assert!(is_given_up(&app, id).await);
+    assert_eq!(
+        queued_alerts(&app).await.len(),
+        1,
+        "its failure is reported, not swallowed"
+    );
+
+    app.cleanup().await;
+}
+
+/// A given-up mail is kept for the retention period, so a lost mail can be
+/// looked up, and then removed: its text may hold a temporary password or a
+/// reset link. A mail still waiting for delivery is never removed.
+#[tokio::test]
+async fn given_up_mails_are_deleted_after_the_retention_period() {
+    let app = TestApp::spawn().await;
+    for address in [
+        "old@example.com",
+        "recent@example.com",
+        "waiting@example.com",
+    ] {
+        app.state
+            .db
+            .email_queue
+            .enqueue(address, "Someone", "test", "subject", "body", None)
+            .await
+            .expect("enqueue");
+    }
+    let ids: Vec<i64> = due_rows(&app).await.iter().map(|row| row.id).collect();
+    let (old_id, recent_id, waiting_id) = (ids[0], ids[1], ids[2]);
+    for (id, days_ago) in [
+        (old_id, GIVEN_UP_RETENTION_DAYS + 1),
+        (recent_id, GIVEN_UP_RETENTION_DAYS - 1),
+    ] {
+        sqlx::query(
+            "UPDATE email_queue \
+             SET given_up_at = CURRENT_TIMESTAMP - make_interval(days => $2) WHERE id = $1",
+        )
         .bind(id)
-        .bind("permanent error (550): 5.1.1 User unknown")
+        .bind(days_ago)
         .execute(&app.state.pool)
         .await
-        .expect("rewrite the previous reason");
-    zerf::background::email_queue::process_pending(&app.state).await;
+        .expect("mark the row as given up");
+    }
 
-    // ...and is reported although it is only attempt 2.
-    assert_eq!(attempts_and_error(&app, id).await.0, 2);
-    let alerts = queued_alerts(&app).await;
-    assert_eq!(alerts.len(), 1, "a changed reason must be reported again");
-    assert!(alerts[0].body.as_deref().unwrap().contains("Attempts: 2"));
+    let deleted = app
+        .state
+        .db
+        .email_queue
+        .delete_given_up_older_than(GIVEN_UP_RETENTION_DAYS)
+        .await
+        .expect("delete old given-up mails");
+
+    assert_eq!(deleted, 1, "only the mail given up too long ago goes");
+    let left: Vec<i64> = sqlx::query_scalar("SELECT id FROM email_queue ORDER BY id")
+        .fetch_all(&app.state.pool)
+        .await
+        .expect("list the remaining rows");
+    assert_eq!(left, vec![recent_id, waiting_id]);
 
     app.cleanup().await;
 }
 
 /// The alert about a failed mail is itself a mail. When the mail server is
-/// down it fails too, and reporting *that* would queue yet another alert mail,
-/// forever. Its failure is recorded like any other but never reported.
+/// down it is given up too, and reporting *that* would queue yet another alert
+/// mail, forever. Its failure is recorded like any other but never reported.
 #[tokio::test]
 async fn a_failed_alert_mail_is_not_reported_again() {
     let app = TestApp::spawn().await;
@@ -550,22 +732,27 @@ async fn a_failed_alert_mail_is_not_reported_again() {
         )
         .await
         .expect("enqueue");
+    let id = due_rows(&app).await[0].id;
 
-    // The ordinary mail fails and is reported; the fan-out turns the report
+    // The ordinary mail is given up and reported; the fan-out turns the report
     // into an email for the admin, queued because SMTP counts as configured.
+    fast_forward(&app, id, MAX_ATTEMPTS - 1).await;
     zerf::background::email_queue::process_pending(&app.state).await;
     zerf::background::error_notifications::process_pending(&app.state).await;
-    let pending = app.state.db.email_queue.list_pending(10).await.unwrap();
-    let alert_mail = pending
+    let alert_mail_id = due_rows(&app)
+        .await
         .iter()
         .find(|mail| mail.kind == "system_error")
-        .expect("the alert email must be queued with the system_error kind");
-    let alert_mail_id = alert_mail.id;
+        .expect("the alert email must be queued with the system_error kind")
+        .id;
 
-    // The alert mail fails as well. That is logged and counted, nothing more.
+    // The alert mail is given up as well. That is logged and recorded, nothing
+    // more.
+    fast_forward(&app, alert_mail_id, MAX_ATTEMPTS - 1).await;
     zerf::background::email_queue::process_pending(&app.state).await;
     let (attempts, last_error) = attempts_and_error(&app, alert_mail_id).await;
-    assert_eq!(attempts, 1, "the alert mail was attempted");
+    assert_eq!(attempts, MAX_ATTEMPTS, "the alert mail was attempted");
+    assert!(is_given_up(&app, alert_mail_id).await);
     assert!(last_error.is_some(), "its failure is recorded");
     assert!(
         queued_alerts(&app).await.is_empty(),
@@ -586,12 +773,8 @@ async fn queued_mail(
     address: &str,
     kind: &str,
 ) -> Vec<zerf::repository::EmailQueueEntry> {
-    app.state
-        .db
-        .email_queue
-        .list_pending(100)
+    due_rows(app)
         .await
-        .expect("list queued mail")
         .into_iter()
         .filter(|mail| mail.to_address == address && mail.kind == kind)
         .collect()

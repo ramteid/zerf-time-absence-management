@@ -87,6 +87,14 @@ async fn main() -> Result<()> {
 
                 // Remove stale system-alert email throttle keys (not touched in 30 days).
                 db.settings.cleanup_stale_alert_keys().await;
+
+                // Remove emails the queue worker gave up on, once they have
+                // been kept long enough to look up (their text can hold a
+                // temporary password or a reset link).
+                let _ = db
+                    .email_queue
+                    .delete_given_up_older_than(background::email_queue::GIVEN_UP_RETENTION_DAYS)
+                    .await;
             }
         });
     }

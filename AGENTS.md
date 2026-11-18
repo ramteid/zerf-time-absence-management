@@ -140,7 +140,7 @@ let user = UserDb::new(pool.clone()).find_by_id(id).await?;
 - Monthly timesheet PDF upload to Nextcloud (daily, after midnight)
 - Monthly payroll report email to the tax office (daily, after midnight)
 - Error-notification worker: drains `error_notification_queue` and alerts opted-in admins in-app + by email (poll every 10s)
-- Email queue worker: drains `email_queue` and delivers via SMTP, guarded by a shared circuit breaker; logs failed deliveries as errors and alerts opted-in admins (poll every 2 minutes)
+- Email queue worker: drains `email_queue` and delivers via SMTP, guarded by a shared circuit breaker; retries a failed mail on a widening schedule (up to about 17 hours) and alerts opted-in admins only once it gives the mail up (poll every 2 minutes)
 
 Both monthly jobs share `background/schedule.rs` (daily loop, `YYYY-MM` period
 math, queue backfill through the previous month, day-of-month deferral) and the
@@ -743,17 +743,30 @@ the PUT that follows decides, and its failure is the error.
 outbound email (password resets, absence decisions, reminders, error alerts)
 goes through `services::notifications::deliver` → `email::queue_email`, which
 persists the already-rendered subject/body to `email_queue` rather than
-sending it inline. The background worker above drains that table every 2 minutes (new messages
-first, then previously-failed ones least-recently-retried first — so one
-undeliverable message can't monopolize the circuit breaker's retry slot and
-starve everything queued behind it) and deletes a row only once SMTP
-confirmed delivery — a message that keeps failing simply stays queued and is
-retried indefinitely, so a transient SMTP outage can no longer silently lose
-an email. That delete is itself retried a few times (idempotent — deleting an
-already-gone row is a no-op) before giving up, so a momentary DB hiccup right
-after a confirmed send can't leave the row looking untouched and cause the
-same email to go out again next cycle; the payroll report's own period
-delete gets the identical treatment for the same reason. Enqueueing
+sending it inline. The background worker above drains that table every 2
+minutes and deletes a row only once SMTP confirmed delivery. That delete is
+itself retried a few times (idempotent — deleting an already-gone row is a
+no-op) before giving up, so a momentary DB hiccup right after a confirmed send
+can't leave the row looking untouched and cause the same email to go out again
+next cycle; the payroll report's own period delete gets the identical
+treatment for the same reason. A message that fails is neither reported nor
+dropped at once: it is retried on a widening schedule
+(`RETRY_DELAYS_SECONDS`: right away, then after 5 min, 15 min, 1 h, 4 h and
+12 h, which makes `MAX_ATTEMPTS` = 6 attempts over 17 h 20 min), because the
+mail server is usually unreachable for a short while only and the next try
+succeeds. `EmailQueueDb::list_due` offers a row only once its wait since
+`last_attempt_at` has passed (a row that failed more often than the schedule
+is long keeps the longest wait), new messages first, then previously-failed
+ones least-recently-retried first — so one undeliverable message can't
+monopolize the circuit breaker's retry slot and starve everything queued
+behind it. When the last attempt fails too, `EmailQueueDb::record_failure`
+sets `email_queue.given_up_at` in the very statement that counts the attempt
+(migration 057), so the failure and the decision to stop cannot be recorded
+apart. The worker never offers a given-up row again, and the daily cleanup
+deletes it after `GIVEN_UP_RETENTION_DAYS` (30) because its text can hold a
+temporary password or a reset link. Rows queued before migration 057 have
+`given_up_at` NULL, so they get one more attempt and, if it fails, the same
+final report: the change cannot drop a mail silently. Enqueueing
 itself is gated on `SettingsDb::load_smtp_config()` returning `Some`
 (SMTP enabled and fully configured); if SMTP is disabled after messages are
 already queued, they are left in place untouched rather than dropped or
@@ -761,20 +774,17 @@ warned about. A shared `email::CircuitBreaker` (5 consecutive failures opens
 it; a 5-minute cooldown then grants one half-open trial) guards every real
 SMTP attempt so a longer outage stops being retried on every poll; the
 breaker is shared with the payroll report's own `send_with_attachment` call so
-both paths back off together. A failed delivery is never silent: its first failed
-attempt, any attempt that fails for a different reason than the one before, and
-its 100th (`PERSISTENT_FAILURE_ATTEMPTS`) are logged as errors under the
-`zerf::email_queue` target and raised to the opted-in admins through
-`enqueue_error` (dedupe key `email_delivery_failed_<queue id>`, so a later report
-re-raises the first with its new text). "A different reason" compares
-`failure_class` — the part of lettre's error text before the first colon, such as
-`permanent error (550)` — so server detail that changes per attempt (a queue id)
-is not a new reason; without this rule an outage reported at the first attempt
-would hide the recipient refusal that surfaces once the server is back, for
-hours. The repeats in between are logged at INFO only: `app_logs` keeps 1000
-rows, and one address the server keeps refusing is retried on every poll, so an
-error row per retry would push every other entry out of the System Log within
-days. The target stays on the
+both paths back off together. A failed delivery is never silent, but only its
+end is an alert. Every failed attempt that another one will follow is logged as
+a warning under the `zerf::email_queue` target ("a retry that may still
+succeed"): it stays in the System Log, where a flaky mail server shows up as a
+pattern, and reaches no admin, so an outage the schedule rides out alerts
+nobody. The warnings are bounded by `MAX_ATTEMPTS` per mail, so a mail the
+server keeps refusing cannot push every other entry out of `app_logs`, which
+keeps 1000 rows. The attempt after which a mail is given up is logged as an
+error and raised to the opted-in admins through `enqueue_error` (dedupe key
+`email_delivery_failed_<queue id>`), once per mail; the alert says that Zerf
+will not send that mail again. The target stays on the
 log-capture loop guard's exclusion list (`zerf::email*`) on purpose, so the
 automatic error → alert path never fires for it and the alert is raised
 explicitly instead — except for a failed *admin alert*. Those mails carry
@@ -852,7 +862,7 @@ The admin's SMTP test sends no message and needs none.
 | `reopen_requests` | Requests to reopen a submitted week |
 | `payroll_report_queue` | Months whose payroll report PDF still has to be emailed |
 | `error_notification_queue` | Technical-error events awaiting fan-out to opted-in admins |
-| `email_queue` | Outbound emails awaiting SMTP delivery (kind, attempts, last error) |
+| `email_queue` | Outbound emails awaiting SMTP delivery (kind, attempts, last error, `given_up_at` once the retry schedule is exhausted) |
 | `notifications` | Per-user in-app notifications |
 | `app_settings` | Key-value app settings |
 | `audit_log` | Before/after JSON snapshots of all mutations |
