@@ -751,8 +751,9 @@ can't leave the row looking untouched and cause the same email to go out again
 next cycle; the payroll report's own period delete gets the identical
 treatment for the same reason. A message that fails is neither reported nor
 dropped at once: it is retried on a widening schedule
-(`RETRY_DELAYS_SECONDS`: right away, then after 5 min, 15 min, 1 h, 4 h and
-12 h, which makes `MAX_ATTEMPTS` = 6 attempts over 17 h 20 min), because the
+(`RETRY_DELAYS_SECONDS`: 5 min, 15 min, 1 h, 4 h and 12 h after the previous
+failed attempt, which makes `MAX_ATTEMPTS` = 6 attempts, the first plus five
+retries, over 17 h 20 min), because the
 mail server is usually unreachable for a short while only and the next try
 succeeds. `EmailQueueDb::list_due` offers a row only once its wait since
 `last_attempt_at` has passed (a row that failed more often than the schedule
@@ -765,8 +766,10 @@ sets `email_queue.given_up_at` in the very statement that counts the attempt
 apart. The worker never offers a given-up row again, and the daily cleanup
 deletes it after `GIVEN_UP_RETENTION_DAYS` (30) because its text can hold a
 temporary password or a reset link. Rows queued before migration 057 have
-`given_up_at` NULL, so they get one more attempt and, if it fails, the same
-final report: the change cannot drop a mail silently. Enqueueing
+`given_up_at` NULL, so they keep their remaining attempts (at least one, since
+a row that already failed more often than the schedule allows gets one more)
+and, if those fail, the same final report: the change cannot drop a mail
+silently. Enqueueing
 itself is gated on `SettingsDb::load_smtp_config()` returning `Some`
 (SMTP enabled and fully configured); if SMTP is disabled after messages are
 already queued, they are left in place untouched rather than dropped or
