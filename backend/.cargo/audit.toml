@@ -39,9 +39,8 @@
 # This is an "unmaintained" advisory (not a vulnerability). The crate is pulled
 # in only by `testcontainers`, a dev-dependency used by the integration tests
 # to start a throwaway Postgres container; it is never part of the shipped
-# binary. `testcontainers-modules` still requires `testcontainers` 0.27, so
-# the dependency cannot move on its own. Re-evaluate when
-# `testcontainers-modules` supports a release without it.
+# binary. The latest release, `testcontainers` 0.28, still depends on it.
+# Re-evaluate when a `testcontainers` release drops it.
 ignore = [
     "RUSTSEC-2023-0071",
     "RUSTSEC-2024-0370",

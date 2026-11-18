@@ -1,7 +1,6 @@
 use chrono::Datelike;
 use std::sync::Arc;
-use testcontainers::ContainerAsync;
-use testcontainers_modules::postgres::Postgres;
+use testcontainers::{ContainerAsync, GenericImage};
 use zerf::services::{categories, holidays};
 use zerf::{build_app, config::Config, AppState};
 
@@ -15,7 +14,7 @@ pub struct TestApp {
     pub admin_password: String,
     pub state: AppState,
     /// Keep the container alive for the duration of the test (None when TEST_DATABASE_URL is set).
-    _container: Option<ContainerAsync<Postgres>>,
+    _container: Option<ContainerAsync<GenericImage>>,
     /// Admin URL used to drop the database on cleanup (Some only when TEST_DATABASE_URL is set).
     admin_database_url: Option<String>,
     /// Name of the isolated test database to drop on cleanup.

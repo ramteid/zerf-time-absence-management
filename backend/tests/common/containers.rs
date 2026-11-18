@@ -21,10 +21,9 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Once;
 
-use testcontainers::core::Mount;
+use testcontainers::core::{IntoContainerPort, Mount, WaitFor};
 use testcontainers::runners::AsyncRunner;
-use testcontainers::{ContainerAsync, ImageExt};
-use testcontainers_modules::postgres::Postgres;
+use testcontainers::{ContainerAsync, GenericImage, ImageExt};
 
 /// Marks a container as one of these tests', so the sweep never touches
 /// anything else on the machine.
@@ -32,11 +31,31 @@ const TEST_CONTAINER_LABEL: &str = "zerf.integration-test";
 /// The test process that owns the container, as `<pid namespace>/<pid>`.
 const OWNER_LABEL: &str = "zerf.integration-test.owner";
 
+/// The official Debian-based image. Its build includes lz4, which the
+/// migrations need for TOAST compression; the Alpine variants do not.
+/// It stays on 17: from 18 on the image keeps its data below
+/// `/var/lib/postgresql/18`, outside the tmpfs mounted below.
+const POSTGRES_IMAGE: &str = "postgres";
+const POSTGRES_TAG: &str = "17";
+/// The superuser, password and database the tests connect with (see app.rs).
+const POSTGRES_CREDENTIAL: &str = "postgres";
+/// Postgres logs this once for the temporary server the image runs its
+/// initialisation on (stdout), and once for the real server (stderr). The
+/// container is ready only after the second.
+const READY_MESSAGE: &str = "database system is ready to accept connections";
+
 /// Start the Postgres container one test runs against.
-pub async fn start_postgres() -> ContainerAsync<Postgres> {
+pub async fn start_postgres() -> ContainerAsync<GenericImage> {
     remove_leftovers_of_finished_runs_once();
-    Postgres::default()
-        .with_tag("17")
+    GenericImage::new(POSTGRES_IMAGE, POSTGRES_TAG)
+        .with_exposed_port(5432.tcp())
+        .with_wait_for(WaitFor::message_on_stderr(READY_MESSAGE))
+        .with_wait_for(WaitFor::message_on_stdout(READY_MESSAGE))
+        .with_env_var("POSTGRES_USER", POSTGRES_CREDENTIAL)
+        .with_env_var("POSTGRES_PASSWORD", POSTGRES_CREDENTIAL)
+        .with_env_var("POSTGRES_DB", POSTGRES_CREDENTIAL)
+        // A test database is thrown away anyway, so durability only costs time.
+        .with_cmd(["-c", "fsync=off"])
         .with_label(TEST_CONTAINER_LABEL, "true")
         .with_label(OWNER_LABEL, owner_of_this_process().unwrap_or_default())
         // In memory: a test database is thrown away anyway, and a tmpfs leaves

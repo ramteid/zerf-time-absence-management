@@ -26,7 +26,7 @@ services:
   # It sits on the internal `private` network next to postgres: the app
   # reaches it as `mailpit:1025`, and nothing is published to the host.
   mailpit:
-    image: axllent/mailpit:v1.21
+    image: axllent/mailpit:v1.34.0
     container_name: zerf-e2e-mailpit
     restart: unless-stopped
     environment:

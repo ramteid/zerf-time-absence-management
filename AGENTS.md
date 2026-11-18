@@ -921,9 +921,9 @@ cargo build --release
 
 ## Frontend
 
-**Framework**: Svelte 5.55.5
-**Build tool**: Vite 8.0.10
-**Test runner**: Vitest 4.1.5 + jsdom
+**Framework**: Svelte 5.58.0
+**Build tool**: Vite 8.3.8
+**Test runner**: Vitest 5.1.1 + jsdom
 **Linter**: ESLint 10 + eslint-plugin-svelte (covers JS and `.svelte` files)
 **Dev server port**: 5173 (proxies `/api` and `/healthz` to `http://127.0.0.1:3333`)
 **Build output**: `frontend/dist/`
@@ -1186,7 +1186,7 @@ gone too. "Already delivered" is derived from the queue (period reached `payroll
 
 ### Integration tests
 
-Integration tests use `testcontainers_modules::postgres::Postgres` (plain `postgres:17` image, no pg_tde). This is intentional: pg_tde is a deployment concern and has no effect on application logic or SQL correctness. `postgres:17` (Debian) is used rather than the module default (`11-alpine`) because lz4 TOAST compression requires PostgreSQL 14+ compiled with `--with-lz4`, which is included in the official Debian-based `postgres:17` image.
+Integration tests run against a testcontainers `GenericImage` of the plain `postgres:17` image (no pg_tde). This is intentional: pg_tde is a deployment concern and has no effect on application logic or SQL correctness. The Debian-based image is used rather than an Alpine one because lz4 TOAST compression requires PostgreSQL 14+ compiled with `--with-lz4`. It stays on 17 because from 18 on the image keeps its data outside the tmpfs the tests mount.
 
 Containers are started only through `tests/common/containers.rs`, which keeps
 them from piling up: the data directory is a tmpfs (no volume can be left
