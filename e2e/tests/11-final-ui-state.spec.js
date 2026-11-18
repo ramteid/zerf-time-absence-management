@@ -9,7 +9,12 @@
 // employee, invalidating her session), hence the file number.
 
 import { test, expect } from "@playwright/test";
-import { storageStatePath } from "./helpers.js";
+import {
+  employeeAbsenceDates,
+  openAbsencesForYear,
+  setDate,
+  storageStatePath,
+} from "./helpers.js";
 import {
   ADMIN,
   ASSISTANT,
@@ -39,7 +44,7 @@ test.describe("employee sees the final state of their items", () => {
   test("employee: the approved vacation now shows as cancelled", async ({
     page,
   }) => {
-    await page.goto("/absences");
+    await openAbsencesForYear(page, (await employeeAbsenceDates(page.request)).year);
     // Full lifecycle visible in one row's status chip: requested (05) →
     // approved (06) → cancellation requested (09) → cancellation approved
     // (10) → "Cancelled". The day-off request stayed "Rejected" (06).
@@ -57,7 +62,13 @@ test.describe("employee sees the final state of their items", () => {
   test("employee: personal report shows the approved planned account day", async ({
     page,
   }) => {
+    // The leave cards follow the year of the period shown, so look at the
+    // day the leave was booked for: it may lie in next year.
+    const { education } = await employeeAbsenceDates(page.request);
     await page.goto("/reports");
+    await page.getByRole("button", { name: "Custom range" }).click();
+    await setDate(page, "reports-period-from", education);
+    await setDate(page, "reports-period-to", education);
     await expect(
       page.locator(".leave-account-card", { hasText: LEAVE_ACCOUNT_CATEGORY }),
     ).toContainText(/Approved planned\s*1/);

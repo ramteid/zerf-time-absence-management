@@ -10,7 +10,11 @@
 // left pending here for 10-team-lead-final-reviews.spec.js to act on.
 
 import { test, expect } from "@playwright/test";
-import { storageStatePath } from "./helpers.js";
+import {
+  employeeAbsenceDates,
+  openAbsencesForYear,
+  storageStatePath,
+} from "./helpers.js";
 
 // Resumes Eve's session saved in 05-employee-workflows.spec.js.
 test.use({ storageState: storageStatePath("employee") });
@@ -45,7 +49,7 @@ test("employee: request to reopen the approved week", async ({ page }) => {
 });
 
 test("employee: request cancellation of the approved vacation", async ({ page }) => {
-  await page.goto("/absences");
+  await openAbsencesForYear(page, (await employeeAbsenceDates(page.request)).year);
   // Persistent UI-state proof of 06's decisions, read from the employee's
   // own absence history: the status chip on each row reflects what the team
   // lead did — the vacation is "Approved", the day-off request is "Rejected"

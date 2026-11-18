@@ -18,8 +18,9 @@ import {
   NO_COST_ABSENCE_CATEGORY,
 } from "./users.js";
 import {
-  bookableDateOffset,
   changeTempPassword,
+  employeeAbsenceDates,
+  openAbsencesForYear,
   readCredentials,
   selectAbsenceKind,
   setDate,
@@ -158,24 +159,19 @@ test("employee: book, edit, and delete time entries, then submit the week", asyn
 test("employee: request absences including an independent leave account", async () => {
   await page.goto("/absences");
 
-  // All three requests use widely-spaced future date ranges (4, 5, and 6
-  // weeks out) purely so they can never overlap each other or trip the
-  // backend's "Overlap with existing absence" guard — the exact dates don't
-  // matter to what's being tested. bookableDateOffset (not isoOffset) is
-  // essential though: these week-multiple offsets keep the weekday of
-  // "today", so a suite run on a weekend would otherwise place every request
-  // on a weekend — and any offset can land on a public holiday (e.g. a
-  // late-November run puts +28 on Dec 25). Either way the dialog would
-  // refuse to submit ("Absence must include at least one workday"). Both
-  // endpoints are walked to bookable days independently; the start can never
-  // overtake the end because both walk forward to the first bookable day.
-  async function requestAbsence(kindLabel, startOffset, endOffset, comment) {
+  // The dates come from employeeAbsenceDates: bookable days (no weekend, no
+  // public holiday, or the dialog refuses with "Absence must include at least
+  // one workday"), each request in its own week so none can overlap another,
+  // and all in one calendar year so every later view of them shows them all.
+  // The page jumps to the year of the first request and stays there.
+  const dates = await employeeAbsenceDates(page.request);
+  async function requestAbsence(kindLabel, startIso, endIso, comment) {
     await page.getByRole("button", { name: "Request Absence" }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
     await selectAbsenceKind(dialog, kindLabel);
-    await setDate(page, "absence-start-date", await bookableDateOffset(page.request, startOffset));
-    await setDate(page, "absence-end-date", await bookableDateOffset(page.request, endOffset));
+    await setDate(page, "absence-start-date", startIso);
+    await setDate(page, "absence-end-date", endIso);
     await dialog.locator("#absence-comment").fill(comment);
     await dialog.getByRole("button", { name: "Submit Request" }).click();
     await expect(dialog).toBeHidden();
@@ -189,9 +185,19 @@ test("employee: request absences including an independent leave account", async 
   // banked enough overtime for a flextime-cost absence. Requesting the
   // custom category here is also what proves it's genuinely usable
   // end-to-end, not just creatable.
-  await requestAbsence("Vacation", 28, 29, "E2E vacation");
-  await requestAbsence("Training", 35, 35, "E2E training");
-  await requestAbsence(NO_COST_ABSENCE_CATEGORY, 42, 42, "E2E day off");
+  await requestAbsence(
+    "Vacation",
+    dates.vacationStart,
+    dates.vacationEnd,
+    "E2E vacation",
+  );
+  await requestAbsence("Training", dates.training, dates.training, "E2E training");
+  await requestAbsence(
+    NO_COST_ABSENCE_CATEGORY,
+    dates.dayOff,
+    dates.dayOff,
+    "E2E day off",
+  );
 
   // The card's numbers are split across two elements: the header fraction
   // (".leave-account-card-count", Available / Entitlement) and the detail
@@ -213,8 +219,8 @@ test("employee: request absences including an independent leave account", async 
 
   await requestAbsence(
     LEAVE_ACCOUNT_CATEGORY,
-    49,
-    49,
+    dates.education,
+    dates.education,
     "E2E educational leave",
   );
 
@@ -240,7 +246,7 @@ test("employee: request absences including an independent leave account", async 
 });
 
 test("employee: cancel a still-pending absence request", async () => {
-  await page.goto("/absences");
+  await openAbsencesForYear(page, (await employeeAbsenceDates(page.request)).year);
   await page
     .locator(".absence-entry", { hasText: "E2E training" })
     .click();

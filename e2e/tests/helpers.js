@@ -126,6 +126,62 @@ export async function bookableDateOffset(request, minOffsetDays) {
   );
 }
 
+// The days of the employee's absence requests (05, reviewed and checked in
+// 06, 09, 10 and 11), all inside one calendar year.
+//
+// The absences page and the personal report show one year at a time, and the
+// absences page jumps to the year of a request just saved. Fixed offsets of
+// four to seven weeks put the later requests into January from mid-November
+// on, and every later view then missed some of them. Here each request gets
+// its own week, starting a week out; when the rest of this year cannot hold
+// them all, the whole set moves to the next January. The result depends only
+// on the day and the holiday calendar, so every spec computes the same dates.
+export async function employeeAbsenceDates(request) {
+  const holidays = await holidayDates(request);
+  const addDays = (iso, days) => {
+    const date = new Date(`${iso}T00:00:00Z`);
+    date.setUTCDate(date.getUTCDate() + days);
+    return date.toISOString().slice(0, 10);
+  };
+  const isBookable = (iso) => {
+    const weekday = new Date(`${iso}T00:00:00Z`).getUTCDay();
+    return weekday !== 6 && weekday !== 0 && !holidays.has(iso);
+  };
+  const firstBookableFrom = (iso) => {
+    let day = iso;
+    while (!isBookable(day)) day = addDays(day, 1);
+    return day;
+  };
+  // Each request starts no earlier than a week after the one before it and
+  // after the day that one ends, so no two can overlap.
+  const datesFrom = (startIso) => {
+    const vacationStart = firstBookableFrom(startIso);
+    const vacationEnd = firstBookableFrom(addDays(vacationStart, 1));
+    const training = firstBookableFrom(addDays(vacationStart, 7));
+    const dayOff = firstBookableFrom(addDays(training, 7));
+    const education = firstBookableFrom(addDays(dayOff, 7));
+    return { vacationStart, vacationEnd, training, dayOff, education };
+  };
+  let dates = datesFrom(isoOffset(7));
+  const year = dates.vacationStart.slice(0, 4);
+  if (Object.values(dates).some((iso) => iso.slice(0, 4) !== year)) {
+    dates = datesFrom(`${Number(year) + 1}-01-04`);
+  }
+  return { ...dates, year: Number(dates.vacationStart.slice(0, 4)) };
+}
+
+// Opens the absences page on `year` (this year or the next, the two the page
+// can show), stepping forward with the page's own "Next year" button.
+export async function openAbsencesForYear(page, year) {
+  await page.goto("/absences");
+  const yearLabel = page.locator(".abs-year-label");
+  await expect(yearLabel).toHaveText(/^\d{4}$/);
+  if (Number(await yearLabel.innerText()) < year) {
+    await page.getByRole("button", { name: "Next year" }).click();
+  }
+  await expect(yearLabel).toHaveText(String(year));
+}
+
 // Returns a *past* ISO date (YYYY-MM-DD) on which an absence can be booked:
 // a weekday that isn't a public holiday, searched backwards from
 // `startOffsetDays` (negative) and no further back than `minOffsetDays`.
