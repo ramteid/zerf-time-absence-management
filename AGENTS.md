@@ -1185,6 +1185,13 @@ gone too. "Already delivered" is derived from the queue (period reached `payroll
 
 Integration tests use `testcontainers_modules::postgres::Postgres` (plain `postgres:17` image, no pg_tde). This is intentional: pg_tde is a deployment concern and has no effect on application logic or SQL correctness. `postgres:17` (Debian) is used rather than the module default (`11-alpine`) because lz4 TOAST compression requires PostgreSQL 14+ compiled with `--with-lz4`, which is included in the official Debian-based `postgres:17` image.
 
+Containers are started only through `tests/common/containers.rs`, which keeps
+them from piling up: the data directory is a tmpfs (no volume can be left
+behind), the `watchdog` feature removes a run's containers on Ctrl-C/SIGTERM,
+and each run first removes containers labelled `zerf.integration-test` whose
+owning test process (same PID namespace) is gone — which catches SIGKILL,
+crashes and failed starts without touching a run still in progress.
+
 ## Testing
 
 ### Frontend

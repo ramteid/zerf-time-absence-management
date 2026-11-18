@@ -1,12 +1,12 @@
 use chrono::Datelike;
 use std::sync::Arc;
-use testcontainers::runners::AsyncRunner;
-use testcontainers::{ContainerAsync, ImageExt};
+use testcontainers::ContainerAsync;
 use testcontainers_modules::postgres::Postgres;
 use zerf::services::{categories, holidays};
 use zerf::{build_app, config::Config, AppState};
 
 use super::client::TestClient;
+use super::containers::start_postgres;
 use super::helpers::{create_isolated_database, init_test_database, reference_date, seed_admin};
 
 /// A running test application with its own database and HTTP client.
@@ -56,11 +56,7 @@ impl TestApp {
                 let cleanup_url = Some(url.clone());
                 (url, base, cleanup_url, None)
             } else {
-                let container = Postgres::default()
-                    .with_tag("17")
-                    .start()
-                    .await
-                    .expect("failed to start Postgres container");
+                let container = start_postgres().await;
                 let host_port = container
                     .get_host_port_ipv4(5432)
                     .await
@@ -180,11 +176,7 @@ impl TestApp {
                 let cleanup_url = Some(url.clone());
                 (url, base, cleanup_url, None)
             } else {
-                let container = Postgres::default()
-                    .with_tag("17")
-                    .start()
-                    .await
-                    .expect("failed to start Postgres container");
+                let container = start_postgres().await;
                 let host_port = container
                     .get_host_port_ipv4(5432)
                     .await

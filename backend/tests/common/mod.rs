@@ -9,6 +9,7 @@
 
 pub mod app;
 pub mod client;
+pub mod containers;
 pub mod helpers;
 
 pub use app::TestApp;
