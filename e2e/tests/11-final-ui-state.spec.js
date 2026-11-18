@@ -63,12 +63,13 @@ test.describe("employee sees the final state of their items", () => {
     page,
   }) => {
     // The leave cards follow the year of the period shown, so look at the
-    // day the leave was booked for: it may lie in next year.
+    // day the leave was booked for: it may lie in next year. That day is in
+    // the future and "From" may not pass "To", so "To" moves first.
     const { education } = await employeeAbsenceDates(page.request);
     await page.goto("/reports");
     await page.getByRole("button", { name: "Custom range" }).click();
-    await setDate(page, "reports-period-from", education);
     await setDate(page, "reports-period-to", education);
+    await setDate(page, "reports-period-from", education);
     await expect(
       page.locator(".leave-account-card", { hasText: LEAVE_ACCOUNT_CATEGORY }),
     ).toContainText(/Approved planned\s*1/);
