@@ -138,9 +138,9 @@
       </div>
       {#if !isAssistantCurrentUser}
         <div>
-          <label class="zf-label" for="account-weekly-hours"
-            >{$t("Weekly hours")}</label
-          >
+          <label class="zf-label" for="account-weekly-hours">
+            {$t("Weekly hours")}
+          </label>
           <input
             id="account-weekly-hours"
             class="zf-input text-secondary"
@@ -151,9 +151,9 @@
           />
         </div>
         <div>
-          <label class="zf-label" for="account-working-days"
-            >{$t("Working days")}</label
-          >
+          <label class="zf-label" for="account-working-days">
+            {$t("Working days")}
+          </label>
           <input
             id="account-working-days"
             class="zf-input text-secondary"
@@ -163,9 +163,9 @@
         </div>
       {/if}
       <div>
-        <label class="zf-label" for="account-start-date"
-          >{$t("Start date")}</label
-        >
+        <label class="zf-label" for="account-start-date">
+          {$t("Start date")}
+        </label>
         <input
           id="account-start-date"
           class="zf-input text-secondary"
@@ -192,9 +192,9 @@
     <div class="field-group">
       {#if !$currentUser.must_change_password}
         <div>
-          <label class="zf-label" for="account-current-password"
-            >{$t("Current password")}</label
-          >
+          <label class="zf-label" for="account-current-password">
+            {$t("Current password")}
+          </label>
           <input
             id="account-current-password"
             class="zf-input"
@@ -206,9 +206,9 @@
       {/if}
       <div class="field-row">
         <div>
-          <label class="zf-label" for="account-new-password"
-            >{$t("New password (min 12 chars)")}</label
-          >
+          <label class="zf-label" for="account-new-password">
+            {$t("New password (min 12 chars)")}
+          </label>
           <input
             id="account-new-password"
             class="zf-input"
@@ -219,9 +219,9 @@
           />
         </div>
         <div>
-          <label class="zf-label" for="account-confirm-password"
-            >{$t("Confirm new password")}</label
-          >
+          <label class="zf-label" for="account-confirm-password">
+            {$t("Confirm new password")}
+          </label>
           <input
             id="account-confirm-password"
             class="zf-input"
@@ -234,9 +234,9 @@
       </div>
       <div class="error-text">{error}</div>
       <div class="form-actions">
-        <button class="zf-btn zf-btn-primary" on:click={changePassword}
-          >{$t("Save")}</button
-        >
+        <button class="zf-btn zf-btn-primary" on:click={changePassword}>
+          {$t("Save")}
+        </button>
       </div>
     </div>
   </div>

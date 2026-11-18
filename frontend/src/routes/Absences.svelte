@@ -218,27 +218,27 @@
             <div class="absence-entry-summary">
               <div class="absence-entry-field absence-entry-type">
                 <span class="absence-entry-label">{$t("Type")}</span>
-                <span class="absence-entry-value absence-entry-type-value"
-                  >{absenceKindLabel(a.kind)}</span
-                >
+                <span class="absence-entry-value absence-entry-type-value">
+                  {absenceKindLabel(a.kind)}
+                </span>
               </div>
               <div class="absence-entry-field absence-entry-from">
                 <span class="absence-entry-label">{$t("From")}</span>
-                <span class="absence-entry-value tab-num"
-                  >{fmtDate(a.start_date)}</span
-                >
+                <span class="absence-entry-value tab-num">
+                  {fmtDate(a.start_date)}
+                </span>
               </div>
               <div class="absence-entry-field absence-entry-to">
                 <span class="absence-entry-label">{$t("To")}</span>
-                <span class="absence-entry-value tab-num"
-                  >{fmtDate(a.end_date)}</span
-                >
+                <span class="absence-entry-value tab-num">
+                  {fmtDate(a.end_date)}
+                </span>
               </div>
               <div class="absence-entry-field absence-entry-days">
                 <span class="absence-entry-label">{$t("Days")}</span>
-                <span class="absence-entry-value tab-num"
-                  >{a.days == null ? "-" : formatDayCount(a.days)}</span
-                >
+                <span class="absence-entry-value tab-num">
+                  {a.days == null ? "-" : formatDayCount(a.days)}
+                </span>
               </div>
             </div>
             <div class="absence-entry-bottom">
@@ -247,9 +247,9 @@
                 <span class="absence-entry-value">{a.comment || "-"}</span>
               </div>
               <div class="absence-entry-detail absence-entry-status">
-                <span class="zf-chip zf-chip-{a.status}"
-                  >{statusLabel(a.status)}</span
-                >
+                <span class="zf-chip zf-chip-{a.status}">
+                  {statusLabel(a.status)}
+                </span>
               </div>
             </div>
           </div>

@@ -245,9 +245,9 @@
 
       <div class="field-row">
         <div>
-          <label class="zf-label" for="payroll-recipients"
-            >{$t("Recipients")}</label
-          >
+          <label class="zf-label" for="payroll-recipients">
+            {$t("Recipients")}
+          </label>
           <textarea
             id="payroll-recipients"
             class="zf-textarea"
@@ -265,9 +265,9 @@ buchhaltung@example.com"
           </div>
         </div>
         <div>
-          <label class="zf-label" for="payroll-day"
-            >{$t("Send day (1-28)")}</label
-          >
+          <label class="zf-label" for="payroll-day">
+            {$t("Send day (1-28)")}
+          </label>
           <input
             id="payroll-day"
             class="zf-input"

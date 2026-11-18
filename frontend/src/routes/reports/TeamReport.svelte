@@ -345,9 +345,9 @@
         <thead>
           <tr>
             <th class="col-employee team-report-header">{$t("Employee")}</th>
-            <th class="text-right team-report-header"
-              >{$t("Flextime balance")}</th
-            >
+            <th class="text-right team-report-header">
+              {$t("Flextime balance")}
+            </th>
             <th class="text-right team-report-header">{$t("Monthly diff")}</th>
             <th class="text-right team-report-header">{$t("Sick days")}</th>
             {#each teamLeaveAccountColumns as col (col.category_id)}
@@ -362,9 +362,9 @@
                 </span>
               </th>
             {/each}
-            <th class="text-center team-report-header"
-              >{$t("All weeks submitted")}</th
-            >
+            <th class="text-center team-report-header">
+              {$t("All weeks submitted")}
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -397,9 +397,9 @@
                   <!-- The balance stops at the end of this person's last fully
                      approved week, which is rarely the month's last day. -->
                   {#if r.flextime_balance_as_of}
-                    <span class="balance-as-of"
-                      >{fmtDate(r.flextime_balance_as_of)}</span
-                    >
+                    <span class="balance-as-of">
+                      {fmtDate(r.flextime_balance_as_of)}
+                    </span>
                   {/if}
                 {/if}
               </td>
@@ -517,9 +517,9 @@
                   {cellMin > 0 ? minToHM(cellMin) : "-"}
                 </td>
               {/each}
-              <td class="tab-num text-right"
-                >{rowTotal > 0 ? minToHM(rowTotal) : "-"}</td
-              >
+              <td class="tab-num text-right">
+                {rowTotal > 0 ? minToHM(rowTotal) : "-"}
+              </td>
             </tr>
           {/each}
         </tbody>
@@ -561,9 +561,9 @@
               <td class="tab-num text-right">{fmtDate(a.end_date)}</td>
               <td class="tab-num text-right">{formatDayCount(a.days)}</td>
               <td>
-                <span class="zf-chip zf-chip-{a.status}"
-                  >{statusLabel(a.status)}</span
-                >
+                <span class="zf-chip zf-chip-{a.status}">
+                  {statusLabel(a.status)}
+                </span>
               </td>
             </tr>
           {/each}

@@ -77,9 +77,9 @@
       {#if row.subject_user_label}
         <span class="audit-subject">→ {row.subject_user_label}</span>
       {/if}
-      <span class="zf-badge {actionClass(row.action)}"
-        >{auditActionLabel(row.action)}</span
-      >
+      <span class="zf-badge {actionClass(row.action)}">
+        {auditActionLabel(row.action)}
+      </span>
       <span class="audit-table">{auditTableLabel(row.table_name)}</span>
       {#if row.data_summary}
         <span class="audit-data">{row.data_summary}</span>
@@ -87,9 +87,9 @@
     </svelte:fragment>
 
     <svelte:fragment slot="detail-title" let:selected>
-      <span class="zf-badge {actionClass(selected.action)} mr-8"
-        >{auditActionLabel(selected.action)}</span
-      >
+      <span class="zf-badge {actionClass(selected.action)} mr-8">
+        {auditActionLabel(selected.action)}
+      </span>
       <span class="flex-1 fw-500">{auditTableLabel(selected.table_name)}</span>
     </svelte:fragment>
 
@@ -111,13 +111,13 @@
       {#if selected.is_time_entry_week}
         <div class="zf-detail-row">
           <span class="zf-detail-label">{$t("Week")}</span>
-          <span
-            >{$t("Week {week}: {from} - {to}", {
+          <span>
+            {$t("Week {week}: {from} - {to}", {
               week: selected.week_number,
               from: fmtDateShort(selected.week_start),
               to: fmtDateShort(selected.week_end),
-            })}</span
-          >
+            })}
+          </span>
         </div>
         {#if selected.week_reason}
           <div class="zf-detail-row">
@@ -129,20 +129,19 @@
           <div class="week-entries">
             {#each selected.week_entries as weekEntry (weekEntry.id)}
               <div class="week-entry-row">
-                <span class="week-entry-date tab-num"
-                  >{fmtDateShort(weekEntry.entry_date)}</span
-                >
-                <span class="week-entry-time tab-num"
-                  >{entryTimeRange(weekEntry, timeFormat)}</span
-                >
-                <span class="week-entry-cat"
-                  >{weekEntry.category_name ??
-                    `#${weekEntry.category_id}`}</span
-                >
+                <span class="week-entry-date tab-num">
+                  {fmtDateShort(weekEntry.entry_date)}
+                </span>
+                <span class="week-entry-time tab-num">
+                  {entryTimeRange(weekEntry, timeFormat)}
+                </span>
+                <span class="week-entry-cat">
+                  {weekEntry.category_name ?? `#${weekEntry.category_id}`}
+                </span>
                 {#if weekEntry.comment}
-                  <span class="zf-comment week-entry-comment"
-                    >{weekEntry.comment}</span
-                  >
+                  <span class="zf-comment week-entry-comment">
+                    {weekEntry.comment}
+                  </span>
                 {/if}
               </div>
             {/each}

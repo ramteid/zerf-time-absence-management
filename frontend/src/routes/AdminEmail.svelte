@@ -242,9 +242,9 @@
           />
         </div>
         <div>
-          <label class="zf-label" for="smtp-encryption"
-            >{$t("Encryption")}</label
-          >
+          <label class="zf-label" for="smtp-encryption">
+            {$t("Encryption")}
+          </label>
           <select
             id="smtp-encryption"
             class="zf-select"

@@ -149,8 +149,9 @@
       <div class="mobile-title-bar-names">
         <span class="mobile-title-bar-appname">{$t("Time tracking")}</span>
         {#if $settings?.organization_name}
-          <span class="mobile-title-bar-org">{$settings.organization_name}</span
-          >
+          <span class="mobile-title-bar-org">
+            {$settings.organization_name}
+          </span>
         {/if}
       </div>
     </div>

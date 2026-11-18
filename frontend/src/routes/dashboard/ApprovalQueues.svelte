@@ -72,9 +72,9 @@
         <div class="flex-min0">
           <div class="zf-row zf-item-title">
             {userFullName(weekUser, `#${week.user_id}`)}
-            <span class="zf-chip zf-chip-submitted zf-chip-sm"
-              >{$t("Approval")}</span
-            >
+            <span class="zf-chip zf-chip-submitted zf-chip-sm">
+              {$t("Approval")}
+            </span>
           </div>
           <div class="tab-num text-hint">
             {fmtWeekLabel(week.week_start)} · {formatHours(week.total_min / 60)}
@@ -120,9 +120,9 @@
         <div class="flex-min0">
           <div class="zf-row zf-item-title">
             {userFullName(reopenUser, `#${reopen.user_id}`)}
-            <span class="zf-chip zf-chip-pending zf-chip-sm"
-              >{$t("Edit request")}</span
-            >
+            <span class="zf-chip zf-chip-pending zf-chip-sm">
+              {$t("Edit request")}
+            </span>
           </div>
           <div class="tab-num text-hint">
             {$t("wants to edit {week_label}", {

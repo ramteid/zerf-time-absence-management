@@ -712,9 +712,9 @@
                     : 0) + "%"}
                 ></div>
               </div>
-              <span class="tab-num text-tertiary text-right"
-                >{minToHM(mins)}</span
-              >
+              <span class="tab-num text-tertiary text-right">
+                {minToHM(mins)}
+              </span>
               <span class="tab-num text-tertiary text-right cat-bar-pct">
                 {catTotal > 0 ? Math.round((mins / catTotal) * 100) : 0}%
               </span>
@@ -768,9 +768,9 @@
                     {/if}
                   </td>
                   <td>
-                    <span class="zf-chip zf-chip-{e.status}"
-                      >{statusLabel(e.status)}</span
-                    >
+                    <span class="zf-chip zf-chip-{e.status}">
+                      {statusLabel(e.status)}
+                    </span>
                   </td>
                 </tr>
               {/each}
@@ -833,9 +833,9 @@
                     {/if}
                   </td>
                   <td>
-                    <span class="zf-chip zf-chip-{a.status}"
-                      >{statusLabel(a.status)}</span
-                    >
+                    <span class="zf-chip zf-chip-{a.status}">
+                      {statusLabel(a.status)}
+                    </span>
                   </td>
                 </tr>
               {/each}

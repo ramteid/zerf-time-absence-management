@@ -35,9 +35,9 @@
   </div>
 
   <div class="week-review-summary">
-    <span class="zf-chip zf-chip-approved"
-      >{formatHours(week.total_min / 60)}</span
-    >
+    <span class="zf-chip zf-chip-approved">
+      {formatHours(week.total_min / 60)}
+    </span>
     <!-- Secondary navigation action lives in the body, not the footer, so the
          footer keeps its clean Close / Reject / Approve grouping. -->
     <button class="zf-btn zf-btn-ghost" on:click={goToReport} disabled={busy}>

@@ -179,9 +179,9 @@
           <div class="field-section-label">{$t("Add an entry")}</div>
           <div class="field-row">
             <div>
-              <label class="zf-label" for="flextime-adjustment-date"
-                >{$t("Effective from")}</label
-              >
+              <label class="zf-label" for="flextime-adjustment-date">
+                {$t("Effective from")}
+              </label>
               <DatePicker
                 id="flextime-adjustment-date"
                 bind:value={effective_date}
@@ -190,9 +190,9 @@
               />
             </div>
             <div>
-              <label class="zf-label" for="flextime-adjustment-hours"
-                >{$t("Hours")}</label
-              >
+              <label class="zf-label" for="flextime-adjustment-hours">
+                {$t("Hours")}
+              </label>
               <input
                 id="flextime-adjustment-hours"
                 class="zf-input"
@@ -204,9 +204,9 @@
             </div>
           </div>
           <div>
-            <label class="zf-label" for="flextime-adjustment-reason"
-              >{$t("Note")}</label
-            >
+            <label class="zf-label" for="flextime-adjustment-reason">
+              {$t("Note")}
+            </label>
             <input
               id="flextime-adjustment-reason"
               class="zf-input"
@@ -289,8 +289,9 @@
   {/if}
   <svelte:fragment slot="footer">
     <span class="flex-1"></span>
-    <button class="zf-btn" on:click={() => dialog.close()}>{$t("Close")}</button
-    >
+    <button class="zf-btn" on:click={() => dialog.close()}>
+      {$t("Close")}
+    </button>
   </svelte:fragment>
 </Dialog>
 

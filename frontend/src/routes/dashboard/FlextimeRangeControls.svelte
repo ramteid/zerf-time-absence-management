@@ -22,18 +22,18 @@
 
 <div class="flextime-controls">
   <div class="flextime-ranges">
-    <button class="zf-btn zf-btn-sm" on:click={() => onSetRange(30)}
-      >{$t("Last 30 days")}</button
-    >
-    <button class="zf-btn zf-btn-sm" on:click={() => onSetRange(90)}
-      >{$t("Last 90 days")}</button
-    >
-    <button class="zf-btn zf-btn-sm" on:click={() => onSetRange(182)}
-      >{$t("Last 6 months")}</button
-    >
-    <button class="zf-btn zf-btn-sm" on:click={() => onSetRange(365)}
-      >{$t("Last year")}</button
-    >
+    <button class="zf-btn zf-btn-sm" on:click={() => onSetRange(30)}>
+      {$t("Last 30 days")}
+    </button>
+    <button class="zf-btn zf-btn-sm" on:click={() => onSetRange(90)}>
+      {$t("Last 90 days")}
+    </button>
+    <button class="zf-btn zf-btn-sm" on:click={() => onSetRange(182)}>
+      {$t("Last 6 months")}
+    </button>
+    <button class="zf-btn zf-btn-sm" on:click={() => onSetRange(365)}>
+      {$t("Last year")}
+    </button>
   </div>
   <div class="flextime-date-range">
     <span class="flextime-date-picker">

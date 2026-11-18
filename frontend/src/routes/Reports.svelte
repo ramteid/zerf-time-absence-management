@@ -580,9 +580,9 @@
       <div class="reports-filter-pair">
         {#if activeTab === "employee" && !isSelfOnlyReportsView}
           <div class="reports-user-filter">
-            <label class="zf-label" for="reports-user-select"
-              >{$t("Employee")}</label
-            >
+            <label class="zf-label" for="reports-user-select">
+              {$t("Employee")}
+            </label>
             <select
               id="reports-user-select"
               class="zf-select"
@@ -591,14 +591,14 @@
               disabled={userListLoadFailed}
             >
               {#if userListLoadFailed && selectedReportUser}
-                <option value={selectedUserId}
-                  >{selectedReportUser.first_name}
-                  {selectedReportUser.last_name}</option
-                >
+                <option value={selectedUserId}>
+                  {selectedReportUser.first_name}
+                  {selectedReportUser.last_name}
+                </option>
               {:else if linkedUserUnavailable}
-                <option value={selectedUserId} disabled
-                  >{$t("User not found or inactive.")}</option
-                >
+                <option value={selectedUserId} disabled>
+                  {$t("User not found or inactive.")}
+                </option>
               {/if}
               {#each users as u (u.id)}
                 <option value={u.id}>{u.first_name} {u.last_name}</option>
@@ -665,8 +665,10 @@
         <button
           type="button"
           class="zf-btn zf-btn-ghost zf-btn-sm"
-          on:click={retryUsers}>{$t("Retry")}</button
+          on:click={retryUsers}
         >
+          {$t("Retry")}
+        </button>
       </div>
     {/if}
   </div>
@@ -681,9 +683,9 @@
     <div class="zf-card">
       <div class="zf-card-empty zf-col" role="alert">
         <span>{$t(usersLoadError || "Error")}</span>
-        <button class="zf-btn zf-btn-primary" on:click={retryUsers}
-          >{$t("Retry")}</button
-        >
+        <button class="zf-btn zf-btn-primary" on:click={retryUsers}>
+          {$t("Retry")}
+        </button>
       </div>
     </div>
   {:else if linkedUserUnavailable}

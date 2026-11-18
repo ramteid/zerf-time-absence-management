@@ -64,9 +64,9 @@
 <div class="mobile-tabs">
   <select on:change={onSelectChange}>
     {#each tabs as tab (tab.href)}
-      <option value={tab.href} selected={pathname === tab.href}
-        >{$t(tab.key)}</option
-      >
+      <option value={tab.href} selected={pathname === tab.href}>
+        {$t(tab.key)}
+      </option>
     {/each}
   </select>
 </div>

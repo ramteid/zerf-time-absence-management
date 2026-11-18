@@ -279,9 +279,9 @@
       {#if hasLeaveAccount}
         <div class="abscat-leave-account-fields">
           <div>
-            <label class="zf-label" for="abscat-leave-account-default-days"
-              >{$t("Leave account default days")}</label
-            >
+            <label class="zf-label" for="abscat-leave-account-default-days">
+              {$t("Leave account default days")}
+            </label>
             <input
               id="abscat-leave-account-default-days"
               class="zf-input"
@@ -298,9 +298,9 @@
             </div>
           </div>
           <div>
-            <label class="zf-label" for="abscat-leave-account-carryover-expiry"
-              >{$t("Carryover expiry date (MM-DD)")}</label
-            >
+            <label class="zf-label" for="abscat-leave-account-carryover-expiry">
+              {$t("Carryover expiry date (MM-DD)")}
+            </label>
             <input
               id="abscat-leave-account-carryover-expiry"
               class="zf-input"
@@ -431,9 +431,9 @@
   {/if}
   <div class="error-text">{error}</div>
   <svelte:fragment slot="footer">
-    <button class="zf-btn" on:click={() => dialog.close()}
-      >{$t("Cancel")}</button
-    >
+    <button class="zf-btn" on:click={() => dialog.close()}>
+      {$t("Cancel")}
+    </button>
     <button class="zf-btn zf-btn-primary" disabled={saving} on:click={save}>
       {saving ? $t("Saving...") : $t("Save")}
     </button>

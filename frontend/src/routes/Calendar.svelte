@@ -484,9 +484,9 @@
                      vacation show a single "Vacation" chip carrying the count. -->
                 {#each groups.slice(0, 3) as group (group.key)}
                   <div class="cal-event" style:background={group.color}>
-                    <span class="cal-event-title"
-                      >{calendarEventTitle(group)}</span
-                    >
+                    <span class="cal-event-title">
+                      {calendarEventTitle(group)}
+                    </span>
                     {#if group.count > 1}
                       <span class="cal-event-count tab-num">{group.count}</span>
                     {/if}
@@ -530,18 +530,18 @@
                 >
                   <span class="cal-popup-primary">{item.primary}</span>
                   {#if item.secondary}
-                    <span class="cal-popup-secondary text-tertiary"
-                      >{item.secondary}</span
-                    >
+                    <span class="cal-popup-secondary text-tertiary">
+                      {item.secondary}
+                    </span>
                   {/if}
                 </a>
               {:else}
                 <div class="cal-popup-row">
                   <span class="cal-popup-primary">{item.primary}</span>
                   {#if item.secondary}
-                    <span class="cal-popup-secondary text-tertiary"
-                      >{item.secondary}</span
-                    >
+                    <span class="cal-popup-secondary text-tertiary">
+                      {item.secondary}
+                    </span>
                   {/if}
                 </div>
               {/if}
@@ -552,9 +552,9 @@
     </div>
     <svelte:fragment slot="footer">
       <span class="flex-1"></span>
-      <button class="zf-btn" on:click={() => (popupCell = null)}
-        >{$t("Close")}</button
-      >
+      <button class="zf-btn" on:click={() => (popupCell = null)}>
+        {$t("Close")}
+      </button>
     </svelte:fragment>
   </Dialog>
 {/if}

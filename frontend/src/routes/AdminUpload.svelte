@@ -185,9 +185,9 @@
 
       <div class="field-row">
         <div>
-          <label class="zf-label" for="backup-upload-url"
-            >{$t("Nextcloud share link")}</label
-          >
+          <label class="zf-label" for="backup-upload-url">
+            {$t("Nextcloud share link")}
+          </label>
           <input
             id="backup-upload-url"
             class="zf-input"
@@ -231,9 +231,9 @@
 
       <div class="field-row">
         <div>
-          <label class="zf-label" for="backup-interval"
-            >{$t("Days between backups")}</label
-          >
+          <label class="zf-label" for="backup-interval">
+            {$t("Days between backups")}
+          </label>
           <input
             id="backup-interval"
             class="zf-input"
@@ -301,9 +301,9 @@
 
       <div class="field-row">
         <div>
-          <label class="zf-label" for="report-upload-url"
-            >{$t("Nextcloud share link")}</label
-          >
+          <label class="zf-label" for="report-upload-url">
+            {$t("Nextcloud share link")}
+          </label>
           <input
             id="report-upload-url"
             class="zf-input"
@@ -347,9 +347,9 @@
 
       <div class="field-row">
         <div>
-          <label class="zf-label" for="report-upload-day"
-            >{$t("Upload day (1-28)")}</label
-          >
+          <label class="zf-label" for="report-upload-day">
+            {$t("Upload day (1-28)")}
+          </label>
           <input
             id="report-upload-day"
             class="zf-input"

@@ -293,9 +293,9 @@
       <div class="field-group">
         <div class="field-row">
           <div>
-            <label class="zf-label" for="admin-first-name"
-              >{$t("First name")}</label
-            >
+            <label class="zf-label" for="admin-first-name">
+              {$t("First name")}
+            </label>
             <input
               id="admin-first-name"
               class="zf-input"
@@ -306,9 +306,9 @@
             />
           </div>
           <div>
-            <label class="zf-label" for="admin-last-name"
-              >{$t("Last name")}</label
-            >
+            <label class="zf-label" for="admin-last-name">
+              {$t("Last name")}
+            </label>
             <input
               id="admin-last-name"
               class="zf-input"
@@ -327,9 +327,9 @@
     <div class="field-group">
       <div class="field-row">
         <div>
-          <label class="zf-label" for="settings-org-name"
-            >{$t("Organization name")}</label
-          >
+          <label class="zf-label" for="settings-org-name">
+            {$t("Organization name")}
+          </label>
           <input
             id="settings-org-name"
             class="zf-input"
@@ -350,9 +350,9 @@
     <div class="field-group">
       <div class="field-row">
         <div>
-          <label class="zf-label" for="settings-language"
-            >{$t("Language")}</label
-          >
+          <label class="zf-label" for="settings-language">
+            {$t("Language")}
+          </label>
           <select
             id="settings-language"
             class="zf-select"
@@ -364,9 +364,9 @@
           </select>
         </div>
         <div>
-          <label class="zf-label" for="settings-time-format"
-            >{$t("Time format")}</label
-          >
+          <label class="zf-label" for="settings-time-format">
+            {$t("Time format")}
+          </label>
           <select
             id="settings-time-format"
             class="zf-select"
@@ -377,9 +377,9 @@
           </select>
         </div>
         <div>
-          <label class="zf-label" for="settings-timezone"
-            >{$t("Timezone")}</label
-          >
+          <label class="zf-label" for="settings-timezone">
+            {$t("Timezone")}
+          </label>
           <select
             id="settings-timezone"
             class="zf-select"
@@ -398,9 +398,9 @@
       </div>
       <div class="field-row">
         <div>
-          <label class="zf-label" for="settings-default-hours"
-            >{$t("Default weekly hours")}</label
-          >
+          <label class="zf-label" for="settings-default-hours">
+            {$t("Default weekly hours")}
+          </label>
           <input
             id="settings-default-hours"
             class="zf-input"
@@ -417,9 +417,9 @@
       </div>
       <div class="field-row">
         <div>
-          <label class="zf-label" for="settings-submission-deadline"
-            >{$t("Submission deadline day of month")}</label
-          >
+          <label class="zf-label" for="settings-submission-deadline">
+            {$t("Submission deadline day of month")}
+          </label>
           <input
             id="settings-submission-deadline"
             class="zf-input"
@@ -443,11 +443,9 @@
       </div>
       <div class="field-row">
         <div>
-          <label class="zf-label" for="settings-medical-certificate-threshold"
-            >{$t(
-              "Consecutive sick days before a certificate is required",
-            )}</label
-          >
+          <label class="zf-label" for="settings-medical-certificate-threshold">
+            {$t("Consecutive sick days before a certificate is required")}
+          </label>
           <input
             id="settings-medical-certificate-threshold"
             class="zf-input"
@@ -502,9 +500,9 @@
       {#if settingsForm.auto_break_enabled}
         <div class="field-row mt-10">
           <div>
-            <label class="zf-label" for="settings-break-threshold"
-              >{$t("Break threshold (hours)")}</label
-            >
+            <label class="zf-label" for="settings-break-threshold">
+              {$t("Break threshold (hours)")}
+            </label>
             <input
               id="settings-break-threshold"
               class="zf-input"
@@ -518,9 +516,9 @@
             </div>
           </div>
           <div>
-            <label class="zf-label" for="settings-break-deduction"
-              >{$t("Break deduction (minutes)")}</label
-            >
+            <label class="zf-label" for="settings-break-deduction">
+              {$t("Break deduction (minutes)")}
+            </label>
             <input
               id="settings-break-deduction"
               class="zf-input"
@@ -538,9 +536,9 @@
         </div>
         <div class="field-row mt-10">
           <div>
-            <label class="zf-label" for="settings-break-threshold-2"
-              >{$t("Second threshold (hours)")}</label
-            >
+            <label class="zf-label" for="settings-break-threshold-2">
+              {$t("Second threshold (hours)")}
+            </label>
             <input
               id="settings-break-threshold-2"
               class="zf-input"
@@ -556,9 +554,9 @@
             </div>
           </div>
           <div>
-            <label class="zf-label" for="settings-break-deduction-2"
-              >{$t("Second deduction (minutes)")}</label
-            >
+            <label class="zf-label" for="settings-break-deduction-2">
+              {$t("Second deduction (minutes)")}
+            </label>
             <input
               id="settings-break-deduction-2"
               class="zf-input"
@@ -595,9 +593,9 @@
         {#if settingsForm.auto_break_forbid_long_stretch}
           <div class="field-row mt-10">
             <div>
-              <label class="zf-label" for="settings-break-min-rest"
-                >{$t("Minimum break length (minutes)")}</label
-              >
+              <label class="zf-label" for="settings-break-min-rest">
+                {$t("Minimum break length (minutes)")}
+              </label>
               <input
                 id="settings-break-min-rest"
                 class="zf-input"
@@ -634,9 +632,9 @@
           >
             <option value="">{$t("- Please select -")}</option>
             {#each countries as countryOption (countryOption.countryCode)}
-              <option value={countryOption.countryCode}
-                >{countryOption.name}</option
-              >
+              <option value={countryOption.countryCode}>
+                {countryOption.name}
+              </option>
             {/each}
           </select>
         </div>

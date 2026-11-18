@@ -28,13 +28,15 @@
         class="tab-num"
         style:color={available < 0
           ? "var(--danger-text)"
-          : "var(--success-text)"}>{formatDayCount(available)}</span
+          : "var(--success-text)"}
       >
-      <span class="leave-account-card-count-total tab-num"
-        ><span class="sr-only">{$t("Entitlement")}</span>/ {formatDayCount(
+        {formatDayCount(available)}
+      </span>
+      <span class="leave-account-card-count-total tab-num">
+        <span class="sr-only">{$t("Entitlement")}</span>/ {formatDayCount(
           balance.annual_entitlement,
-        )}</span
-      >
+        )}
+      </span>
     </div>
   </div>
 
@@ -46,9 +48,9 @@
     </div>
     <div class="leave-account-card-detail">
       <span class="leave-account-card-detail-dot"></span>
-      <span class="leave-account-card-detail-label"
-        >{$t("Approved planned")}</span
-      >
+      <span class="leave-account-card-detail-label">
+        {$t("Approved planned")}
+      </span>
       <span class="tab-num">{formatDayCount(balance.approved_upcoming)}</span>
     </div>
     <div class="leave-account-card-detail">
@@ -65,12 +67,12 @@
     >
       <div>
         <span>{$t("Carryover from {year}", { year: year - 1 })}</span>
-        <strong class="tab-num"
-          >{formatDayCount(balance.carryover_expired ? 0 : carryoverRemaining)}
-          <span class="leave-account-card-carryover-total"
-            >/ {formatDayCount(carryoverDays)}</span
-          ></strong
-        >
+        <strong class="tab-num">
+          {formatDayCount(balance.carryover_expired ? 0 : carryoverRemaining)}
+          <span class="leave-account-card-carryover-total">
+            / {formatDayCount(carryoverDays)}
+          </span>
+        </strong>
       </div>
       {#if balance.carryover_expiry}
         <span class="leave-account-card-carryover-status">

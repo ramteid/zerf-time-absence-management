@@ -31,9 +31,9 @@
     </div>
     <div>
       <div class="zf-label">{$t("Status")}</div>
-      <span class="zf-chip zf-chip-{absence.status}"
-        >{statusLabel(absence.status)}</span
-      >
+      <span class="zf-chip zf-chip-{absence.status}">
+        {statusLabel(absence.status)}
+      </span>
     </div>
     {#if absence.comment}
       <div>

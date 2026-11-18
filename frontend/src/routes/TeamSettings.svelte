@@ -93,9 +93,9 @@
               on:change={() => toggle(row)}
               disabled={rowDisabled(row)}
             />
-            <span class="team-setting-checkbox-label"
-              >{$t("Auto-approve submissions")}</span
-            >
+            <span class="team-setting-checkbox-label">
+              {$t("Auto-approve submissions")}
+            </span>
           </label>
         </div>
       {/each}
@@ -138,9 +138,9 @@
               on:change={() => toggle(row)}
               disabled={rowDisabled(row)}
             />
-            <span class="team-setting-checkbox-label"
-              >{$t("Auto-approve edit requests")}</span
-            >
+            <span class="team-setting-checkbox-label">
+              {$t("Auto-approve edit requests")}
+            </span>
           </label>
         </div>
       {/each}

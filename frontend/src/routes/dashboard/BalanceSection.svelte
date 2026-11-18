@@ -54,9 +54,9 @@
             value: formatHours((currentMonthDiffMin || 0) / 60),
           })}
           {#if balanceAsOf}
-            <span class="balance-as-of"
-              >{$t("As of {date}", { date: fmtDate(balanceAsOf) })}</span
-            >
+            <span class="balance-as-of">
+              {$t("As of {date}", { date: fmtDate(balanceAsOf) })}
+            </span>
           {/if}
         </span>
       </StatCard>

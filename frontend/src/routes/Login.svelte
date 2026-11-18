@@ -292,9 +292,9 @@
       {:else}
         <form on:submit={submitReset}>
           <div class="mb-14">
-            <label class="zf-label" for="new-password"
-              >{$t("New password")}</label
-            >
+            <label class="zf-label" for="new-password">
+              {$t("New password")}
+            </label>
             <input
               id="new-password"
               class="zf-input"
@@ -306,9 +306,9 @@
             />
           </div>
           <div class="mb-14">
-            <label class="zf-label" for="new-password2"
-              >{$t("Confirm password")}</label
-            >
+            <label class="zf-label" for="new-password2">
+              {$t("Confirm password")}
+            </label>
             <input
               id="new-password2"
               class="zf-input"

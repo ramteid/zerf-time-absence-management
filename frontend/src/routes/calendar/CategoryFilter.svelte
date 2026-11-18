@@ -71,9 +71,9 @@
       <!-- The count only appears once something is actually filtered out, so
            the button reads as a plain label while everything is shown. -->
       {#if isFiltered}
-        <span class="cal-filter-count tab-num"
-          >{visibleCount}/{items.length}</span
-        >
+        <span class="cal-filter-count tab-num">
+          {visibleCount}/{items.length}
+        </span>
       {/if}
       <Icon name="ChevDown" size={14} />
     </button>
@@ -85,14 +85,18 @@
             type="button"
             class="zf-btn zf-btn-sm"
             on:click={onShowAll}
-            disabled={!isFiltered}>{$t("Show all")}</button
+            disabled={!isFiltered}
           >
+            {$t("Show all")}
+          </button>
           <button
             type="button"
             class="zf-btn zf-btn-sm"
             on:click={onHideAll}
-            disabled={allHidden}>{$t("Hide all")}</button
+            disabled={allHidden}
           >
+            {$t("Hide all")}
+          </button>
         </div>
         <!-- `menuitemcheckbox` is only valid inside a `menu`, and the list is
              the element that actually holds the checkable items. -->

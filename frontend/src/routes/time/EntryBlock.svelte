@@ -67,9 +67,9 @@
       <CategoryDot color={category.color} />
       <span class="time-block-cat-name">{$t(category.name)}</span>
       <span class="time-entry-chip">
-        <StatusChip status={entry.status}
-          >{statusLabel(entry.status)}</StatusChip
-        >
+        <StatusChip status={entry.status}>
+          {statusLabel(entry.status)}
+        </StatusChip>
       </span>
     </div>
     <div class="time-block-times tab-num">

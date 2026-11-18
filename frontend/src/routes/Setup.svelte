@@ -112,9 +112,9 @@
     >
       <div class="name-row">
         <div class="flex-1">
-          <label class="zf-label" for="setup-first-name"
-            >{$t("First name")}</label
-          >
+          <label class="zf-label" for="setup-first-name">
+            {$t("First name")}
+          </label>
           <input
             id="setup-first-name"
             class="zf-input"
@@ -126,8 +126,9 @@
           />
         </div>
         <div class="flex-1">
-          <label class="zf-label" for="setup-last-name">{$t("Last name")}</label
-          >
+          <label class="zf-label" for="setup-last-name">
+            {$t("Last name")}
+          </label>
           <input
             id="setup-last-name"
             class="zf-input"
@@ -165,9 +166,9 @@
         />
       </div>
       <div class="mb-14">
-        <label class="zf-label" for="setup-confirm"
-          >{$t("Confirm password")}</label
-        >
+        <label class="zf-label" for="setup-confirm">
+          {$t("Confirm password")}
+        </label>
         <input
           id="setup-confirm"
           name="password_confirm"

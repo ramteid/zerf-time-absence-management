@@ -576,9 +576,9 @@
     <div class="field-group">
       <div class="field-row">
         <div>
-          <label class="zf-label" for="user-first-name"
-            >{$t("First name")}</label
-          >
+          <label class="zf-label" for="user-first-name">
+            {$t("First name")}
+          </label>
           <input
             id="user-first-name"
             class="zf-input"
@@ -635,9 +635,9 @@
       <div class="field-row">
         <div>
           <div class="field-label-row">
-            <label class="zf-label" for="user-start-date"
-              >{$t("Start date")}</label
-            >
+            <label class="zf-label" for="user-start-date">
+              {$t("Start date")}
+            </label>
           </div>
           <DatePicker
             id="user-start-date"
@@ -647,9 +647,9 @@
         </div>
         <div>
           <div class="field-label-row">
-            <label class="zf-label" for="user-hire-date"
-              >{$t("Hire date")}</label
-            >
+            <label class="zf-label" for="user-hire-date">
+              {$t("Hire date")}
+            </label>
             {#if hire_date}
               <button
                 type="button"
@@ -676,9 +676,9 @@
       {#if !isAssistantRole}
         <div class="field-row">
           <div>
-            <label class="zf-label" for="user-weekly-hours"
-              >{$t("Weekly hours")}</label
-            >
+            <label class="zf-label" for="user-weekly-hours">
+              {$t("Weekly hours")}
+            </label>
             <input
               id="user-weekly-hours"
               class="zf-input"
@@ -712,9 +712,9 @@
         </div>
         {#if workingTimeChanged}
           <div class="working-time-change">
-            <label class="zf-label" for="user-changes-from"
-              >{$t("Changes apply from")}</label
-            >
+            <label class="zf-label" for="user-changes-from">
+              {$t("Changes apply from")}
+            </label>
             <DatePicker
               id="user-changes-from"
               bind:value={changes_from}
@@ -738,11 +738,11 @@
                   <span>{$t("From")} {fmtDate(row.valid_from)}</span>
                   <!-- No hours means the contract had no target hours then,
                        for example while the person was an assistant. -->
-                  <strong
-                    >{row.weekly_hours == null
+                  <strong>
+                    {row.weekly_hours == null
                       ? $t("No target hours")
-                      : `${fmtDecimal(row.weekly_hours, 2)} h`}</strong
-                  >
+                      : `${fmtDecimal(row.weekly_hours, 2)} h`}
+                  </strong>
                 </li>
               {/each}
             </ul>
@@ -750,9 +750,9 @@
         {/if}
         {#if showOpeningBalanceField}
           <div>
-            <label class="zf-label" for="user-opening-balance"
-              >{$t("Flextime hours brought along")}</label
-            >
+            <label class="zf-label" for="user-opening-balance">
+              {$t("Flextime hours brought along")}
+            </label>
             <input
               id="user-opening-balance"
               class="zf-input"
@@ -800,8 +800,9 @@
                     <label
                       class="zf-label"
                       for={`leave-account-${leaveAccount.category_id}-base`}
-                      >{$t("Base entitlement")}</label
                     >
+                      {$t("Base entitlement")}
+                    </label>
                     <input
                       id={`leave-account-${leaveAccount.category_id}-base`}
                       class="zf-input"
@@ -815,8 +816,10 @@
                     <label
                       class="zf-label"
                       for={`leave-account-${leaveAccount.category_id}-current`}
-                      >{$t("Override")} {leaveAccount.current_year}</label
                     >
+                      {$t("Override")}
+                      {leaveAccount.current_year}
+                    </label>
                     <input
                       id={`leave-account-${leaveAccount.category_id}-current`}
                       class="zf-input"
@@ -830,8 +833,10 @@
                     <label
                       class="zf-label"
                       for={`leave-account-${leaveAccount.category_id}-next`}
-                      >{$t("Override")} {leaveAccount.next_year}</label
                     >
+                      {$t("Override")}
+                      {leaveAccount.next_year}
+                    </label>
                     <input
                       id={`leave-account-${leaveAccount.category_id}-next`}
                       class="zf-input"
@@ -911,9 +916,9 @@
       {#if isNew}
         <div class="field-row">
           <div>
-            <label class="zf-label" for="user-password"
-              >{$t("Password (min 12 chars)")}</label
-            >
+            <label class="zf-label" for="user-password">
+              {$t("Password (min 12 chars)")}
+            </label>
             <input
               id="user-password"
               class="zf-input"
@@ -924,9 +929,9 @@
             />
           </div>
           <div>
-            <label class="zf-label" for="user-confirm-password"
-              >{$t("Confirm password")}</label
-            >
+            <label class="zf-label" for="user-confirm-password">
+              {$t("Confirm password")}
+            </label>
             <input
               id="user-confirm-password"
               class="zf-input"
@@ -1015,9 +1020,9 @@
   {/if}
   <svelte:fragment slot="footer">
     {#if !showTempPassword}
-      <button class="zf-btn" on:click={() => dialog.close()}
-        >{$t("Cancel")}</button
-      >
+      <button class="zf-btn" on:click={() => dialog.close()}>
+        {$t("Cancel")}
+      </button>
       <button class="zf-btn zf-btn-primary" on:click={save}>
         {$t(isNew ? "Add User" : "Save")}
       </button>

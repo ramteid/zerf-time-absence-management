@@ -207,9 +207,9 @@
     <label class="zf-label" for="absence-kind">{$t("Type")}</label>
     <select id="absence-kind" class="zf-select" bind:value={category_id}>
       {#if !isNew && template.category_id && !activeAbsenceCategories.find((c) => c.id === template.category_id)}
-        <option value={template.category_id}
-          >{template.category_name || $t("Unknown type")}</option
-        >
+        <option value={template.category_id}>
+          {template.category_name || $t("Unknown type")}
+        </option>
       {/if}
       {#each activeAbsenceCategories as cat (cat.id)}
         <option value={cat.id}>{$t(cat.name)}</option>
@@ -265,9 +265,9 @@
     </div>
   {/if}
   <div>
-    <label class="zf-label" for="absence-comment"
-      >{$t("Notes (optional)")}</label
-    >
+    <label class="zf-label" for="absence-comment">
+      {$t("Notes (optional)")}
+    </label>
     <textarea
       id="absence-comment"
       class="zf-textarea"

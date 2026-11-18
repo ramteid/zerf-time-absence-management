@@ -460,8 +460,10 @@
     aria-haspopup="dialog"
     aria-controls={id ? `${id}-picker` : undefined}
     on:click={openPicker}
-    on:keydown={onKeyDown}>{displayLabel}</button
+    on:keydown={onKeyDown}
   >
+    {displayLabel}
+  </button>
 
   {#if isOpen}
     <div
@@ -505,8 +507,10 @@
                 stepHour(item.offset > 0 ? 1 : -1);
               keyFocus = "hour";
               drumElement?.focus();
-            }}>{String(item.displayValue).padStart(2, "0")}</button
+            }}
           >
+            {String(item.displayValue).padStart(2, "0")}
+          </button>
         {/each}
       </div>
 
@@ -538,8 +542,10 @@
                 stepMinute(item.offset > 0 ? 1 : -1);
               keyFocus = "minute";
               drumElement?.focus();
-            }}>{String(item.displayValue).padStart(2, "0")}</button
+            }}
           >
+            {String(item.displayValue).padStart(2, "0")}
+          </button>
         {/each}
       </div>
 
@@ -562,8 +568,10 @@
             on:click|stopPropagation={() => {
               if (isPm) toggleAmPm();
               drumElement?.focus();
-            }}>AM</button
+            }}
           >
+            AM
+          </button>
           <button
             type="button"
             class="tp-item"
@@ -572,15 +580,19 @@
             on:click|stopPropagation={() => {
               if (!isPm) toggleAmPm();
               drumElement?.focus();
-            }}>PM</button
+            }}
           >
+            PM
+          </button>
         </div>
       {/if}
       <button
         type="button"
         class="tp-ok"
-        on:click|stopPropagation={() => closePicker(true)}>{$t("OK")}</button
+        on:click|stopPropagation={() => closePicker(true)}
       >
+        {$t("OK")}
+      </button>
     </div>
   {/if}
 </div>

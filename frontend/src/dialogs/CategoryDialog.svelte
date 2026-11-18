@@ -173,9 +173,9 @@
   {/if}
   <div class="error-text">{error}</div>
   <svelte:fragment slot="footer">
-    <button class="zf-btn" on:click={() => dialog.close()}
-      >{$t("Cancel")}</button
-    >
+    <button class="zf-btn" on:click={() => dialog.close()}>
+      {$t("Cancel")}
+    </button>
     <button class="zf-btn zf-btn-primary" disabled={saving} on:click={save}>
       {saving ? $t("Saving...") : $t("Save")}
     </button>

@@ -33,8 +33,9 @@
     </div>
   {:else}
     <div class="danger-box">
-      <strong>{$t("No email was sent! Email / SMTP is not configured.")}</strong
-      >
+      <strong>
+        {$t("No email was sent! Email / SMTP is not configured.")}
+      </strong>
       <div>
         {$t("You must deliver this password to the user in person!")}
       </div>
@@ -49,8 +50,10 @@
       on:click={() => {
         dialog.close(true);
         onDismiss();
-      }}>{$t("OK")}</button
+      }}
     >
+      {$t("OK")}
+    </button>
   </svelte:fragment>
 </Dialog>
 

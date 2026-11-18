@@ -221,16 +221,16 @@
         {#if $categories.length === 0}
           <option value={null}>{$t("No categories available.")}</option>
         {:else}
-          {#each $categories as c (c.id)}<option value={c.id}
-              >{$t(c.name)}</option
-            >{/each}
+          {#each $categories as c (c.id)}<option value={c.id}>
+              {$t(c.name)}
+            </option>{/each}
         {/if}
       </select>
     </div>
     <div>
-      <label class="zf-label" for="entry-comment"
-        >{$t("Comment (optional)")}</label
-      >
+      <label class="zf-label" for="entry-comment">
+        {$t("Comment (optional)")}
+      </label>
       <textarea
         id="entry-comment"
         class="zf-textarea"
@@ -262,8 +262,10 @@
       class="zf-btn"
       type="button"
       disabled={busy}
-      on:click={() => dialog.close()}>{$t("Cancel")}</button
+      on:click={() => dialog.close()}
     >
+      {$t("Cancel")}
+    </button>
     <button
       class="zf-btn zf-btn-primary"
       type="button"
