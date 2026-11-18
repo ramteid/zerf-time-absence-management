@@ -319,11 +319,19 @@ from 20 to 30 hours never gives the weeks already worked a 30-hour target.
 `users.weekly_hours` stays the value in force today (the latest row) for
 everything that needs only the current contract. There is no backfill: the
 first change writes the old value as a starting row at the contract start
-(`WorkScheduleDb::record_hours_tx`). That includes zero: a contract that had no
-work target until this save (an assistant promoted, time tracking switched on)
-is judged by zero hours for the weeks before the change, so a first target never
-reaches back to the contract start. Contracts without a work target get zero
-hours (`services::work_schedules::weekly_hours_for`).
+(`WorkScheduleDb::record_hours_tx`). A NULL `weekly_hours` (migration 056) is a
+period **without a work target**, which is not the same as zero hours: a
+zero-hour contract still has a flextime account, a period without a target has
+none. A contract that only gains a target in this save (an assistant promoted,
+time tracking switched on) gets a NULL starting row, and one that loses its
+target gets a NULL row from that day (`record_target_ended_tx`), so a target
+that comes back never reaches into the gap. `WeeklyHoursHistory::on` reads such
+a day as zero hours and `has_target_on` as false; the flextime ledger and the
+balance pipelines (`build_range_for_balance`) leave those days out entirely,
+worked minutes included, because hours booked as an assistant were paid as they
+were and are not flextime. The plain range report still shows them as worked.
+Contracts without a work target have no target for all time
+(`services::work_schedules::weekly_hours_for` → `WeeklyHoursHistory::no_target`).
 
 **Hours and weekdays change from one date** (`changes_from`, formerly
 `weekly_hours_from`, still accepted as an alias): not before the contract start,

@@ -419,9 +419,14 @@ async fn build_range_with_user_core(
         let before_start = current_date < user.start_date;
         let after_today = current_date > today;
         // Only set for the balance pipelines: a day whose week is not fully
-        // approved contributes nothing, exactly like a future day.
-        let week_not_approved = approved_weeks
-            .map(|weeks| !weeks.counts(current_date))
+        // approved contributes nothing, exactly like a future day. Nor does a
+        // day from a period in which the contract had no work target (an
+        // assistant promoted later): there was no flextime account for its
+        // hours to count towards, they were paid as they were.
+        let left_out_of_balance = approved_weeks
+            .map(|weeks| {
+                !weeks.counts(current_date) || !weekly_hours_history.has_target_on(current_date)
+            })
             .unwrap_or(false);
 
         // A day has a work target when it is a weekday within the user's contract,
@@ -444,7 +449,7 @@ async fn build_range_with_user_core(
         );
         // `target` is the same figure capped at today: a day still ahead, or one
         // in a week the balance pipelines have not approved, asks nothing yet.
-        let target = if after_today || week_not_approved {
+        let target = if after_today || left_out_of_balance {
             0
         } else {
             full_target
@@ -457,7 +462,7 @@ async fn build_range_with_user_core(
         let mut approved_times: Vec<(NaiveTime, NaiveTime)> = vec![];
         let mut submitted_times: Vec<(NaiveTime, NaiveTime)> = vec![];
         // Skip entry processing entirely for inactive/future/unapproved-week days.
-        if !before_start && !after_today && !week_not_approved {
+        if !before_start && !after_today && !left_out_of_balance {
             for (
                 start_time,
                 end_time,
@@ -795,8 +800,11 @@ pub async fn build_flextime_for_user(
         // The flextime balance only counts a day whose own week is fully
         // approved (see `ApprovedWeeks`) — not just "on or before the cutoff
         // date": a rejected or still-open week contributes nothing even when
-        // an entirely different, later week has already been approved.
-        let week_not_approved = !approved.counts(current_date);
+        // an entirely different, later week has already been approved. A day
+        // from a period without a work target counts for nothing either, as in
+        // the balance pipelines of the range report.
+        let left_out_of_balance =
+            !approved.counts(current_date) || !weekly_hours_history.has_target_on(current_date);
         let absence_blocks_target = absence
             .as_deref()
             .map(|kind| absence_removes_target(&category_flags, kind))
@@ -807,10 +815,10 @@ pub async fn build_flextime_for_user(
             &schedule_history,
             current_date,
             user.start_date,
-            holiday.is_some() || absence_blocks_target || week_not_approved,
+            holiday.is_some() || absence_blocks_target || left_out_of_balance,
             weekly_hours_history.on(current_date),
         );
-        let actual = if before_start || week_not_approved {
+        let actual = if before_start || left_out_of_balance {
             0
         } else {
             approved_crediting_minutes_by_day

@@ -1,0 +1,19 @@
+-- A period in which a contract had no work target, as a dated row.
+--
+-- Migration 055 dated the weekly hours, but a contract that only gains a
+-- target later (an assistant promoted to employee, time tracking switched on)
+-- had no way to say what came before. Writing zero hours for that period kept
+-- the target away from it, but a zero-hour contract still has a flextime
+-- account, so every hour booked as an assistant turned into flextime after the
+-- promotion. Writing nothing at all handed the new hours to the whole past
+-- instead, and every week since the contract start then counted as hours not
+-- worked.
+--
+-- A NULL `weekly_hours` now means "no work target from this date on": no
+-- target, and no flextime account the day's hours could count towards. The
+-- range check still holds for every row that has hours, because a CHECK
+-- passes NULL.
+--
+-- Idempotent: dropping NOT NULL from a column that is already nullable is a
+-- no-op.
+ALTER TABLE user_weekly_hours ALTER COLUMN weekly_hours DROP NOT NULL;

@@ -159,12 +159,10 @@ pub async fn get_one(
         .find_by_id(user_id)
         .await?
         .ok_or(AppError::NotFound)?;
-    let approver_ids = app_state
-        .db
-        .users
-        .get_approver_ids(user.id)
-        .await
-        .unwrap_or_default();
+    // A failed read is an error, never an empty list: the form saves back what
+    // it was shown, so a list that only looked empty would be saved as a
+    // change — no approvers, or Monday to Friday instead of the real days.
+    let approver_ids = app_state.db.users.get_approver_ids(user.id).await?;
     // The weekdays currently on record, so the form shows what is stored rather
     // than a guess derived from the day count. An empty list means no pattern
     // was ever recorded for this contract, which is the case for assistants and
@@ -177,8 +175,7 @@ pub async fn get_one(
         .db
         .work_schedules
         .list_for_user(user.id)
-        .await
-        .unwrap_or_default()
+        .await?
         .into_iter()
         .rfind(|row| row.valid_from <= shown_on)
         .map(|row| row.weekdays)
@@ -189,8 +186,7 @@ pub async fn get_one(
         .db
         .work_schedules
         .list_hours_for_user(user.id)
-        .await
-        .unwrap_or_default();
+        .await?;
     let user_json = serde_json::json!({
         "id": user.id,
         "weekly_hours_history": weekly_hours_history,
@@ -525,9 +521,7 @@ pub async fn update(
     // it. Sending both cannot produce a contradiction, because the count sent is
     // simply ignored in favour of the days.
     let requested_weekdays: Option<Vec<i16>> = match &body.work_weekdays {
-        Some(days) => Some(crate::repository::WorkScheduleDb::normalised_weekdays(
-            days,
-        )?),
+        Some(days) => Some(crate::services::work_schedules::normalised_weekdays(days)?),
         None => None,
     };
     let effective_workdays_update: Option<i16> = if is_assistant_role(&new_role) {
@@ -680,17 +674,14 @@ pub async fn update(
     );
     let start_date_now = effective_start_date.unwrap_or(previous_user.start_date);
     let workdays_now = effective_workdays_update.unwrap_or(previous_user.workdays_per_week);
+    let had_work_target =
+        crate::roles::has_work_target(&previous_user.role, previous_user.tracks_time);
+    let today = crate::services::settings::app_today(&app_state.pool).await;
     if now_has_work_target {
         // The weeks before this save were judged by the stored hours, or by no
         // target at all for a contract that only gains one now (an assistant
         // promoted, time tracking switched on). Those weeks keep that.
-        let previous_hours =
-            if crate::roles::has_work_target(&previous_user.role, previous_user.tracks_time) {
-                previous_user.weekly_hours
-            } else {
-                0.0
-            };
-        let today = crate::services::settings::app_today(&app_state.pool).await;
+        let previous_hours = had_work_target.then_some(previous_user.weekly_hours);
         crate::services::work_schedules::record_working_time_tx(
             &mut transaction,
             crate::services::work_schedules::WorkingTimeUpdate {
@@ -705,6 +696,18 @@ pub async fn update(
                 changes_from: body.changes_from,
                 changed_by: requester.id,
             },
+        )
+        .await?;
+    } else if had_work_target {
+        // The target ends today. Kept on record so that, should it come back,
+        // the period without one is not judged by the hours from before it.
+        crate::services::work_schedules::record_target_ended_tx(
+            &mut transaction,
+            user_id,
+            start_date_now,
+            previous_user.weekly_hours,
+            today,
+            requester.id,
         )
         .await?;
     }

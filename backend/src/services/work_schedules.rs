@@ -102,8 +102,8 @@ pub async fn contract_schedule(pool: &DatabasePool, user_id: i64) -> AppResult<C
 /// The weekly hours a calculation must apply on each day of this contract.
 ///
 /// A contract with no work target carries no minutes whatever its stored hours
-/// (legacy data holds non-zero hours on assistants), so it gets zero for all
-/// time. Everybody else reads their recorded changes, falling back to the
+/// (legacy data holds non-zero hours on assistants), so it has no target for
+/// all time. Everybody else reads their recorded changes, falling back to the
 /// current hours when none were ever recorded.
 pub async fn weekly_hours_for(
     pool: &DatabasePool,
@@ -113,11 +113,17 @@ pub async fn weekly_hours_for(
     current_weekly_hours: f64,
 ) -> AppResult<WeeklyHoursHistory> {
     if !crate::roles::has_work_target(role, tracks_time) {
-        return Ok(WeeklyHoursHistory::constant(0.0));
+        return Ok(WeeklyHoursHistory::no_target());
     }
     WorkScheduleDb::new(pool.clone())
         .hours_history_for_user(user_id, current_weekly_hours)
         .await
+}
+
+/// Sort, de-duplicate and check a set of working days named by a request, so a
+/// handler can refuse a bad one before anything is written.
+pub fn normalised_weekdays(weekdays: &[i16]) -> AppResult<Vec<i16>> {
+    WorkScheduleDb::normalised_weekdays(weekdays)
 }
 
 /// What one save of the user form says about a contract's working time.
@@ -130,8 +136,8 @@ pub struct WorkingTimeUpdate<'a> {
     pub contract_start: NaiveDate,
     pub today: NaiveDate,
     /// The weekly hours the weeks before this save were judged by: the stored
-    /// hours, or zero for a contract that had no work target until now.
-    pub previous_hours: f64,
+    /// hours, or `None` for a contract that had no work target until now.
+    pub previous_hours: Option<f64>,
     /// The weekly hours the form sent, if any.
     pub new_hours: Option<f64>,
     /// The weekdays the form named, already normalised.
@@ -193,7 +199,7 @@ pub async fn record_working_time_tx(
     let changed_pattern = wanted_pattern.filter(|days| current_pattern.as_ref() != Some(days));
     let changed_hours = update
         .new_hours
-        .filter(|hours| *hours != update.previous_hours);
+        .filter(|hours| Some(*hours) != update.previous_hours);
     if changed_pattern.is_none() && changed_hours.is_none() {
         return Ok(());
     }
@@ -211,7 +217,7 @@ pub async fn record_working_time_tx(
             update.contract_start,
             update.previous_hours,
             changes_from,
-            new_hours,
+            Some(new_hours),
             created_by,
         )
         .await?;
@@ -227,6 +233,34 @@ pub async fn record_working_time_tx(
         .await?;
     }
     Ok(())
+}
+
+/// Record that a contract has no work target any more, from `from` on.
+///
+/// Every calculation already reads a contract without a target as having none
+/// on any day, so this changes nothing today. It matters once the target comes
+/// back (an assistant promoted again, time tracking switched back on): the
+/// period in between then keeps no target and no flextime account, instead of
+/// reading the hours from before and counting every week of it as hours not
+/// worked.
+pub async fn record_target_ended_tx(
+    tx: &mut crate::db::PgConnection,
+    user_id: i64,
+    contract_start: NaiveDate,
+    hours_until_then: f64,
+    from: NaiveDate,
+    changed_by: i64,
+) -> AppResult<()> {
+    WorkScheduleDb::record_hours_tx(
+        tx,
+        user_id,
+        contract_start,
+        Some(hours_until_then),
+        from.max(contract_start),
+        None,
+        Some(changed_by),
+    )
+    .await
 }
 
 /// The working days the save asks for, or `None` when it says nothing about

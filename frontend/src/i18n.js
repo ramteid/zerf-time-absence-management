@@ -260,6 +260,7 @@ const TRANSLATIONS = {
     "Weeks before this date keep the hours and working days they were worked with.":
       "Weeks before this date keep the hours and working days they were worked with.",
     "Weekly hours history": "Weekly hours history",
+    "No target hours": "No target hours",
     "Changes to the working time must start between the contract start and today.":
       "Changes to the working time must start between the contract start and today.",
     "A day that is not ticked carries no target hours, costs no leave day, and any time booked on it counts as overtime.":
@@ -618,6 +619,7 @@ const TRANSLATIONS = {
     "Weeks before this date keep the hours and working days they were worked with.":
       "Wochen vor diesem Datum behalten die Stunden und Arbeitstage, mit denen sie gearbeitet wurden.",
     "Weekly hours history": "Verlauf der Wochenstunden",
+    "No target hours": "Keine Sollstunden",
     "Changes to the working time must start between the contract start and today.":
       "Änderungen der Arbeitszeit müssen zwischen Vertragsbeginn und heute beginnen.",
     "A day that is not ticked carries no target hours, costs no leave day, and any time booked on it counts as overtime.":

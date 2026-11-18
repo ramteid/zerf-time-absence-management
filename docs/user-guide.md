@@ -554,7 +554,9 @@ do not move the balance until the week they belong to is approved.
 Users with role `assistant` do not have a flextime account. This behavior is
 role-based (not inferred from weekly hours). For assistants, flextime and
 overtime reports return no rows and submission completeness for past weeks is
-treated as complete.
+treated as complete. If an assistant later becomes an employee, the time as an
+assistant still has no flextime: hours booked then do not count towards the
+new flextime balance.
 
 ### How daily targets are calculated
 
@@ -1778,7 +1780,8 @@ not in the future.
 - Booked times and absences are never changed. Only the target they are
   compared with changes.
 - If the person had no target before, for example as an assistant, the weeks
-  before the date keep no target.
+  before the date keep no target. Hours booked in those weeks stay visible in
+  the reports, but they do not count towards the flextime balance.
 - If a later change is already on record, the new one replaces it. From the
   chosen date on, what you saved applies.
 - Saving the form without changing the hours or days leaves the history as it

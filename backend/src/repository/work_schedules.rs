@@ -29,7 +29,9 @@ pub struct WorkWeekdays {
 #[derive(Clone, Debug, FromRow, Serialize)]
 pub struct WeeklyHoursRow {
     pub valid_from: NaiveDate,
-    pub weekly_hours: f64,
+    /// `None` from a date on which the contract had no work target at all
+    /// (migration 056).
+    pub weekly_hours: Option<f64>,
 }
 
 #[derive(Clone)]
@@ -395,32 +397,36 @@ impl WorkScheduleDb {
     }
 
     /// Record the hours in force from `valid_from` on, inside the caller's
-    /// transaction. Writing the same date again replaces that day's value, and
+    /// transaction. `None` records that the contract has no work target from
+    /// that day on. Writing the same date again replaces that day's value, and
     /// a change recorded for a later date is replaced too, for the reason
     /// [`Self::record_weekdays_change_tx`] gives.
     ///
     /// When the person has no history yet, `previous_hours` is first written as
-    /// the starting row dated `contract_start`, so the weeks already worked keep
-    /// the hours they were worked under. That includes zero: somebody who had
-    /// no target before (a non-booking contract, an assistant promoted to
-    /// employee) keeps a target of zero for the weeks before the change. Not
-    /// writing it handed the new hours to the whole past, so a first target
-    /// dated from October also demanded those hours for every week since the
+    /// the starting row dated `contract_start`, so the weeks before the change
+    /// keep what they were judged by. For somebody who had no target before (an
+    /// assistant promoted to employee) that is `None`: the weeks before the
+    /// promotion keep no target and no flextime account. Writing nothing
+    /// handed the new hours to the whole past instead, so a first target dated
+    /// from October also demanded those hours for every week since the
     /// contract start.
     ///
-    /// Finally `users.weekly_hours` is set to the latest row, the value in force
-    /// today, so everything that needs only the current contract stays correct
-    /// even when an earlier date was corrected.
+    /// Finally `users.weekly_hours` is set to the latest row with hours, the
+    /// value in force today, so everything that needs only the current contract
+    /// stays correct even when an earlier date was corrected. A latest row
+    /// without a target leaves it alone: the caller has just stored what the
+    /// contract holds now (zero for an assistant, the kept hours for an
+    /// account that stopped tracking time).
     pub async fn record_hours_tx(
         tx: &mut sqlx::PgConnection,
         user_id: i64,
         contract_start: NaiveDate,
-        previous_hours: f64,
+        previous_hours: Option<f64>,
         valid_from: NaiveDate,
-        new_hours: f64,
+        new_hours: Option<f64>,
         created_by: Option<i64>,
     ) -> AppResult<()> {
-        if !(0.0..=168.0).contains(&new_hours) {
+        if new_hours.is_some_and(|hours| !(0.0..=168.0).contains(&hours)) {
             return Err(AppError::BadRequest("Invalid weekly_hours.".into()));
         }
         sqlx::query(
@@ -451,26 +457,31 @@ impl WorkScheduleDb {
         .bind(created_by)
         .execute(&mut *tx)
         .await?;
-        // A row that repeats the hours of the row before it records no change.
+        // A row that repeats the value of the row before it records no change.
         // That is what a correction back to the earlier value leaves behind, and
         // the admin expects the mistaken entry to be gone, not duplicated. The
-        // oldest row has no predecessor and is never touched.
+        // oldest row has no predecessor and is never touched. `IS NOT DISTINCT
+        // FROM` so that two periods without a target in a row count as equal.
         sqlx::query(
             "DELETE FROM user_weekly_hours WHERE id IN ( \
                  SELECT id FROM ( \
                      SELECT id, weekly_hours, \
+                            LAG(id) OVER (ORDER BY valid_from) AS before_id, \
                             LAG(weekly_hours) OVER (ORDER BY valid_from) AS before_hours \
                      FROM user_weekly_hours WHERE user_id = $1 \
-                 ) ordered WHERE before_hours IS NOT NULL AND weekly_hours = before_hours)",
+                 ) ordered \
+                 WHERE before_id IS NOT NULL AND weekly_hours IS NOT DISTINCT FROM before_hours)",
         )
         .bind(user_id)
         .execute(&mut *tx)
         .await?;
         sqlx::query(
-            "UPDATE users SET weekly_hours = ( \
+            "UPDATE users SET weekly_hours = latest.weekly_hours \
+             FROM ( \
                  SELECT weekly_hours FROM user_weekly_hours \
                  WHERE user_id = $1 ORDER BY valid_from DESC LIMIT 1 \
-             ) WHERE id = $1",
+             ) latest \
+             WHERE users.id = $1 AND latest.weekly_hours IS NOT NULL",
         )
         .bind(user_id)
         .execute(&mut *tx)

@@ -404,20 +404,29 @@ impl WorkScheduleHistory {
 /// than its weekdays, and dated for the same reason: every target is recomputed
 /// on each query, so one stored value would re-judge the whole past the moment
 /// the contract changed. Asked per day, never once for a range.
+///
+/// A value of `None` is a period in which the contract had no work target at
+/// all — the person was an assistant, or did not track time. That is not the
+/// same as zero hours: a zero-hour contract still has a flextime account,
+/// while a period without a target has none, so the hours booked in it are
+/// paid as they are and never become flextime (see [`Self::has_target_on`]).
 #[derive(Debug, Clone)]
 pub struct WeeklyHoursHistory {
     /// Ascending by the date each value starts applying.
-    entries: Vec<(NaiveDate, f64)>,
+    entries: Vec<(NaiveDate, Option<f64>)>,
     /// Used when nothing was ever recorded: the person's current hours, which
     /// is what every report read before this history existed.
-    fallback: f64,
+    fallback: Option<f64>,
 }
 
 impl WeeklyHoursHistory {
-    pub fn new(entries: Vec<(NaiveDate, f64)>, fallback: f64) -> Self {
+    pub fn new(entries: Vec<(NaiveDate, Option<f64>)>, fallback: f64) -> Self {
         let mut entries = entries;
         entries.sort_by_key(|(valid_from, _)| *valid_from);
-        Self { entries, fallback }
+        Self {
+            entries,
+            fallback: Some(fallback),
+        }
     }
 
     /// One value for all time.
@@ -425,10 +434,18 @@ impl WeeklyHoursHistory {
         Self::new(Vec::new(), weekly_hours)
     }
 
-    /// The hours in force on `date`: the latest entry that had already begun.
+    /// A contract that has no work target on any day.
+    pub fn no_target() -> Self {
+        Self {
+            entries: Vec::new(),
+            fallback: None,
+        }
+    }
+
+    /// The value in force on `date`: the latest entry that had already begun.
     /// A date before the first entry reads the first entry, so a contract start
     /// moved earlier never leaves days without hours.
-    pub fn on(&self, date: NaiveDate) -> f64 {
+    fn in_force(&self, date: NaiveDate) -> Option<f64> {
         self.entries
             .iter()
             .rev()
@@ -436,6 +453,17 @@ impl WeeklyHoursHistory {
             .or_else(|| self.entries.first())
             .map(|(_, hours)| *hours)
             .unwrap_or(self.fallback)
+    }
+
+    /// The hours in force on `date`; a day without a work target carries none.
+    pub fn on(&self, date: NaiveDate) -> f64 {
+        self.in_force(date).unwrap_or(0.0)
+    }
+
+    /// Whether the contract had a work target on `date`, and so a flextime
+    /// account the day's hours count towards.
+    pub fn has_target_on(&self, date: NaiveDate) -> bool {
+        self.in_force(date).is_some()
     }
 }
 
@@ -607,7 +635,8 @@ mod tests {
     #[test]
     fn weekly_hours_follow_the_date_they_took_effect() {
         let d = |m, day| NaiveDate::from_ymd_opt(2030, m, day).unwrap();
-        let history = WeeklyHoursHistory::new(vec![(d(6, 1), 30.0), (d(1, 1), 20.0)], 99.0);
+        let history =
+            WeeklyHoursHistory::new(vec![(d(6, 1), Some(30.0)), (d(1, 1), Some(20.0))], 99.0);
         assert_eq!(history.on(d(5, 31)), 20.0, "the past keeps its hours");
         assert_eq!(history.on(d(6, 1)), 30.0, "valid_from is the first day");
         assert_eq!(history.on(d(12, 31)), 30.0);
@@ -617,6 +646,22 @@ mod tests {
             "before the first entry reads the first entry"
         );
         assert_eq!(WeeklyHoursHistory::constant(12.5).on(d(3, 3)), 12.5);
+    }
+
+    #[test]
+    fn a_period_without_a_target_carries_no_hours_and_no_flextime_account() {
+        let d = |m, day| NaiveDate::from_ymd_opt(2030, m, day).unwrap();
+        // An assistant from January, promoted to 30 hours from June.
+        let history = WeeklyHoursHistory::new(vec![(d(1, 1), None), (d(6, 1), Some(30.0))], 0.0);
+        assert_eq!(history.on(d(5, 31)), 0.0);
+        assert!(!history.has_target_on(d(5, 31)), "no account before June");
+        assert_eq!(history.on(d(6, 1)), 30.0);
+        assert!(history.has_target_on(d(6, 1)));
+        // A zero-hour contract is different: it still has an account.
+        let zero = WeeklyHoursHistory::constant(0.0);
+        assert!(zero.has_target_on(d(3, 3)));
+        assert!(!WeeklyHoursHistory::no_target().has_target_on(d(3, 3)));
+        assert_eq!(WeeklyHoursHistory::no_target().on(d(3, 3)), 0.0);
     }
 
     use super::*;

@@ -3435,8 +3435,14 @@ async fn weekly_hours_changes_are_dated_and_not_retroactive() {
     assert_eq!(st, StatusCode::OK, "change hours: {body}");
     let rows = schedules.list_hours_for_user(user_id).await.unwrap();
     assert_eq!(rows.len(), 2, "starting row plus the change: {rows:?}");
-    assert_eq!((rows[0].valid_from, rows[0].weekly_hours), (start, 20.0));
-    assert_eq!((rows[1].valid_from, rows[1].weekly_hours), (change, 30.0));
+    assert_eq!(
+        (rows[0].valid_from, rows[0].weekly_hours),
+        (start, Some(20.0))
+    );
+    assert_eq!(
+        (rows[1].valid_from, rows[1].weekly_hours),
+        (change, Some(30.0))
+    );
 
     let (_, detail) = admin.get(&format!("/api/v1/users/{user_id}")).await;
     assert_eq!(detail["weekly_hours"].as_f64(), Some(30.0), "current hours");
@@ -3473,7 +3479,7 @@ async fn weekly_hours_changes_are_dated_and_not_retroactive() {
     assert_eq!(st, StatusCode::OK, "correct the change: {body}");
     let rows = schedules.list_hours_for_user(user_id).await.unwrap();
     assert_eq!(rows.len(), 2, "replaced, not added: {rows:?}");
-    assert_eq!(rows[1].weekly_hours, 25.0);
+    assert_eq!(rows[1].weekly_hours, Some(25.0));
 
     // Correcting the same date back to the earlier hours removes the mistaken
     // entry instead of leaving two rows that say the same thing.
@@ -3486,7 +3492,10 @@ async fn weekly_hours_changes_are_dated_and_not_retroactive() {
     assert_eq!(st, StatusCode::OK, "correct back to the old hours: {body}");
     let rows = schedules.list_hours_for_user(user_id).await.unwrap();
     assert_eq!(rows.len(), 1, "the mistaken entry is gone: {rows:?}");
-    assert_eq!((rows[0].valid_from, rows[0].weekly_hours), (start, 20.0));
+    assert_eq!(
+        (rows[0].valid_from, rows[0].weekly_hours),
+        (start, Some(20.0))
+    );
     let (_, detail) = admin.get(&format!("/api/v1/users/{user_id}")).await;
     assert_eq!(detail["weekly_hours"].as_f64(), Some(20.0));
 
@@ -3562,7 +3571,7 @@ async fn hours_and_working_days_change_from_one_date() {
         .iter()
         .map(|r| (r.valid_from, r.weekly_hours))
         .collect();
-    assert_eq!(hours, vec![(start, 40.0), (change, 32.0)]);
+    assert_eq!(hours, vec![(start, Some(40.0)), (change, Some(32.0))]);
     let days = schedules.list_for_user(user_id).await.unwrap();
     let days: Vec<_> = days
         .iter()
@@ -3668,15 +3677,18 @@ async fn hours_and_working_days_change_from_one_date() {
     app.cleanup().await;
 }
 
-/// A contract that gains its first target keeps zero for the weeks before.
+/// A contract that gains its first target keeps none for the weeks before.
 ///
 /// Before this an assistant promoted to employee with 30 hours from a December
 /// Monday was also given those 30 hours for every week since the contract
-/// start, and every one of those weeks then counted as hours not worked.
+/// start, and every one of those weeks then counted as hours not worked. Nor
+/// may the hours booked as an assistant turn into flextime: they were paid as
+/// they were, and there was no flextime account to book them to.
 ///
 /// The numbers: 30 hours over five days is 30 × 60 ÷ 5 = 360 minutes a day.
+/// The assistant books 08:00 to 12:00, which is 240 minutes.
 #[tokio::test]
-async fn a_first_target_leaves_the_weeks_before_it_at_zero() {
+async fn a_first_target_leaves_the_weeks_before_it_without_one() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
     let schedules = &app.state.db.work_schedules;
@@ -3698,7 +3710,21 @@ async fn a_first_target_leaves_the_weeks_before_it_at_zero() {
     assert_eq!(st, StatusCode::OK, "create assistant: {body}");
     let user_id = id(&body);
 
+    // A week of work as an assistant, handed in and approved.
     let change = reference_date() - Duration::days(28);
+    let assistant_monday = change - Duration::days(7);
+    let assistant = login_change_pw(&app, "promoted@example.com", &temp_pw(&body)).await;
+    let (_, categories) = admin.get("/api/v1/categories").await;
+    let category_id = categories[0]["id"].as_i64().expect("a work category");
+    let entry_id = create_and_submit_entry(&assistant, &iso(assistant_monday), category_id).await;
+    let (st, body) = admin
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [entry_id]}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "approve: {body}");
+
     let (st, body) = admin
         .put(
             &format!("/api/v1/users/{user_id}"),
@@ -3717,7 +3743,11 @@ async fn a_first_target_leaves_the_weeks_before_it_at_zero() {
         .iter()
         .map(|r| (r.valid_from, r.weekly_hours))
         .collect();
-    assert_eq!(hours, vec![(start, 0.0), (change, 30.0)]);
+    assert_eq!(
+        hours,
+        vec![(start, None), (change, Some(30.0))],
+        "no target until the promotion"
+    );
     assert_eq!(
         day_target_minutes(&admin, user_id, change - Duration::days(3)).await,
         0,
@@ -3727,6 +3757,103 @@ async fn a_first_target_leaves_the_weeks_before_it_at_zero() {
         day_target_minutes(&admin, user_id, change + Duration::days(4)).await,
         360,
         "30 hours over five days from the promotion on"
+    );
+
+    // The range report still shows the work, but the flextime account does
+    // not count it.
+    let (st, report) = admin
+        .get(&format!(
+            "/api/v1/reports/range?user_id={user_id}&from={assistant_monday}&to={assistant_monday}"
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK, "range report: {report}");
+    assert_eq!(report["actual_min"].as_i64(), Some(240), "08:00 to 12:00");
+    let (st, ledger) = admin
+        .get(&format!(
+            "/api/v1/reports/flextime?user_id={user_id}&from={}&to={}",
+            assistant_monday,
+            change - Duration::days(1)
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK, "flextime: {ledger}");
+    let days = ledger["days"].as_array().expect("ledger days");
+    assert!(!days.is_empty(), "the ledger covers the assistant week");
+    assert!(
+        days.iter().all(|day| day["actual_min"].as_i64() == Some(0)
+            && day["cumulative_min"].as_i64() == Some(0)),
+        "assistant hours never become flextime: {days:?}"
+    );
+
+    app.cleanup().await;
+}
+
+/// A target that ends is kept on record, so that it does not reach into the
+/// period without one when it comes back.
+///
+/// An employee on 20 hours becomes an assistant. Should they become an employee
+/// again later, the months as an assistant must keep no target, rather than
+/// reading the 20 hours from before and counting every week of them as hours
+/// not worked. That reading itself is pinned in `time_calc`'s tests; this one
+/// pins what is recorded.
+#[tokio::test]
+async fn a_target_that_ends_is_kept_on_record() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let schedules = &app.state.db.work_schedules;
+    let start = reference_date() - Duration::days(400);
+    let iso = |date: chrono::NaiveDate| date.format("%Y-%m-%d").to_string();
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "back-again@example.com",
+                "first_name": "Bea", "last_name": "Back",
+                "role": "employee", "weekly_hours": 20.0,
+                "start_date": iso(start),
+                "approver_ids": [1],
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create: {body}");
+    let user_id = id(&body);
+
+    // Becomes an assistant today.
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{user_id}"),
+            &json!({"role": "assistant", "weekly_hours": 0.0}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "to assistant: {body}");
+    let hours = schedules.list_hours_for_user(user_id).await.unwrap();
+    let hours: Vec<_> = hours
+        .iter()
+        .map(|r| (r.valid_from, r.weekly_hours))
+        .collect();
+    assert_eq!(
+        hours,
+        vec![(start, Some(20.0)), (reference_date(), None)],
+        "the 20 hours end where the target ends"
+    );
+
+    // And an employee again, from the same day: the change replaces the gap.
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{user_id}"),
+            &json!({"role": "employee", "weekly_hours": 25.0, "work_weekdays": [1, 2, 3, 4, 5]}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "back to employee: {body}");
+    let hours = schedules.list_hours_for_user(user_id).await.unwrap();
+    let hours: Vec<_> = hours
+        .iter()
+        .map(|r| (r.valid_from, r.weekly_hours))
+        .collect();
+    assert_eq!(
+        hours,
+        vec![(start, Some(20.0)), (reference_date(), Some(25.0))],
+        "from today the new hours, before it the old ones"
     );
 
     app.cleanup().await;

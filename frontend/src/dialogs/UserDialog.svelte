@@ -736,7 +736,13 @@
               {#each weeklyHoursHistory as row (row.valid_from)}
                 <li>
                   <span>{$t("From")} {fmtDate(row.valid_from)}</span>
-                  <strong>{fmtDecimal(row.weekly_hours, 2)} h</strong>
+                  <!-- No hours means the contract had no target hours then,
+                       for example while the person was an assistant. -->
+                  <strong
+                    >{row.weekly_hours == null
+                      ? $t("No target hours")
+                      : `${fmtDecimal(row.weekly_hours, 2)} h`}</strong
+                  >
                 </li>
               {/each}
             </ul>
