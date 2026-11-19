@@ -116,7 +116,17 @@ let user = UserDb::new(pool.clone()).find_by_id(id).await?;
 - Auth cleanup: purge expired sessions and login attempts (hourly)
 - Notification cleanup: delete notifications older than 90 days (daily)
 - Holiday scheduler: ensure current and next year holidays exist (weekly, Monday noon)
-- Submission reminder scheduler (also carries two month-boundary passes, both at
+- Submission reminder scheduler. On the deadline day `run_check` reminds
+  everybody who tracks time, with the question that fits the contract: people
+  with a target schedule about every week not handed in, empty ones included
+  (`find_unsubmitted_weeks`); assistants and contracts without weekly hours —
+  the ones `roles::has_submission_obligation` exempts — only about weeks
+  holding a draft or an uncorrected rejection
+  (`find_weeks_with_unsubmitted_bookings`), for every past month. The second
+  group was once left out, and since the month-end pass below only looks at the
+  month just finished, an older draft was chased by nobody while it held that
+  month's archive back and kept its hours out of the payroll report. It also
+  carries two month-boundary passes, both at
   08:00 on every third day from the 1st — `month_reminder_is_due_now`).
   `run_month_end_check` asks the assistants who still hold a booking they never
   handed in; `run_month_weeks_reminder` names the finished month's missing weeks

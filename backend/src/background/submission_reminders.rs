@@ -1,6 +1,7 @@
 //! Background task: check on the configured deadline day of each month
 //! whether users have submitted all past weeks' time entries.
-//! Users with weekly_hours = 0 are skipped (non-booking users).
+//! Assistants and users with weekly_hours = 0 have no target schedule, so they
+//! are only asked about bookings they made and never handed in.
 
 use crate::db::DatabasePool;
 use crate::services::settings::{
@@ -191,9 +192,58 @@ async fn find_unsubmitted_weeks(
     incomplete_week_mondays
 }
 
-/// Run one check pass for all active non-assistant users.
-/// Assistant users have no fixed target schedule and are excluded from
-/// submission completeness reminders by role policy.
+/// Collect the Mondays of fully elapsed weeks that hold a booking the person
+/// made and never handed in: a draft, or a rejected entry nobody has corrected
+/// yet. Only days from the start date on count, because earlier rows are
+/// hidden everywhere and nobody could act on them.
+///
+/// This is the question for people the app may not demand weeks from
+/// (`roles::has_submission_obligation`): assistants and contracts without
+/// weekly hours. For them a week without a booking is no evidence of anything,
+/// so [`find_unsubmitted_weeks`] would chase weeks they simply did not work.
+/// A booking they made is evidence, though. It counts nowhere until it is
+/// handed in and approved: it never reaches the payroll report, so the hours go
+/// unpaid, and it holds that month's archived timesheet back. A week that is
+/// handed in and only waits for a decision is the approver's move and is not
+/// named.
+async fn find_weeks_with_unsubmitted_bookings(
+    pool: &DatabasePool,
+    user_id: i64,
+    user_start: NaiveDate,
+) -> Vec<NaiveDate> {
+    let today = app_today(pool).await;
+    // The same window as `find_unsubmitted_weeks`: fully elapsed weeks only,
+    // because the current week can still gain and lose bookings.
+    let last_checked_sunday = crate::time_calc::week_monday(today) - chrono::Duration::days(1);
+    if user_start > last_checked_sunday {
+        return vec![];
+    }
+    let open_dates = crate::repository::TimeEntryDb::new(pool.clone())
+        .get_incomplete_dates_in_range(user_id, user_start, last_checked_sunday)
+        .await
+        .unwrap_or_default();
+    let mut week_mondays: Vec<NaiveDate> = open_dates
+        .into_iter()
+        .map(crate::time_calc::week_monday)
+        .collect();
+    week_mondays.sort();
+    week_mondays.dedup();
+    week_mondays
+}
+
+/// Run one check pass on the deadline day.
+///
+/// Everybody who tracks time is asked about their past weeks, with the
+/// question that fits their contract. People with a target schedule are asked
+/// about every week that is not handed in, empty ones included. People without
+/// one (assistants, contracts without weekly hours) are asked only about weeks
+/// holding a booking they never handed in.
+///
+/// The second group used to be left out entirely. The month-end pass asks
+/// assistants about the month that has just finished and nothing older, so a
+/// draft or an uncorrected rejection in any earlier month was chased by nobody.
+/// It then held that month's archived timesheet back with no end in sight, and
+/// a forgotten draft never reached the payroll report at all.
 pub async fn run_check(state: &crate::AppState) {
     let pool = &state.pool;
 
@@ -216,71 +266,94 @@ pub async fn run_check(state: &crate::AppState) {
 
     let today = app_today(pool).await;
 
-    let rows: Vec<crate::repository::ActiveUserRow> =
-        match state.db.users.get_active_non_assistant_users().await {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::error!(target:"zerf::submission_reminders", "fetch users failed: {e}");
-                return;
+    match state.db.users.get_active_non_assistant_users().await {
+        Ok(rows) => {
+            tracing::debug!(
+                target: "zerf::assistant_role",
+                reminder_candidate_count = rows.len(),
+                today = %today,
+                "submission reminder pass loaded non-assistant candidates"
+            );
+            for row in rows {
+                let missing_weeks = find_unsubmitted_weeks(pool, row.id, row.start_date).await;
+                send_submission_reminder(state, &language, today, row.id, &missing_weeks).await;
             }
-        };
-    tracing::debug!(
-        target: "zerf::assistant_role",
-        reminder_candidate_count = rows.len(),
-        today = %today,
-        "submission reminder pass loaded non-assistant candidates"
+        }
+        Err(e) => {
+            tracing::error!(target:"zerf::submission_reminders", "fetch users failed: {e}");
+        }
+    }
+
+    // A failure above must not cost this group its reminder too, and the
+    // reverse: each group is loaded and reminded on its own.
+    match state
+        .db
+        .users
+        .get_active_users_without_submission_obligation()
+        .await
+    {
+        Ok(rows) => {
+            for row in rows {
+                let open_weeks =
+                    find_weeks_with_unsubmitted_bookings(pool, row.id, row.start_date).await;
+                send_submission_reminder(state, &language, today, row.id, &open_weeks).await;
+            }
+        }
+        Err(e) => {
+            tracing::error!(
+                target:"zerf::submission_reminders",
+                "fetch users without a submission obligation failed: {e}"
+            );
+        }
+    }
+}
+
+/// Send the deadline-day reminder naming `weeks`; nothing when it is empty.
+async fn send_submission_reminder(
+    state: &crate::AppState,
+    language: &crate::i18n::Language,
+    today: NaiveDate,
+    user_id: i64,
+    weeks: &[NaiveDate],
+) {
+    if weeks.is_empty() {
+        return;
+    }
+    let week_labels: Vec<String> = weeks
+        .iter()
+        .map(|monday| crate::i18n::format_week_label(language, *monday))
+        .collect();
+    let text = crate::i18n::notification_event_text(
+        language,
+        "submission_reminder",
+        &[("weeks", week_labels.join(", "))],
+    );
+    let email_body = crate::i18n::notification_email_body(
+        language,
+        "submission_reminder",
+        &[("weeks", week_labels.join("\n"))],
     );
 
-    for crate::repository::ActiveUserRow {
-        id: user_id,
-        start_date: user_start,
-        ..
-    } in rows
-    {
-        let missing_weeks = find_unsubmitted_weeks(pool, user_id, user_start).await;
-
-        if missing_weeks.is_empty() {
-            continue;
-        }
-
-        let missing_labels: Vec<String> = missing_weeks
-            .iter()
-            .map(|monday| crate::i18n::format_week_label(&language, *monday))
-            .collect();
-
-        let weeks_str = missing_labels.join(", ");
-        let text = crate::i18n::notification_event_text(
-            &language,
+    // Idempotent per user per local day (configured timezone, not UTC).
+    // The key must NOT depend on which weeks are still missing: `run_loop`
+    // re-checks every minute while the deadline day lasts, so a content-derived
+    // key would mint a fresh notification — and a fresh email — each time
+    // someone submits one of their outstanding weeks, nagging them once per
+    // minute precisely while they are working through the backlog.
+    let dedupe_key = format!("submission_reminder:{}", today);
+    crate::services::notifications::deliver(
+        state,
+        &crate::services::notifications::Outgoing::new(
+            user_id,
+            language,
             "submission_reminder",
-            &[("weeks", weeks_str.clone())],
-        );
-        let email_body = crate::i18n::notification_email_body(
-            &language,
-            "submission_reminder",
-            &[("weeks", missing_labels.join("\n"))],
-        );
-
-        // Idempotent per user per local day (configured timezone, not UTC).
-        // The key must NOT depend on which weeks are still missing: `run_loop`
-        // re-checks every minute while the deadline day lasts, so a content-derived
-        // key would mint a fresh notification — and a fresh email — each time
-        // someone submits one of their outstanding weeks, nagging them once per
-        // minute precisely while they are working through the backlog.
-        let dedupe_key = format!("submission_reminder:{}", today);
-        crate::services::notifications::deliver(
-            state,
-            &crate::services::notifications::Outgoing::new(
-                user_id,
-                &language,
-                "submission_reminder",
-                &text.title,
-                &text.body,
-            )
-            .email_body(&email_body)
-            .dedupe_key(&dedupe_key),
+            &text.title,
+            &text.body,
         )
-        .await;
-    }
+        .email_body(&email_body)
+        .dedupe_key(&dedupe_key),
+    )
+    .await;
 }
 
 /// Both month-boundary reminders go out from 08:00 local time — the start of

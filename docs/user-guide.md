@@ -214,12 +214,13 @@ inferred from role alone.
   else — their hours only count, and only reach the payroll report, once the
   week is approved. What they are exempt from is the *demand*: nobody can
   require a certain amount of booked time from them, so they are never flagged
-  for "weeks missing" and never receive a submission reminder.
+  for "weeks missing" and are never reminded of a week they booked nothing in.
+  They are only reminded of bookings they made and have not handed in yet.
 - A non-assistant with weekly hours set to `0` is a non-booking user: approval
   logic still applies to anything they do book, but they are exempt from
-  monthly submission reminders and from week-completeness requirements (the
-  Submissions tile, team report, and monthly PDF upload never flag them for
-  "weeks missing").
+  week-completeness requirements (the Submissions tile, team report, and
+  monthly PDF upload never flag them for "weeks missing"). Like assistants,
+  they are only reminded of bookings they made and have not handed in yet.
 - Approver: a user who has been explicitly assigned to another user and is
 	active.
 - Admin: manages users, categories, holidays, settings, and can also be an
@@ -963,6 +964,8 @@ Duplicate reminders are automatically suppressed — you will not receive the sa
 ### Monthly submission reminder
 
 On the configured submission deadline day each month, every active user with weekly hours > 0 (employees and team leads alike) receives one reminder (in-app, plus email if SMTP is enabled) listing the past weeks that are not fully submitted up to that day. The current week is excluded.
+
+Assistants and users with weekly hours set to `0` get the same reminder on the same day, but it only lists weeks in which they booked something and have not handed it in yet: a draft, or a rejected entry that has not been corrected. A week they booked nothing in is never listed. This covers every past month, not just the last one. Until such a booking is handed in and approved, its hours count nowhere: they do not reach the payroll report, and that month's timesheet is not archived.
 
 The reminder is sent directly to the affected user, not to their approvers. Duplicate reminders for the same user and deadline day are suppressed.
 

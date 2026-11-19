@@ -87,6 +87,27 @@ pub struct ActiveUserRow {
     pub workdays_per_week: i16,
 }
 
+/// Build an [`ActiveUserRow`] from the columns both reminder queries select.
+fn active_user_row(
+    (id, email, first_name, last_name, start_date, workdays_per_week): (
+        i64,
+        String,
+        String,
+        String,
+        NaiveDate,
+        i16,
+    ),
+) -> ActiveUserRow {
+    ActiveUserRow {
+        id,
+        email,
+        first_name,
+        last_name,
+        start_date,
+        workdays_per_week,
+    }
+}
+
 /// Approval reminder row (approver_id, total_pending_count).
 pub type PendingApproverReminderRow = (i64, i64);
 
@@ -1590,19 +1611,30 @@ impl UserDb {
             selected_user_count = rows.len(),
             "loaded active non-assistant users with weekly_hours > 0 for submission reminders"
         );
-        Ok(rows
-            .into_iter()
-            .map(
-                |(id, email, first_name, last_name, start_date, workdays_per_week)| ActiveUserRow {
-                    id,
-                    email,
-                    first_name,
-                    last_name,
-                    start_date,
-                    workdays_per_week,
-                },
-            )
-            .collect())
+        Ok(rows.into_iter().map(active_user_row).collect())
+    }
+
+    /// The active, time-tracking people that `get_active_non_assistant_users`
+    /// leaves out: assistants and contracts without weekly hours, the ones
+    /// `roles::has_submission_obligation` exempts.
+    ///
+    /// The app may not demand a week from them, but a booking they made and
+    /// never handed in still counts nowhere until it is approved, so the
+    /// submission reminder asks them about exactly those bookings. A missing
+    /// or zero value for the hours counts as "no hours", the same as in
+    /// `has_submission_obligation`.
+    pub async fn get_active_users_without_submission_obligation(
+        &self,
+    ) -> AppResult<Vec<ActiveUserRow>> {
+        let rows = sqlx::query_as::<_, (i64, String, String, String, NaiveDate, i16)>(
+            "SELECT id, email, first_name, last_name, start_date, workdays_per_week FROM users \
+             WHERE active = TRUE AND tracks_time = TRUE \
+             AND (lower(trim(role)) = $1 OR COALESCE(weekly_hours, 0) <= 0)",
+        )
+        .bind(ROLE_ASSISTANT)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(active_user_row).collect())
     }
 
     /// Begin a transaction.

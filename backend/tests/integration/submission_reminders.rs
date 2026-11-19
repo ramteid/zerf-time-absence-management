@@ -1100,3 +1100,121 @@ async fn reminders_only_chase_what_is_genuinely_missing() {
 
     app.cleanup().await;
 }
+
+/// The deadline-day reminder also reaches people without a target schedule,
+/// but only about bookings they made and never handed in. The month-end pass
+/// looks at the month that has just ended and nothing older, so without this a
+/// draft or an uncorrected rejection from an earlier month was chased by
+/// nobody. A week that is handed in and only waits for a decision is the
+/// approver's move, and an empty week is no evidence of anything for an
+/// assistant, so neither is named.
+#[tokio::test]
+async fn deadline_reminder_names_old_bookings_an_assistant_never_handed_in() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "old-bookings").await;
+    let lead = login_change_pw(&app, "lead-old-bookings@example.com", &lead_pw).await;
+
+    let (status, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "aushilfe-old-bookings@example.com",
+                "first_name": "Alex",
+                "last_name": "AssistOldBookings",
+                "role": "assistant",
+                "weekly_hours": 0,
+                "start_date": "2024-01-01",
+                "approver_ids": [lead_id],
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create assistant: {body}");
+    let assistant =
+        login_change_pw(&app, "aushilfe-old-bookings@example.com", &temp_pw(&body)).await;
+
+    // Three weeks well before the month that has just ended, so the month-end
+    // pass would never look at any of them. One day per week is enough: a
+    // week is handed in and decided as a whole.
+    let ref_date = reference_date();
+    let this_monday =
+        ref_date - chrono::Duration::days(ref_date.weekday().num_days_from_monday() as i64);
+    let draft_week = this_monday - chrono::Duration::weeks(12);
+    let rejected_week = this_monday - chrono::Duration::weeks(10);
+    let pending_week = this_monday - chrono::Duration::weeks(8);
+    let mut booking_ids = Vec::new();
+    for week in [draft_week, rejected_week, pending_week] {
+        let tuesday = (week + chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
+        let (status, body) = assistant
+            .post(
+                "/api/v1/time-entries",
+                &json!({
+                    "entry_date": tuesday,
+                    "start_time": "08:00",
+                    "end_time": "12:00",
+                    "category_id": cat_id,
+                }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "book {tuesday}: {body}");
+        booking_ids.push(id(&body));
+    }
+    // The first week's booking simply stays a draft.
+    let (rejected_id, pending_id) = (booking_ids[1], booking_ids[2]);
+
+    let (status, body) = assistant
+        .post(
+            "/api/v1/time-entries/submit",
+            &json!({"ids": [rejected_id, pending_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "submit two of the weeks: {body}");
+    let (status, body) = lead
+        .post(
+            "/api/v1/time-entries/batch-reject",
+            &json!({"ids": [rejected_id], "reason": "There were school holidays"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "reject one week: {body}");
+
+    let (status, _) = assistant.delete("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::OK);
+
+    zerf::background::submission_reminders::run_check(&app.state).await;
+
+    let (status, body) = assistant.get("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::OK);
+    let reminders: Vec<&serde_json::Value> = body
+        .as_array()
+        .expect("notifications array")
+        .iter()
+        .filter(|item| item["kind"] == "submission_reminder")
+        .collect();
+    assert_eq!(reminders.len(), 1, "exactly one reminder: {body}");
+    let reminder_body = reminders[0]["body"].as_str().unwrap_or_default();
+    let label = |monday| zerf::i18n::format_week_label(&zerf::i18n::Language::default(), monday);
+    assert!(
+        reminder_body.contains(&label(draft_week)),
+        "the draft's week is named: {reminder_body}"
+    );
+    assert!(
+        reminder_body.contains(&label(rejected_week)),
+        "the uncorrected rejection's week is named: {reminder_body}"
+    );
+    assert!(
+        !reminder_body.contains(&label(pending_week)),
+        "a week waiting for a decision is not the assistant's move: {reminder_body}"
+    );
+    // Only the three booked weeks could ever be named; the empty weeks since
+    // 2024 are no evidence of anything for an assistant.
+    assert_eq!(
+        reminder_body.matches("CW ").count(),
+        2,
+        "only the two open weeks are named: {reminder_body}"
+    );
+
+    app.cleanup().await;
+}

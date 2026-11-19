@@ -78,11 +78,14 @@ pub fn can_approve_non_admin_subjects(role: &str, active: bool) -> bool {
 ///
 /// What assistants and zero-hour users lack is a target schedule. There is no
 /// amount of booked time anybody can require of them, so nothing about their
-/// week can be called "missing": no submission reminder, and no "weeks missing"
-/// verdict on the Submissions tile, in the team report, or in the monthly PDF
-/// and payroll gates. Those checks must use the same exemption the reminder
-/// uses (see `UserDb::get_active_non_assistant_users`) — otherwise a zero-hour
-/// user is nagged by an indicator for a reminder that will never fire.
+/// week can be called "missing": no reminder about a week they booked nothing
+/// in, and no "weeks missing" verdict on the Submissions tile, in the team
+/// report, or in the monthly PDF and payroll gates. Those checks must use the
+/// same exemption the reminder uses (see
+/// `UserDb::get_active_non_assistant_users`) — otherwise a zero-hour user is
+/// nagged by an indicator for a reminder that will never fire. A booking they
+/// did make and never handed in is still reminded of (see
+/// `UserDb::get_active_users_without_submission_obligation`).
 #[inline]
 pub fn has_submission_obligation(role: &str, weekly_hours: f64) -> bool {
     !is_assistant_role(role) && weekly_hours > 0.0
