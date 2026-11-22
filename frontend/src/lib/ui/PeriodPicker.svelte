@@ -153,11 +153,13 @@
     flex-wrap: wrap;
   }
 
-  /* Keep the month input compact — it only ever shows e.g. "July 2026".
-     On mobile the width is reduced so it fits next to the employee selector. */
+  /* The month input shows the full month name, e.g. "September 2026". Its width
+     is set in rem so it grows with the type scale; the text area left after the
+     input's padding and calendar button must still hold the longest label in
+     both languages, or the end of it is cut off. */
   .period-month-input {
-    width: 150px;
-    min-width: 100px;
+    width: 11rem;
+    min-width: 11rem;
   }
 
   /* Keep the toggle button aligned with the date inputs, not their labels. */
@@ -166,10 +168,10 @@
   }
 
   /* Mobile: the Reports toolbar puts the employee dropdown and this picker side
-     by side, and the picker is used ONLY there. The two picker modes need
-     different treatment because the month nav is narrow enough to sit beside
-     the dropdown but the From/To pair is not. Verified across 320–412px with a
-     headless browser before shipping.
+     by side where there is room for both at full text width, and on separate
+     lines where there is not. The picker is used ONLY there. The two picker
+     modes need different treatment because the month nav is narrow enough to
+     sit beside the dropdown on a tablet but the From/To pair is not.
 
      MONTH mode: `display: contents` dissolves the picker's box so its children —
      the ◀ month ▶ nav and the "Custom range" toggle — become flex items of the
@@ -188,15 +190,17 @@
       display: contents;
     }
 
+    /* The nav may grow to fill a line of its own when the employee dropdown
+       needs the full width (see Reports.svelte), and its month input never
+       gets narrower than the longest month label. */
     .zf-nav-slider {
-      flex: 0 1 auto;
-      min-width: 0;
+      flex: 1 1 auto;
     }
 
     .period-month-input {
-      width: 130px;
-      min-width: 90px;
-      flex: 1 1 auto;
+      width: auto;
+      min-width: 10rem;
+      flex: 1 1 11rem;
     }
 
     .period-picker-range {

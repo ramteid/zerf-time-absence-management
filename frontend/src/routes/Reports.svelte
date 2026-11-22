@@ -715,10 +715,14 @@
 
   /* Groups the employee selector and the period picker. On desktop they sit at
      their natural sizes on one line (the toolbar-row wraps the export buttons
-     below when space is tight). The mobile side-by-side behaviour lives in the
-     media query at the bottom of this block and in PeriodPicker.svelte. */
+     below when space is tight). When even the pair itself does not fit, the
+     picker drops to its own line (flex-wrap) rather than squeezing the
+     employee dropdown, so a name is never cut off while there is room for it
+     on a line of its own. The mobile layout lives in the media query below and
+     in PeriodPicker.svelte. */
   .reports-filter-pair {
     display: flex;
+    flex-wrap: wrap;
     align-items: flex-end;
     gap: 12px;
     flex: 1 1 auto;
@@ -730,19 +734,15 @@
     min-width: 0;
   }
 
-  /* Mobile: keep the employee dropdown and the month nav on one row, with the
-     period picker's "Custom range" toggle dropping to a full-width line below
-     them (see PeriodPicker.svelte, which uses `display: contents` to promote
-     its nav + toggle into THIS flex container). flex-wrap lets the toggle wrap;
-     the employee select takes flex: 1 1 0 so it shrinks to share the row with
-     the ~200px month nav instead of forcing a stack. */
+  /* Mobile: the employee dropdown asks for a basis wide enough for a long name.
+     Where that fits next to the month nav (tablets) they share a line;
+     on a phone the dropdown takes a line of its own and the nav, then the
+     period picker's "Custom range" toggle, follow below it (see
+     PeriodPicker.svelte, which uses `display: contents` to promote its nav +
+     toggle into THIS flex container). */
   @media (max-width: 768px) {
-    .reports-filter-pair {
-      flex-wrap: wrap;
-    }
-
     .reports-user-filter {
-      flex: 1 1 0;
+      flex: 1 1 16rem;
     }
   }
 
