@@ -16,7 +16,6 @@
     <div class="mt-12">
       <DayCard
         {day}
-        dayIndex={6}
         {currentUser}
         {categories}
         {weekStatus}

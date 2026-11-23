@@ -15,10 +15,9 @@
 </script>
 
 <div class="week-grid">
-  {#each weekdays as day, dayIndex (day.ds)}
+  {#each weekdays as day (day.ds)}
     <DayCard
       {day}
-      {dayIndex}
       {currentUser}
       {categories}
       {weekStatus}

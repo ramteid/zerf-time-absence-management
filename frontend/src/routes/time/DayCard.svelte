@@ -16,7 +16,6 @@
   import { settings } from "../../stores.js";
 
   export let day;
-  export let dayIndex = 0;
   export let currentUser = null;
   export let categories = [];
   export let weekStatus = "draft";
