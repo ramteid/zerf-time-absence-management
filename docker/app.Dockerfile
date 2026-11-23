@@ -23,7 +23,8 @@ RUN npm run build
 FROM rust:1-slim-trixie AS backend-builder
 WORKDIR /build
 ARG ZERF_BUILD_PROFILE=release
-ENV CARGO_TERM_COLOR=always
+ENV CARGO_TERM_COLOR=always \
+    RUSTFLAGS="-D warnings"
 
 # Layer 1: manifests only — cached until Cargo.toml / Cargo.lock change.
 COPY backend/Cargo.toml backend/Cargo.lock* ./

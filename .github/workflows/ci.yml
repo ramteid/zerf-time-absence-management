@@ -20,6 +20,8 @@ jobs:
   rust:
     name: Backend (build, test)
     runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -D warnings
     defaults:
       run:
         working-directory: backend

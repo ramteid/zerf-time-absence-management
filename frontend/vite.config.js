@@ -4,7 +4,13 @@ import { svelte } from "@sveltejs/vite-plugin-svelte";
 const frontendDebugBuild = process.env.ZERF_FRONTEND_DEBUG_BUILD === "true";
 
 export default defineConfig({
-  plugins: [svelte()],
+  plugins: [
+    svelte({
+      onwarn(warning) {
+        throw new Error(`Svelte warning [${warning.code}]: ${warning.message}`);
+      },
+    }),
+  ],
   // Expose the debug-build flag to client code as a compile-time constant.
   // In a normal production build this is `false`, so any `if (__ZERF_DEBUG__)`
   // branch (e.g. the [app-debug]/[nav-debug] console logging) is stripped out
