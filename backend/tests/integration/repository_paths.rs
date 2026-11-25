@@ -3251,18 +3251,32 @@ async fn a_contract_without_a_work_target_is_never_judged_by_fixed_days() {
         !schedule.has_fixed_days(),
         "an assistant has no fixed working days"
     );
-    // Every calendar day can carry an absence for them, Saturday included.
-    let saturday = {
+    // Every weekday can carry an absence for them — Wanda used to work Monday
+    // to Thursday, and a Friday is charged all the same — but a weekend never
+    // is.
+    let weekday_on = |weekday: chrono::Weekday| {
         let mut d = reference_date();
-        while d.weekday() != chrono::Weekday::Sat {
+        while d.weekday() != weekday {
             d += Duration::days(1);
         }
         d
     };
-    assert!(
-        schedule.covers(saturday),
-        "an assistant's absence is charged on any calendar day"
-    );
+    for weekday in [
+        chrono::Weekday::Mon,
+        chrono::Weekday::Thu,
+        chrono::Weekday::Fri,
+    ] {
+        assert!(
+            schedule.covers(weekday_on(weekday)),
+            "an assistant's absence is charged on a {weekday}"
+        );
+    }
+    for weekday in [chrono::Weekday::Sat, chrono::Weekday::Sun] {
+        assert!(
+            !schedule.covers(weekday_on(weekday)),
+            "an assistant's absence is never charged on a {weekday}"
+        );
+    }
 
     app.cleanup().await;
 }
