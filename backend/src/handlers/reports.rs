@@ -320,41 +320,59 @@ pub async fn team(
                     0.0
                 };
 
-                let (flextime_balance_min, flextime_balance_as_of) = if team_member_is_assistant {
-                    (None, None)
-                } else {
-                    // Build the overtime rows for the selected month's year so
-                    // the balance reflects the end of the selected period, not
-                    // today. The rows already stop contributing after the
-                    // flextime cutoff (end of the last fully approved week), so
-                    // the row for query_month holds the balance as of the
-                    // earlier of that month's end and the cutoff.
-                    let (overtime_rows, cutoff_date) =
-                        build_overtime_rows_for_year(&pool, team_member.id, month_start.year())
-                            .await?;
-                    let balance_min = match overtime_rows.iter().find(|r| r.month == query_month) {
-                        Some(row) => row.cumulative_min,
-                        // No row for the month: the member had not started yet,
-                        // or the month is still ahead of today. Either way no
-                        // worked time counts, leaving only admin bookings.
-                        None => {
-                            flextime_adjustments_through(
-                                &pool,
-                                team_member.id,
-                                team_member.start_date,
-                                month_end.min(
-                                    crate::services::reports::flextime_effective_through(
-                                        &pool,
-                                        team_member.start_date,
-                                    )
-                                    .await,
-                                ),
-                            )
-                            .await?
-                        }
+                // `month_movement` is (target, actual, diff) of the month as the
+                // flextime balance counts it. It is read off the very row the
+                // balance is, so the column and the balance beside it can never
+                // disagree about which weeks are in.
+                let (flextime_balance_min, flextime_balance_as_of, month_movement) =
+                    if team_member_is_assistant {
+                        (None, None, None)
+                    } else {
+                        // Build the overtime rows for the selected month's year so
+                        // the balance reflects the end of the selected period, not
+                        // today. The rows already stop contributing after the
+                        // flextime cutoff (end of the last fully approved week), so
+                        // the row for query_month holds the balance as of the
+                        // earlier of that month's end and the cutoff.
+                        let (overtime_rows, cutoff_date) =
+                            build_overtime_rows_for_year(&pool, team_member.id, month_start.year())
+                                .await?;
+                        let row = overtime_rows.iter().find(|r| r.month == query_month);
+                        let balance_min = match row {
+                            Some(row) => row.cumulative_min,
+                            // No row for the month: the member had not started yet,
+                            // or the month is still ahead of today. Either way no
+                            // worked time counts, leaving only admin bookings.
+                            None => {
+                                flextime_adjustments_through(
+                                    &pool,
+                                    team_member.id,
+                                    team_member.start_date,
+                                    month_end.min(
+                                        crate::services::reports::flextime_effective_through(
+                                            &pool,
+                                            team_member.start_date,
+                                        )
+                                        .await,
+                                    ),
+                                )
+                                .await?
+                            }
+                        };
+                        // Only weeks that are fully approved take part in the
+                        // balance, on the target side as well as on the hours
+                        // side. Comparing every day's target up to today with
+                        // the approved hours alone showed each week still
+                        // waiting for approval as a full week of missing time.
+                        let movement = row
+                            .map(|row| (row.target_min, row.actual_min, row.diff_min))
+                            .unwrap_or((0, 0, 0));
+                        (
+                            Some(balance_min),
+                            Some(month_end.min(cutoff_date)),
+                            Some(movement),
+                        )
                     };
-                    (Some(balance_min), Some(month_end.min(cutoff_date)))
-                };
 
                 let weeks_all_submitted = all_weeks_submitted_for_month(
                     &pool,
@@ -369,13 +387,13 @@ pub async fn team(
                 Ok::<TeamRow, AppError>(TeamRow {
                     user_id: team_member.id,
                     name: format!("{} {}", team_member.first_name, team_member.last_name),
-                    target_min: month_report.target_min,
-                    actual_min: month_report.actual_min,
-                    diff_min: if team_member_is_assistant {
-                        None
-                    } else {
-                        Some(month_report.diff_min)
-                    },
+                    target_min: month_movement
+                        .map(|(target, _, _)| target)
+                        .unwrap_or(month_report.target_min),
+                    actual_min: month_movement
+                        .map(|(_, actual, _)| actual)
+                        .unwrap_or(month_report.actual_min),
+                    diff_min: month_movement.map(|(_, _, diff)| diff),
                     adjustment_min: if team_member_is_assistant {
                         None
                     } else {

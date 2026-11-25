@@ -1155,7 +1155,7 @@ pub struct ApprovedWeeks {
 impl ApprovedWeeks {
     /// True when `date`'s ISO week is fully approved and therefore counts
     /// toward the flextime balance.
-    fn counts(&self, date: NaiveDate) -> bool {
+    pub fn counts(&self, date: NaiveDate) -> bool {
         self.mondays.contains(&crate::time_calc::week_monday(date))
     }
 }
@@ -1659,13 +1659,16 @@ pub struct LeaveAccountCategory {
 pub struct TeamRow {
     pub user_id: i64,
     pub name: String,
-    /// Target minutes for the report month (excluding weekends, holidays, absences, and future days).
+    /// Target minutes for the report month (excluding weekends, holidays,
+    /// absences and future days). For everyone with a flextime account only the
+    /// days of fully approved weeks count, exactly as in their balance; for an
+    /// assistant every day up to today does.
     pub target_min: i64,
-    /// Actual minutes: approved time entries in the report month (including today).
+    /// Actual minutes: approved time entries on the days `target_min` covers.
     pub actual_min: i64,
-    /// Diff = actual - target for the report month. Deliberately excludes admin
-    /// bookings so the target/actual/diff triple stays consistent. None for
-    /// assistants.
+    /// Diff = actual - target for the report month, over the same days the
+    /// flextime balance counts. Deliberately excludes admin bookings so the
+    /// target/actual/diff triple stays consistent. None for assistants.
     pub diff_min: Option<i64>,
     /// Signed minutes booked by an admin with an effective date in the report
     /// month. Clients that present "how the balance moved this month" add this

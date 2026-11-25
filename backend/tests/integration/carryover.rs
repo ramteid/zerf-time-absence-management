@@ -360,12 +360,13 @@ async fn carryover_policy_edge_cases() {
     let bal_after_approved =
         leave_account_balance(&emp, emp_id, vacation_account_id, next_year).await;
 
-    // Edge case 3: before next year starts, approved upcoming days do not consume
-    // carryover_remaining yet (only already taken approved days do).
+    // Edge case 3: an approved day booked ahead but still before the carryover
+    // expiry already uses that carryover up, so the card must not show it as
+    // unused just because the day has not arrived yet.
     assert_eq!(
         json_f64(&bal_after_approved, "carryover_remaining"),
-        json_i64(&bal_after_approved, "carryover_days") as f64,
-        "carryover remaining should stay full before any approved days are actually taken"
+        json_i64(&bal_after_approved, "carryover_days") as f64 - 1.0,
+        "the approved day booked before the expiry already spends one carryover day"
     );
 
     // Edge case 4: cancellation_pending stays budget-reserved while moving from

@@ -571,7 +571,7 @@ Daily target hours are `0` when:
 - Day is before your start date,
 - Day is in the future.
 
-Absences from categories with cost type `flextime` (e.g. flextime reduction) are the exception: they follow the absence workflow and block normal time entry creation on those days, but the daily work target is not removed. This lets the days reduce your flextime balance intentionally. To prevent the balance from going below the configured minimum (default 0 minutes; admin can override via the `flextime_min_balance_min` setting), the balance is checked TWICE: when you submit the request AND when the approver approves it. The check accounts for any other already-pending/approved flextime-cost absences you have so multiple requests that each individually fit cannot together breach the floor, and the approver's re-check catches the case where you spent balance between request and approval.
+Absences from categories with cost type `flextime` (e.g. flextime reduction) are the exception: they follow the absence workflow and block normal time entry creation on those days, but the daily work target is not removed. This lets the days reduce your flextime balance intentionally. To prevent the balance from going below the configured minimum (default 0 minutes; admin can override via the `flextime_min_balance_min` setting), the balance is checked TWICE: when you submit the request AND when the approver approves it. The check accounts for any other already-pending/approved flextime-cost absences you have — including ones in weeks that are not approved yet, which are not in your balance until they are — so multiple requests that each individually fit cannot together breach the floor, and the approver's re-check catches the case where you spent balance between request and approval.
 
 Otherwise, your weekly hours are spread evenly across a fixed pool of
 weekdays, and that same daily target applies on every one of them —
@@ -1409,6 +1409,9 @@ card for every account available to you. The balance fields are:
   previous year (never below zero).
 - **Carryover expiry**: date after which that account's carryover is no longer
   usable.
+- **Carryover remaining**: carryover days not yet used up. Every day on or
+  before the expiry date uses carryover first — days booked for the future
+  and requested days included, not only days already taken.
 - **Already taken**: approved account days that are today or in the past.
 - **Approved upcoming**: approved account days that are in the future.
 - **Requested**: days in `requested` or `cancellation_pending` status.
@@ -1583,6 +1586,10 @@ their own submission policy.
 Team leads can access team-scoped reports covering their direct reports plus
 themselves.
 
+- The **Monthly diff** column shows how the flextime balance moved in the
+  month, and it counts the same weeks the balance does: only fully approved
+  weeks. A week that is still being worked or waits for approval is not in it,
+  so it never appears as missing time.
 - Report date ranges are validated: from must be ≤ to, and the date span must
   not exceed 366 days.
 - Non-admin leads see only users explicitly assigned to them (plus themselves).
@@ -1954,9 +1961,9 @@ entitlement and optional per-year overrides for each user:
   changes from year to year. Account values default to 0 when the assistant
   role is selected. Update the current-year and next-year overrides each
   January once the number of worked days for the previous year is known.
-  Assistants have no fixed working days, so every calendar day in a
-  leave-account request — weekends included, public holidays excluded — counts
-  as one leave day against their entitlement.
+  Assistants have no fixed working days, so every weekday (Monday to Friday)
+  in a leave-account request — public holidays excluded — counts as one leave
+  day against their entitlement. Weekends never count.
 - Changes take effect immediately for balance calculations. If you reduce a
   user's account entitlement after they have already used account days, their
   available balance may go negative.

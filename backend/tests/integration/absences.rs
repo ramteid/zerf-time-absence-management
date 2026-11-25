@@ -1033,8 +1033,9 @@ async fn absences_admin_self_approval_uses_inapp_only_notifications() {
     app.cleanup().await;
 }
 
-/// Assistants (Aushilfen) have no fixed weekdays, so they must be able to
-/// submit absences on any day of the week — including weekends.
+/// Assistants (Aushilfen) have no fixed weekdays, so an absence may start or
+/// end on any day of the week — but weekends are never charged, so a request
+/// holding nothing but a weekend is refused like it is for everybody else.
 #[tokio::test]
 async fn assistant_absence_any_weekday() {
     let app = TestApp::spawn().await;
@@ -1059,17 +1060,16 @@ async fn assistant_absence_any_weekday() {
     let assistant = login_change_pw(&app, "assistant-absences@example.com", &assistant_pw).await;
 
     let next_week_monday = next_monday(7);
-    let saturday = (next_week_monday + chrono::Duration::days(5))
-        .format("%Y-%m-%d")
-        .to_string();
-    let sunday = (next_week_monday + chrono::Duration::days(6))
-        .format("%Y-%m-%d")
-        .to_string();
-    let next_saturday = (next_week_monday + chrono::Duration::days(12))
-        .format("%Y-%m-%d")
-        .to_string();
+    let day_after = |offset: i64| {
+        (next_week_monday + chrono::Duration::days(offset))
+            .format("%Y-%m-%d")
+            .to_string()
+    };
+    let saturday = day_after(5);
+    let sunday = day_after(6);
+    let next_saturday = day_after(12);
 
-    // Weekend-only absence must be accepted for assistants.
+    // A weekend-only absence holds no day that could be charged.
     let (st, _) = assistant
         .post(
             "/api/v1/absences",
@@ -1078,11 +1078,9 @@ async fn assistant_absence_any_weekday() {
         .await;
     assert_eq!(
         st,
-        StatusCode::OK,
-        "assistant can submit absence on Saturday+Sunday"
+        StatusCode::BAD_REQUEST,
+        "a weekend-only absence is refused for an assistant"
     );
-
-    // Single-day Saturday absence must also be accepted.
     let (st, _) = assistant
         .post(
             "/api/v1/absences",
@@ -1091,8 +1089,29 @@ async fn assistant_absence_any_weekday() {
         .await;
     assert_eq!(
         st,
-        StatusCode::OK,
-        "assistant can submit single-day Saturday absence"
+        StatusCode::BAD_REQUEST,
+        "a single Saturday is refused for an assistant"
+    );
+
+    // Starting on a Saturday is fine as long as a weekday follows.
+    let (st, _) = assistant
+        .post(
+            "/api/v1/absences",
+            &json!({"kind": "special_leave", "start_date": saturday, "end_date": day_after(8)}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "Saturday to Tuesday is accepted");
+    let (st, preview) = assistant
+        .get(&format!(
+            "/api/v1/absences/workday-preview?start_date={saturday}&end_date={}",
+            day_after(8)
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK, "preview: {preview}");
+    assert_eq!(
+        preview["days"].as_i64(),
+        Some(2),
+        "Monday and Tuesday count; the weekend does not"
     );
 
     app.cleanup().await;
@@ -1208,6 +1227,92 @@ async fn flextime_balance_reserves_past_requests_after_cutoff() {
         st,
         StatusCode::BAD_REQUEST,
         "past request after cutoff must reduce the balance available to a future request: {body}"
+    );
+    assert!(
+        body.to_string().contains("flextime balance"),
+        "rejection should mention flextime balance: {body}"
+    );
+
+    app.cleanup().await;
+}
+
+/// A flextime absence in an earlier week that is still open is in no balance
+/// yet, so it must be reserved even though it lies before the last approved
+/// week. Only looking past that week let a request through that pushed the
+/// balance below the floor once the open week was approved.
+#[tokio::test]
+async fn flextime_balance_reserves_absences_in_open_weeks_before_the_cutoff() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, emp_id, emp_pw, _, cat_id) = bootstrap_team(&app, &admin, false).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+    let lead = login_change_pw(&app, "lead-r@example.com", &lead_pw).await;
+
+    // Week one is the employee's first and stays open: it holds a single
+    // flextime day and nothing else. Week two is approved, so the cutoff lies
+    // after week one.
+    let first_monday = next_monday(-28);
+    let second_monday = next_monday(-21);
+    sqlx::query("UPDATE users SET start_date = $1 WHERE id = $2")
+        .bind(first_monday)
+        .bind(emp_id)
+        .execute(&app.state.pool)
+        .await
+        .expect("set start date");
+    sqlx::query(
+        "INSERT INTO time_entries(user_id, entry_date, start_time, end_time, category_id, \
+         status, reviewed_by, reviewed_at) \
+         VALUES ($1,$2,'08:00','16:00',$3,'approved',$4,CURRENT_TIMESTAMP)",
+    )
+    .bind(emp_id)
+    .bind(second_monday)
+    .bind(cat_id)
+    .bind(lead_id)
+    .execute(&app.state.pool)
+    .await
+    .expect("approved entry in week two");
+
+    // The absence is booked while the balance is ample.
+    set_flextime_opening_balance(&app.state.pool, emp_id, 10_000_000)
+        .await
+        .expect("ample balance");
+    let open_day = first_monday.format("%Y-%m-%d").to_string();
+    let (st, body) = emp
+        .post(
+            "/api/v1/absences",
+            &json!({"kind":"flextime_reduction","start_date":open_day,"end_date":open_day}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "book the open week's flextime day: {body}"
+    );
+    let (st, body) = lead
+        .post(
+            &format!("/api/v1/absences/{}/approve", id(&body)),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "approve it: {body}");
+
+    // Balance through the cutoff: 2428 carried in + 480 worked - 5 * 468
+    // target of week two = 568. One further day costs 468 and fits, two do
+    // not — and the open week's day is the second one.
+    set_flextime_opening_balance(&app.state.pool, emp_id, 2428)
+        .await
+        .expect("tight balance");
+    let future_day = next_monday(7).format("%Y-%m-%d").to_string();
+    let (st, body) = emp
+        .post(
+            "/api/v1/absences",
+            &json!({"kind":"flextime_reduction","start_date":future_day,"end_date":future_day}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "the open week's flextime day is still to be charged, so this does not fit: {body}"
     );
     assert!(
         body.to_string().contains("flextime balance"),

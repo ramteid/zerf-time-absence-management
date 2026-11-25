@@ -61,9 +61,9 @@ pub fn validate_auto_approve_end_date(
 /// never going to be worked.
 ///
 /// An irregular contract needs no special case here. It has no weekday pool,
-/// and [`crate::time_calc::WorkSchedule::covers`] answers true for all seven of
-/// its days, so a range of calendar days that are not all holidays passes —
-/// exactly as before.
+/// and [`crate::time_calc::WorkSchedule::covers`] answers true for each of its
+/// five weekdays, so a range holding a weekday that is not a holiday passes.
+/// A weekend-only range does not: nobody's leave account pays for a weekend.
 pub fn has_effective_workday(
     schedule: &crate::services::work_schedules::ContractSchedule,
     start_date: NaiveDate,
@@ -584,8 +584,8 @@ async fn carryover_days_into_year_tx(
 pub struct CarryoverRemainingInput<'a> {
     pub pool: &'a crate::db::DatabasePool,
     pub user_id: i64,
-    /// Approved and cancellation-pending ranges already booked against this
-    /// specific account in the queried year.
+    /// Every range reserving budget on this specific account in the queried
+    /// year: requested, approved and cancellation-pending.
     pub leave_account_ranges: &'a [(NaiveDate, NaiveDate)],
     pub year_start: NaiveDate,
     pub today: NaiveDate,
@@ -610,14 +610,25 @@ pub async fn carryover_remaining_days(input: CarryoverRemainingInput<'_>) -> App
         return Ok(0.0);
     }
 
+    // Carryover is used up by every account day on or before the expiry date,
+    // booked ahead as well as already taken: a week requested for March
+    // already spends the carryover that lapses at the end of March, and the
+    // card must not still show those days as unused in February. The year is
+    // counted once and then split at the expiry (`usage_split_at_expiry`), so a
+    // week straddling the expiry is not billed twice.
     let consumed = if let Some(expiry) = expiry_date {
-        let cutoff = std::cmp::min(expiry, today);
-        if cutoff < year_start {
-            0.0
-        } else {
-            workdays_for_ranges_in_window(pool, user_id, leave_account_ranges, year_start, cutoff)
-                .await?
-        }
+        let year_end = NaiveDate::from_ymd_opt(year_start.year(), 12, 31)
+            .ok_or_else(|| AppError::Internal("Invalid carryover year.".into()))?;
+        usage_split_at_expiry(
+            pool,
+            user_id,
+            leave_account_ranges,
+            year_start,
+            year_end,
+            expiry,
+        )
+        .await?
+        .0
     } else {
         workdays_for_ranges_in_window(pool, user_id, leave_account_ranges, year_start, today)
             .await?
@@ -626,27 +637,30 @@ pub async fn carryover_remaining_days(input: CarryoverRemainingInput<'_>) -> App
     Ok((carryover_days as f64 - consumed).max(0.0))
 }
 
-/// Count target-bearing days in `[from, to]` for flextime-cost absence
-/// accounting: every day the flextime ledger charges a target on (see
-/// `services::reports::build_flextime_for_user`'s day loop) minus public
-/// holidays.
+/// Minutes a flextime-cost absence over `[from, to]` has still to take off the
+/// balance, i.e. the target of every day the balance does not carry yet.
+///
+/// The balance only counts days of approved weeks (`ApprovedWeeks`). A day in
+/// any other week — one still being worked, one waiting for approval, one
+/// rejected, wherever it lies relative to the last approved week — is not in it
+/// yet and will be the moment its week is approved, with the target kept and no
+/// hours booked. Those are the days priced here. Days of an approved week are
+/// left out because the balance already holds them.
 ///
 /// The cost is returned in minutes rather than days, because what one day
 /// costs is a question about that day. A contract whose working days change
 /// partway through the range prices each half by the pattern in force on it,
 /// and a flat "days times one rate" cannot express that.
 ///
-/// Days are counted by the contract's own working days. This used to count the
-/// whole Monday-to-Friday pool instead, on the grounds that a contract of one
-/// to four days was not pinned to particular weekdays and might have placed its
-/// work on any of them. With the weekdays recorded that reason is gone: a
-/// Tuesday-to-Friday contract is away on Tuesday, Wednesday, Thursday and
-/// Friday, and its Monday costs nothing because it was never worked. A contract
-/// with no recorded pattern still sees the whole pool, so it keeps costing
-/// exactly what it costs today.
+/// Days are counted by the contract's own working days: a Tuesday-to-Friday
+/// contract is away on Tuesday, Wednesday, Thursday and Friday, and its Monday
+/// costs nothing because it was never worked. A contract with no recorded
+/// pattern still sees the whole pool, so it keeps costing exactly what it
+/// costs today.
 async fn flextime_cost_minutes(
     pool: &crate::db::DatabasePool,
     schedule: &crate::services::work_schedules::ContractSchedule,
+    approved: &crate::services::reports::ApprovedWeeks,
     from: NaiveDate,
     to: NaiveDate,
 ) -> AppResult<i64> {
@@ -660,7 +674,7 @@ async fn flextime_cost_minutes(
     let mut day = std::cmp::max(from, schedule.start_date);
     while day <= to {
         let day_schedule = schedule.history.on(day);
-        if day_schedule.covers(day) && !holidays.contains(&day) {
+        if !approved.counts(day) && day_schedule.covers(day) && !holidays.contains(&day) {
             // The hours in force on this very day, not today's.
             minutes += day_schedule.day_minutes(schedule.weekly_hours.on(day));
         }
@@ -675,11 +689,13 @@ async fn flextime_cost_minutes(
 /// The check accounts for:
 /// 1. The current balance through the end of the last fully approved week
 ///    (from `build_flextime_for_user`).
-/// 2. The post-cutoff cost of OTHER pending/approved/cancellation_pending
-///    flextime-cost absences. These are committed deductions that are not yet
-///    reflected in the balance. Without this, multiple requests that each
-///    individually fit could be approved together and breach the floor.
-/// 3. The post-cutoff cost of the proposed range itself.
+/// 2. The cost of OTHER pending/approved/cancellation_pending flextime-cost
+///    absences on every day the balance does not carry yet — days of weeks
+///    that are not approved, before the cutoff as well as after it. These are
+///    committed deductions that are not yet reflected in the balance. Without
+///    this, multiple requests that each individually fit could be approved
+///    together and breach the floor.
+/// 3. The cost of the proposed range itself, on the same days.
 ///
 /// `exclude_id` excludes the absence being edited/approved from (2) so it is
 /// not double-counted with (3).
@@ -716,13 +732,14 @@ pub async fn validate_flextime_balance(
 
     // (1) Current flextime balance = cumulative balance through the cutoff date
     // (end of last fully approved week).
-    let cutoff_date = crate::services::reports::flex_balance_cutoff_date(
+    let approved = crate::services::reports::approved_weeks(
         pool,
         user.id,
         user.start_date,
         user.workdays_per_week,
     )
     .await?;
+    let cutoff_date = approved.cutoff_date;
     let balance_through_cutoff = if cutoff_date < user.start_date {
         // Cutoff is before the start date: no approved history exists yet.
         0
@@ -748,11 +765,13 @@ pub async fn validate_flextime_balance(
 
     // (2) Committed-but-not-yet-accounted flextime usage from OTHER absences.
     //
-    // cost_type='flextime' absences cost `target_per_day_min` per workday
-    // because the day keeps its target while the user logs zero hours. Portions
-    // through the cutoff are already reflected in current_balance, so count
-    // every later day, including a past day after the cutoff, to avoid a gap
-    // between the ledger cutoff and today.
+    // cost_type='flextime' absences cost the day's target because the day keeps
+    // it while the user logs zero hours. Only days of approved weeks are in the
+    // balance above; every other day, before the cutoff or after it, is still
+    // to be charged (see `flextime_cost_minutes`). Looking only past the cutoff
+    // missed an absence in an earlier week that is still open: it was in no
+    // balance and in no commitment, so a request could pass that pushed the
+    // balance below the floor the moment that week was approved.
     //
     // Including `requested` and `cancellation_pending` is conservative: a
     // pending request will probably be approved; a cancellation request might
@@ -761,32 +780,19 @@ pub async fn validate_flextime_balance(
     // validating right now (it would otherwise count itself in step 2 AND in
     // step 3 below).
     let committed_ranges =
-        AbsenceDb::flextime_cost_ranges_after_tx(tx, user.id, unaccounted_from, exclude_id).await?;
+        AbsenceDb::flextime_cost_ranges_after_tx(tx, user.id, user.start_date, exclude_id).await?;
     let mut committed_cost_min: i64 = 0;
     for (range_start, range_end) in &committed_ranges {
-        let effective_start = std::cmp::max(*range_start, unaccounted_from);
-        if effective_start > *range_end {
-            // Range was entirely before the cutoff and is already accounted for.
-            continue;
-        }
         committed_cost_min +=
-            flextime_cost_minutes(pool, &schedule, effective_start, *range_end).await?;
+            flextime_cost_minutes(pool, &schedule, &approved, *range_start, *range_end).await?;
     }
 
-    // (3) Post-cutoff portion of the proposed range. Same reasoning as (2):
-    // days through the cutoff were already counted in current_balance with
-    // the target preserved (because cost_type='flextime' never removes the
-    // target), so approving or creating the absence does not add new cost for
-    // those days.
-    let proposed_start = std::cmp::max(start_date, unaccounted_from);
-    let proposed_cost_min = if proposed_start > end_date {
-        // Entirely accounted for. The check below then reduces to
-        // "current_balance - committed_cost >= floor", verifying that already
-        // pending commitments do not already breach the floor.
-        0
-    } else {
-        flextime_cost_minutes(pool, &schedule, proposed_start, end_date).await?
-    };
+    // (3) The proposed range itself, priced the same way. Days of an approved
+    // week were already counted in current_balance with the target preserved
+    // (because cost_type='flextime' never removes the target), so approving or
+    // creating the absence does not add new cost for those days.
+    let proposed_cost_min =
+        flextime_cost_minutes(pool, &schedule, &approved, start_date, end_date).await?;
 
     if current_balance_min - committed_cost_min - proposed_cost_min < floor_min {
         return Err(AppError::BadRequest(

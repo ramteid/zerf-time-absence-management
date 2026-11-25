@@ -362,8 +362,9 @@ what makes that true rather than merely intended: a recorded pattern needs no
 cap, but a bare day *count* is a quota, so it stays a quota — without it a
 three-day contract with no pattern was charged five days for one week away. An
 irregular contract (`workdays_per_week` of zero) has no weekday pool at all: it
-carries no target, yet every calendar day of an absence is charged to it, so
-`covers` answers true for all seven days while `days_per_week` answers zero. The
+carries no target, yet every *weekday* of an absence is charged to it (never a
+Saturday or Sunday, the assistants' seven-day sentinel included), so `covers`
+answers true for Monday to Friday while `days_per_week` answers zero. The
 two questions genuinely have different answers there, and reading the empty pool
 literally made all of that person's leave free.
 

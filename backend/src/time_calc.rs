@@ -260,17 +260,16 @@ impl WorkSchedule {
     /// Without a fixed pattern this is the old question — does the date fall in
     /// the potential pool — so callers get the behaviour they had before.
     ///
-    /// An irregular contract (`workdays_per_week` of zero or less) is the one
-    /// case where that pool answers "no" for all seven days. It is not a
-    /// contract with no working days; it is one with no *fixed* days at all,
-    /// and the app charges every calendar day of an absence against it
-    /// (`counted_workdays`' irregular branch, `validate_absence_has_workday`).
-    /// Reading the empty pool literally made every leave day such a person took
-    /// free of charge, so it is answered here instead.
+    /// The exception is a contract with no weekday pool to speak of: an
+    /// irregular one (`workdays_per_week` of zero or less) and an assistant's
+    /// seven-day sentinel. Neither has fixed days, and an absence is charged
+    /// against them on every *weekday* — reading the empty pool literally made
+    /// all of an irregular contract's leave free. Weekends are never charged:
+    /// nobody's leave account pays for a Saturday or a Sunday.
     pub fn covers(&self, date: NaiveDate) -> bool {
         if !self.has_fixed_days() {
-            if self.is_irregular() {
-                return true;
+            if self.is_irregular() || self.fallback_days_per_week >= 7 {
+                return date.weekday().num_days_from_monday() < 5;
             }
             return is_potential_workday(date, self.fallback_days_per_week);
         }
@@ -690,8 +689,10 @@ mod tests {
         }
 
         // An irregular schedule has no weekly quota to cap against, so every
-        // covered non-holiday calendar day counts.
+        // covered non-holiday weekday counts. The assistants' seven-day
+        // sentinel reads the same way: weekends are never charged.
         let irregular = potential_workdays_per_week(workdays_per_week) == 0;
+        let weekdays_only = irregular || workdays_per_week >= 7;
 
         let mut counted = Vec::new();
         let mut used_in_week: std::collections::HashMap<NaiveDate, i16> =
@@ -699,7 +700,11 @@ mod tests {
         let mut date = window_start;
         while date <= window_end {
             let is_candidate = !holidays.contains(&date)
-                && (irregular || is_potential_workday(date, workdays_per_week));
+                && if weekdays_only {
+                    date.weekday().num_days_from_monday() < 5
+                } else {
+                    is_potential_workday(date, workdays_per_week)
+                };
             if is_candidate
                 && clamped
                     .iter()
@@ -1219,9 +1224,9 @@ mod tests {
     }
 
     /// An irregular schedule has no quota to cap against, so every covered
-    /// non-holiday calendar day counts — weekends included.
+    /// non-holiday weekday counts — weekends never do.
     #[test]
-    fn counted_workdays_counts_every_day_for_irregular_schedules() {
+    fn counted_workdays_counts_every_weekday_for_irregular_schedules() {
         let holidays = HashSet::from([day(2026, 5, 14)]);
         let counted = counted_workdays(
             &[(day(2026, 5, 11), day(2026, 5, 17))],
@@ -1230,7 +1235,9 @@ mod tests {
             &holidays,
             0,
         );
-        assert_eq!(counted.len(), 6);
+        // Monday, Tuesday, Wednesday and Friday; Thursday is a holiday and
+        // the weekend is never charged.
+        assert_eq!(counted.len(), 4);
     }
 
     /// Ranges outside the window contribute nothing, and an empty list is 0.
@@ -1504,10 +1511,10 @@ mod tests {
     }
 
     /// An assistant has no fixed days and no target. Both halves matter, and
-    /// they pull in opposite directions: every calendar day of theirs can
-    /// carry an absence, yet none of them asks for work.
+    /// they pull in opposite directions: every weekday of theirs can carry an
+    /// absence, yet none of them asks for work. A weekend carries neither.
     #[test]
-    fn an_assistant_carries_every_calendar_day_and_no_target() {
+    fn an_assistant_carries_every_weekday_and_no_target() {
         let assistant = WorkScheduleHistory::without_history(WorkSchedule::without_fixed_days(7));
         let monday = day(2026, 5, 4);
         let saturday = day(2026, 5, 9);
@@ -1522,9 +1529,23 @@ mod tests {
             );
         }
 
-        // But a weekend absence is still charged to them, which is what the
-        // app has always done for an hourly contract.
+        // But a weekday absence is charged to them, and a weekend one is not.
         let charged = scheduled_leave_days(
+            &assistant,
+            &[(monday, sunday)],
+            hired_long_ago(),
+            monday,
+            sunday,
+            &HashSet::new(),
+        );
+        assert_eq!(
+            charged,
+            (0..5)
+                .map(|offset| monday + Duration::days(offset))
+                .collect::<Vec<_>>(),
+            "Monday to Friday count, the weekend does not"
+        );
+        let weekend_only = scheduled_leave_days(
             &assistant,
             &[(saturday, sunday)],
             hired_long_ago(),
@@ -1532,7 +1553,7 @@ mod tests {
             sunday,
             &HashSet::new(),
         );
-        assert_eq!(charged, vec![saturday, sunday], "both weekend days count");
+        assert!(weekend_only.is_empty(), "a weekend costs nothing");
     }
 
     /// A leave range that runs across a change of working days is charged by
@@ -1708,11 +1729,11 @@ mod tests {
     }
 
     #[test]
-    fn a_contract_with_no_weekday_pool_still_carries_every_day_of_leave() {
+    fn a_contract_with_no_weekday_pool_still_carries_every_weekday_of_leave() {
         // An irregular contract (`workdays_per_week` of zero) has no target —
         // `potential_workdays_per_week` answers zero — but the app charges every
-        // calendar day of an absence to it. Reading the empty pool as "no
-        // working days" made all of that leave free.
+        // weekday of an absence to it. Reading the empty pool as "no
+        // working days" made all of that leave free. Weekends stay free.
         let irregular = WorkSchedule::without_fixed_days(0);
         assert_eq!(irregular.days_per_week(), 0, "no target pool");
         assert_eq!(
@@ -1721,9 +1742,10 @@ mod tests {
             "and so no day is worth anything"
         );
         for offset in 0..7i64 {
-            assert!(
+            assert_eq!(
                 irregular.covers(day(2026, 5, 4) + Duration::days(offset)),
-                "every calendar day can hold an absence, offset {offset}"
+                offset < 5,
+                "only a weekday can hold an absence, offset {offset}"
             );
         }
         assert_eq!(irregular.weekly_leave_cap(), None, "and no quota caps it");
@@ -1864,8 +1886,12 @@ mod tests {
         assert!(!assistant.has_fixed_days());
         assert_eq!(assistant.days_per_week(), 7);
         assert!(
-            assistant.covers(monday + Duration::days(6)),
-            "Sunday counts"
+            assistant.covers(monday + Duration::days(4)),
+            "Friday counts"
+        );
+        assert!(
+            !assistant.covers(monday + Duration::days(6)),
+            "Sunday does not"
         );
 
         let five = WorkSchedule::without_fixed_days(5);
